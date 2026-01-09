@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LaceTracker</title>
+
+    <style>
+      #crash-report {
+        display: none;
+        position: fixed;
+        top: 0; left: 0; width: 100%; height: 100%;
+        background-color: #000;
+        color: #ff3333;
+        z-index: 99999;
+        padding: 20px;
+        font-family: monospace;
+        overflow: auto;
+        white-space: pre-wrap;
+      }
+    </style>
+    <script>
+      window.onerror = function(message, source, lineno, colno, error) {
+        var report = document.getElementById('crash-report');
+        report.style.display = 'block';
+        report.innerHTML += "<h1>FATAL STARTUP ERROR</h1>";
+        report.innerHTML += "<h3 style='color:white'>" + message + "</h3>";
+        report.innerHTML += "<p>Source: " + source + ":" + lineno + "</p>";
+        if (error && error.stack) {
+          report.innerHTML += "<pre style='color:#888'>" + error.stack + "</pre>";
+        }
+      };
+      
+      // Auch Promise-Fehler fangen (z.B. async imports)
+      window.onunhandledrejection = function(event) {
+        var report = document.getElementById('crash-report');
+        report.style.display = 'block';
+        report.innerHTML += "<h1>UNHANDLED PROMISE</h1>";
+        report.innerHTML += "<p>" + event.reason + "</p>";
+      };
+    </script>
+    </head>
+  <body>
+    <div id="crash-report"></div>
+    
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

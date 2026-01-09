@@ -1,0 +1,65 @@
+:root {
+  --bg-deep: #050505;
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-surface: rgba(255, 255, 255, 0.03);
+  --primary-gold: #E6C2BF;
+  --crimson-red: #990000;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--bg-deep);
+  color: #e0e0e0;
+  font-family: 'Montserrat', 'Helvetica', 'Arial', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+/* TYPOGRAPHY OVERRIDES */
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Playfair Display', serif;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* GLASSMORPHISM UTILITIES */
+.glass-panel {
+  background: var(--glass-surface) !important;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border) !important;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+}
+
+/* PUNISHMENT MODE OVERRIDE (Wird dynamisch aktiviert) */
+body.punishment-active {
+  background: radial-gradient(circle at center, #1a0000 0%, #000000 100%);
+}
+
+body.punishment-active .MuiPaper-root {
+  border-color: rgba(153, 0, 0, 0.3) !important;
+}
+
+/* SCROLLBAR - Dark & Slim */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #000; 
+}
+::-webkit-scrollbar-thumb {
+  background: #333; 
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--primary-gold); 
+}
+
+/* IMAGE GRID OPTIMIZATION */
+.image-grid-item {
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.3s ease;
+}
