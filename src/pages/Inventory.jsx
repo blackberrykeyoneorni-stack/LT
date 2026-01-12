@@ -1,14 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { doc, getDoc, addDoc, collection, serverTimestamp } from 'firebase/firestore';
-import { db } from '../firebase';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'; // NEU: Storage Imports
+import { db, storage } from '../firebase'; // NEU: Storage Import
 import { useAuth } from '../contexts/AuthContext';
 import { useItems } from '../contexts/ItemContext';
 import { useNFCGlobal } from '../contexts/NFCContext';
 import { safeDate } from '../utils/dateUtils'; 
 
 // COMPONENTS
-import ItemInfoGrid from '../components/item-detail/ItemInfoGrid'; // Wiederverwendung deiner Info-Komponente
+import ItemInfoGrid from '../components/item-detail/ItemInfoGrid'; 
 
 // FRAMER MOTION
 import { motion } from 'framer-motion';
@@ -34,6 +35,8 @@ import FingerprintIcon from '@mui/icons-material/Fingerprint';
 import LocalLaundryServiceIcon from '@mui/icons-material/LocalLaundryService'; 
 import SaveIcon from '@mui/icons-material/Save';
 import ImageSearchIcon from '@mui/icons-material/ImageSearch';
+import CloudUploadIcon from '@mui/icons-material/CloudUpload'; // NEU: Icon für Upload
+import DeleteIcon from '@mui/icons-material/Delete'; // NEU: Icon zum Löschen
 
 // --- ZENTRALES DESIGN ---
 import { DESIGN_TOKENS, PALETTE, getCategoryColor } from '../theme/obsidianDesign';
@@ -86,9 +89,13 @@ export default function Inventory() {
   
   // UI States
   const [filterOpen, setFilterOpen] = useState(false);
-  const [addItemOpen, setAddItemOpen] = useState(false); // NEU: Bottom Sheet State
-  const [newItem, setNewItem] = useState(defaultNewItem); // NEU: Form Data
+  const [addItemOpen, setAddItemOpen] = useState(false); 
+  const [newItem, setNewItem] = useState(defaultNewItem);
   const [isSaving, setIsSaving] = useState(false);
+
+  // NEU: Image Upload State
+  const [imageFile, setImageFile] = useState(null);
+  const [imagePreview, setImagePreview] = useState(null);
 
   // Filter Values
   const [filterStatus, setFilterStatus] = useState('active');
@@ -99,7 +106,7 @@ export default function Inventory() {
   const [sortBy, setSortBy] = useState('dateDesc');
   const [scannedLocation, setScannedLocation] = useState(null);
 
-  // LOAD SETTINGS (Erweitert um Locations & Categories & Vibes)
+  // LOAD SETTINGS
   useEffect(() => {
     if (!currentUser) return;
     const loadSettings = async () => {
@@ -110,7 +117,7 @@ export default function Inventory() {
             getDoc(doc(db, `users/${currentUser.uid}/settings/preferences`)),
             getDoc(doc(db, `users/${currentUser.uid}/settings/locations`)),
             getDoc(doc(db, `users/${currentUser.uid}/settings/categories`)),
-            getDoc(doc(db, `users/${currentUser.uid}/settings/vibes`)) // Optional, falls existiert
+            getDoc(doc(db, `users/${currentUser.uid}/settings/vibes`))
         ]);
 
         setDropdowns({
@@ -118,7 +125,7 @@ export default function Inventory() {
             materials: mSnap.exists() ? mSnap.data().list : [],
             locations: lSnap.exists() ? lSnap.data().list : [],
             categoryStructure: cSnap.exists() ? cSnap.data().structure : {},
-            vibeTagsList: vSnap.exists() ? vSnap.data().list : ['Business', 'Casual', 'Shiny', 'Matte', 'Reinforced'] // Fallback
+            vibeTagsList: vSnap.exists() ? vSnap.data().list : ['Business', 'Casual', 'Shiny', 'Matte', 'Reinforced']
         });
 
         if (pSnap.exists()) {
@@ -139,6 +146,27 @@ export default function Inventory() {
       }
   }, [locationRouter]);
 
+  // Cleanup Preview URL
+  useEffect(() => {
+      return () => {
+          if (imagePreview) URL.revokeObjectURL(imagePreview);
+      }
+  }, [imagePreview]);
+
+  // --- IMAGE HANDLERS ---
+  const handleImageChange = (e) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      setImageFile(file);
+      setImagePreview(URL.createObjectURL(file));
+    }
+  };
+
+  const handleRemoveImage = () => {
+      setImageFile(null);
+      setImagePreview(null);
+  };
+
   // --- SAVE NEW ITEM HANDLER ---
   const handleSaveItem = async () => {
       if (!newItem.brand || !newItem.mainCategory) {
@@ -147,8 +175,19 @@ export default function Inventory() {
       }
       setIsSaving(true);
       try {
+        let finalImageUrl = newItem.imageUrl; // Fallback auf existierenden Wert (falls vorhanden)
+
+        // 1. Upload Image if selected
+        if (imageFile) {
+            const storageRef = ref(storage, `users/${currentUser.uid}/items/${Date.now()}_${imageFile.name}`);
+            const snapshot = await uploadBytes(storageRef, imageFile);
+            finalImageUrl = await getDownloadURL(snapshot.ref);
+        }
+
+        // 2. Create Firestore Doc
         await addDoc(collection(db, `users/${currentUser.uid}/items`), {
             ...newItem,
+            imageUrl: finalImageUrl, // Gespeicherte URL verwenden
             cost: parseFloat(newItem.cost) || 0,
             createdAt: serverTimestamp(),
             status: 'active',
@@ -156,9 +195,13 @@ export default function Inventory() {
             totalMinutes: 0,
             lastWorn: null
         });
+
+        // 3. Reset
         setAddItemOpen(false);
         setNewItem(defaultNewItem);
-        // Optional: Toast message hier
+        setImageFile(null);
+        setImagePreview(null);
+
       } catch (e) {
           console.error(e);
           alert("Fehler beim Speichern: " + e.message);
@@ -315,8 +358,8 @@ export default function Inventory() {
             sx: { 
                 ...DESIGN_TOKENS.glassCard, 
                 borderTop: `1px solid ${PALETTE.primary.main}`,
-                borderRadius: '24px 24px 0 0', // Runder "Sheet" Look
-                height: '85vh', // Fast Fullscreen für viel Platz
+                borderRadius: '24px 24px 0 0', 
+                height: '85vh', 
                 maxHeight: '85vh'
             } 
         }}
@@ -334,17 +377,57 @@ export default function Inventory() {
             {/* SCROLLABLE CONTENT */}
             <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 2 }}>
                 <Container maxWidth="sm" disableGutters>
-                    {/* Extra Image URL Field since it's missing in Grid */}
-                    <Box sx={{ mb: 3, display: 'flex', alignItems: 'flex-end', gap: 1 }}>
-                        <ImageSearchIcon sx={{ color: 'text.secondary', mb: 0.5 }} />
-                        <TextField 
-                            label="Bild URL (Optional)" 
-                            variant="standard" 
-                            fullWidth 
-                            value={newItem.imageUrl} 
-                            onChange={e => setNewItem({...newItem, imageUrl: e.target.value})}
+                    
+                    {/* NEU: IMAGE UPLOAD UI */}
+                    <Box sx={{ mb: 3, textAlign: 'center' }}>
+                        <input
+                            accept="image/*"
+                            style={{ display: 'none' }}
+                            id="raised-button-file"
+                            type="file"
+                            onChange={handleImageChange}
                         />
+                        <label htmlFor="raised-button-file">
+                            <Box sx={{
+                                width: '100%',
+                                height: 200,
+                                borderRadius: 2,
+                                border: `2px dashed ${imagePreview ? PALETTE.accents.green : PALETTE.primary.main}`,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer',
+                                overflow: 'hidden',
+                                position: 'relative',
+                                bgcolor: 'rgba(0,0,0,0.2)',
+                                transition: 'all 0.2s',
+                                '&:hover': { bgcolor: 'rgba(255,255,255,0.05)' }
+                            }}>
+                                {imagePreview ? (
+                                    <img src={imagePreview} alt="Preview" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                                ) : (
+                                    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, p: 2 }}>
+                                        <CloudUploadIcon sx={{ fontSize: 40, color: PALETTE.primary.main }} />
+                                        <Typography variant="body2" color="text.secondary">
+                                            Bild auswählen oder aufnehmen
+                                        </Typography>
+                                    </Box>
+                                )}
+                            </Box>
+                        </label>
+                        {imagePreview && (
+                            <Button 
+                                size="small" 
+                                color="error" 
+                                startIcon={<DeleteIcon />} 
+                                onClick={handleRemoveImage} 
+                                sx={{ mt: 1 }}
+                            >
+                                Bild entfernen
+                            </Button>
+                        )}
                     </Box>
+
                     <Divider sx={{ mb: 3, borderColor: 'rgba(255,255,255,0.1)' }} />
                     
                     {/* REUSED ITEM GRID */}
@@ -369,7 +452,7 @@ export default function Inventory() {
                     disabled={isSaving}
                     sx={{ ...DESIGN_TOKENS.buttonGradient, height: 56 }}
                 >
-                    {isSaving ? "Speichere..." : "Item Hinzufügen"}
+                    {isSaving ? "Lade hoch & Speichere..." : "Item Hinzufügen"}
                 </Button>
             </Box>
         </Box>

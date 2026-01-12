@@ -28,7 +28,7 @@ export default function LaundryDialog({
                         </ListItemAvatar>
                         <ListItemText 
                             primary={item.name || item.brand} 
-                            secondary={item.subCategory} 
+                            secondary={`${item.subCategory} • ID: ${item.customId || item.id}`}
                         />
                     </ListItem>
                 ))}
