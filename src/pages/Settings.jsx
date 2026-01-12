@@ -61,8 +61,9 @@ export default function Settings() {
   const [maxInstructionItems, setMaxInstructionItems] = useState(1);
   const [previousTarget, setPreviousTarget] = useState(null);
   
-  // STATE: Flags
+  // STATE: Flags & Hardcore
   const [sissyProtocolEnabled, setSissyProtocolEnabled] = useState(false);
+  const [nightReleaseProbability, setNightReleaseProbability] = useState(15); // Standard 15%
   const [biometricAvailable, setBiometricAvailable] = useState(false);
 
   // STATE: Gewichtung (Weights)
@@ -114,6 +115,7 @@ export default function Settings() {
         setMaxInstructionItems(data.maxInstructionItems || 1);
         setPreviousTarget(data.previousTargetHours || null);
         setSissyProtocolEnabled(data.sissyProtocolEnabled || false);
+        setNightReleaseProbability(data.nightReleaseProbability !== undefined ? data.nightReleaseProbability : 15);
         setCategoryWeights(data.categoryWeights || {});
       }
 
@@ -164,7 +166,8 @@ export default function Settings() {
         dailyTargetHours,
         nylonRestingHours,
         maxInstructionItems,
-        sissyProtocolEnabled, 
+        sissyProtocolEnabled,
+        nightReleaseProbability,
         categoryWeights
       });
       showToast("Alle Einstellungen gespeichert.", "success");
@@ -432,10 +435,33 @@ export default function Settings() {
             <Stack direction="row" justifyContent="space-between" alignItems="center">
                 <Box>
                     <Typography variant="body1" color={sissyProtocolEnabled ? "error" : "text.primary"} fontWeight={sissyProtocolEnabled ? "bold" : "normal"}>Hardcore Protokoll</Typography>
-                    <Typography variant="caption" color="text.secondary">Erzwingt Ingestion bei Nacht-Sessions</Typography>
+                    <Typography variant="caption" color="text.secondary">
+                        {sissyProtocolEnabled ? "Erzwingt Ingestion & Start-Challenges" : "Inaktiv"}
+                    </Typography>
                 </Box>
                 <Switch checked={sissyProtocolEnabled} onChange={(e) => setSissyProtocolEnabled(e.target.checked)} color="error" />
             </Stack>
+
+            {/* NEU: Wahrscheinlichkeits-Slider für Hardcore Start */}
+            {sissyProtocolEnabled && (
+                <Box sx={{ mt: 2, pl: 2, borderLeft: `2px solid ${PALETTE.accents.red}` }}>
+                     <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                        <Typography variant="caption" color="error">Wahrscheinlichkeit Start-Challenge</Typography>
+                        <Typography variant="caption" color="error" fontWeight="bold">{nightReleaseProbability}%</Typography>
+                     </Box>
+                     <Slider
+                        value={nightReleaseProbability}
+                        min={0} max={100} step={5}
+                        onChange={(e, v) => setNightReleaseProbability(v)}
+                        valueLabelDisplay="auto"
+                        sx={{ color: PALETTE.accents.red }}
+                     />
+                     <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem' }}>
+                         Wahrscheinlichkeit, dass bei Start einer Nachtsession eine Entladung gefordert wird.
+                     </Typography>
+                </Box>
+            )}
+
         </AccordionDetails>
       </Accordion>
 

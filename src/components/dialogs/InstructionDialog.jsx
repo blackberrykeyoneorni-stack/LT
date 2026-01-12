@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Dialog, 
   DialogContent, 
   DialogActions, 
+  DialogTitle,
+  DialogContentText,
   Typography, 
   Box, 
   Button, 
@@ -21,10 +23,14 @@ import WeekendIcon from '@mui/icons-material/Weekend';
 import CelebrationIcon from '@mui/icons-material/Celebration';
 import NfcIcon from '@mui/icons-material/Nfc';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import ReportProblemIcon from '@mui/icons-material/ReportProblem'; // Icon für Hardcore
 
 import { useNFCGlobal } from '../../contexts/NFCContext';
 import { useAuth } from '../../contexts/AuthContext';
-import { startSession as startSessionService } from '../../services/SessionService'; // NEU
+import { startSession as startSessionService } from '../../services/SessionService';
+import { registerPunishment } from '../../services/PunishmentService'; // NEU: Import für Strafe
+import { db } from '../../firebase'; // NEU: Für Prefs Access
+import { doc, getDoc } from 'firebase/firestore';
 
 export default function InstructionDialog({ 
   open, 
@@ -52,65 +58,145 @@ export default function InstructionDialog({
   // Local State für verifizierte Items während der Dialog offen ist
   const [verifiedItems, setVerifiedItems] = useState([]);
 
+  // --- HARDCORE PROTOCOL STATE ---
+  const [hardcoreDialogOpen, setHardcoreDialogOpen] = useState(false);
+  const [pendingAction, setPendingAction] = useState(null); // Speichert die Aktion, die nach dem Check ausgeführt wird
+  const [hcPrefs, setHcPrefs] = useState({ enabled: false, probability: 15 });
+
+  // Lade Einstellungen beim Öffnen des Dialogs
+  useEffect(() => {
+    const loadPrefs = async () => {
+        if (!currentUser || !open) return;
+        try {
+            const prefsSnap = await getDoc(doc(db, `users/${currentUser.uid}/settings/preferences`));
+            if (prefsSnap.exists()) {
+                const data = prefsSnap.data();
+                setHcPrefs({
+                    enabled: data.sissyProtocolEnabled || false,
+                    probability: data.nightReleaseProbability !== undefined ? data.nightReleaseProbability : 15
+                });
+            }
+        } catch (e) { console.error("Error loading prefs for HC check", e); }
+    };
+    loadPrefs();
+  }, [currentUser, open]);
+
+  // --- HARDCORE LOGIK ---
+  const triggerHardcoreCheck = (actionToExecute) => {
+      // 1. Check: Nur Nachts und wenn enabled
+      if (!isNight || !hcPrefs.enabled) {
+          actionToExecute();
+          return;
+      }
+
+      // 2. Check: Zufallsgenerator (0.0 bis 1.0) < (15 / 100)
+      const roll = Math.random();
+      const threshold = hcPrefs.probability / 100;
+      
+      console.log(`Hardcore Roll: ${roll.toFixed(2)} vs ${threshold}`);
+
+      if (roll < threshold) {
+          // TREFFER! -> Intercept
+          setPendingAction(() => actionToExecute);
+          setHardcoreDialogOpen(true);
+      } else {
+          // Kein Treffer -> Normal weiter
+          actionToExecute();
+      }
+  };
+
+  const handleHardcoreRefuse = async () => {
+      // Strafe registrieren, aber Aktion fortsetzen
+      try {
+          await registerPunishment(currentUser.uid, "Hardcore-Start verweigert (Entladung)", 30);
+          if (showToast) showToast("Verweigerung registriert. Strafe aktiv.", "warning");
+      } catch (e) {
+          console.error("Punishment Error", e);
+      } finally {
+          setHardcoreDialogOpen(false);
+          if (pendingAction) pendingAction(); // Führe den ursprünglichen Start aus
+          setPendingAction(null);
+      }
+  };
+
+  const handleHardcoreAccept = () => {
+      // User hat akzeptiert (wir vertrauen ihm hier oder loggen es später als Event)
+      if (showToast) showToast("Brav. Session wird gestartet.", "success");
+      setHardcoreDialogOpen(false);
+      if (pendingAction) pendingAction();
+      setPendingAction(null);
+  };
+
+
   // --- NFC VERIFICATION LOGIC ---
   const handleVerifyItem = (fullItem) => {
       if (!fullItem) return;
 
-      // Wir nutzen den Binding-Scanner, um die ID abzugreifen
-      startBindingScan(async (scannedTagId) => {
-          console.log("Verify Scan:", scannedTagId, "Target:", fullItem);
+      const executeVerify = () => {
+        // Wir nutzen den Binding-Scanner, um die ID abzugreifen
+        startBindingScan(async (scannedTagId) => {
+            console.log("Verify Scan:", scannedTagId, "Target:", fullItem);
 
-          // Prüfung: Stimmt der Tag mit irgendeiner ID des Items überein?
-          const isMatch = (
-              scannedTagId === fullItem.nfcTagId || 
-              scannedTagId === fullItem.customId ||
-              scannedTagId === fullItem.id
-          );
+            // Prüfung: Stimmt der Tag mit irgendeiner ID des Items überein?
+            const isMatch = (
+                scannedTagId === fullItem.nfcTagId || 
+                scannedTagId === fullItem.customId ||
+                scannedTagId === fullItem.id
+            );
 
-          if (isMatch) {
-              // 1. Session starten (VIA SERVICE)
-              try {
-                  await startSessionService(currentUser.uid, {
-                      itemId: fullItem.id,
-                      // Wir übergeben das Item als Array, damit der Service weiß, dass es eine Instruction ist (Konsistenz)
-                      items: [fullItem], 
-                      type: 'instruction', 
-                      periodId: instruction.periodId, 
-                      acceptedAt: instruction.acceptedAt, // Übergeben für Lag-Berechnung
-                      verifiedViaNfc: true
-                  });
-                  
-                  // 2. UI Update
-                  setVerifiedItems(prev => [...prev, fullItem.id]);
-                  
-                  if (showToast) showToast(`${fullItem.name} verifiziert & gestartet!`, "success");
-                  
-                  // Haptisches Feedback
-                  if (navigator.vibrate) navigator.vibrate(200);
+            if (isMatch) {
+                // 1. Session starten (VIA SERVICE)
+                try {
+                    await startSessionService(currentUser.uid, {
+                        itemId: fullItem.id,
+                        // Wir übergeben das Item als Array, damit der Service weiß, dass es eine Instruction ist (Konsistenz)
+                        items: [fullItem], 
+                        type: 'instruction', 
+                        periodId: instruction.periodId, 
+                        acceptedAt: instruction.acceptedAt, // Übergeben für Lag-Berechnung
+                        verifiedViaNfc: true
+                    });
+                    
+                    // 2. UI Update
+                    setVerifiedItems(prev => [...prev, fullItem.id]);
+                    
+                    if (showToast) showToast(`${fullItem.name} verifiziert & gestartet!`, "success");
+                    
+                    // Haptisches Feedback
+                    if (navigator.vibrate) navigator.vibrate(200);
 
-              } catch (e) {
-                  console.error("Fehler beim Session-Start:", e);
-                  if (showToast) showToast("Fehler beim Starten der Session.", "error");
-              }
-          } else {
-              if (showToast) showToast(`Falscher Tag! Erwartet: ${fullItem.name}`, "error");
-          }
-      });
+                } catch (e) {
+                    console.error("Fehler beim Session-Start:", e);
+                    if (showToast) showToast("Fehler beim Starten der Session.", "error");
+                }
+            } else {
+                if (showToast) showToast(`Falscher Tag! Erwartet: ${fullItem.name}`, "error");
+            }
+        });
+      };
+
+      // Wrap with Hardcore Check
+      triggerHardcoreCheck(executeVerify);
   };
 
   // --- SMART START HANDLER ---
   const handleSmartStart = () => {
-      // Wir prüfen, welche Items aus der Instruction noch NICHT verifiziert (gestartet) wurden
-      const unverifiedItems = instruction.items.filter(i => !verifiedItems.includes(i.id));
-      
-      if (unverifiedItems.length === 0) {
-          // Alles erledigt -> Schließen
-          onClose();
-          if (showToast) showToast("Alle Anweisungen erfüllt.", "success");
-      } else {
-          // Restliche starten (Ohne NFC Zwang via Dashboard Handler)
-          onStartRequest(unverifiedItems);
-      }
+      const executeStart = () => {
+        // Wir prüfen, welche Items aus der Instruction noch NICHT verifiziert (gestartet) wurden
+        const unverifiedItems = instruction.items.filter(i => !verifiedItems.includes(i.id));
+        
+        if (unverifiedItems.length === 0) {
+            // Alles erledigt -> Schließen
+            onClose();
+            if (showToast) showToast("Alle Anweisungen erfüllt.", "success");
+        } else {
+            // Restliche starten (Ohne NFC Zwang via Dashboard Handler)
+            onStartRequest(unverifiedItems);
+        }
+      };
+
+      // Wrap with Hardcore Check
+      triggerHardcoreCheck(executeStart);
   };
 
   // Status Berechnung für Button
@@ -317,38 +403,70 @@ export default function InstructionDialog({
   };
 
   return (
-    <Dialog 
-        open={open} 
-        onClose={!instruction?.isAccepted ? onClose : undefined} 
-        maxWidth="xs" 
-        fullWidth 
-        PaperProps={DESIGN_TOKENS.glassCard}
-    >
-      <DialogContent sx={{ pb: 4 }}>
-        {renderContent()}
-      </DialogContent>
-      {/* SHOW ACTIONS ONLY IF: No instruction, OR Accepted (to show Start button) */}
-      {(!instruction || instruction.isAccepted) && (
+    <>
+      <Dialog 
+          open={open} 
+          onClose={!instruction?.isAccepted ? onClose : undefined} 
+          maxWidth="xs" 
+          fullWidth 
+          PaperProps={DESIGN_TOKENS.glassCard}
+      >
+        <DialogContent sx={{ pb: 4 }}>
+          {renderContent()}
+        </DialogContent>
+        {/* SHOW ACTIONS ONLY IF: No instruction, OR Accepted (to show Start button) */}
+        {(!instruction || instruction.isAccepted) && (
+            <DialogActions sx={{ flexDirection: 'column', gap: 1, p: 2 }}>
+                
+                {instruction?.isAccepted && (
+                    <Button 
+                      variant="contained" 
+                      fullWidth 
+                      onClick={handleSmartStart}
+                      color={allDone ? "success" : "primary"}
+                      sx={{ mb: 1, py: 1.5 }}
+                    >
+                        {allDone 
+                          ? "Fertig / Schließen" 
+                          : (verifiedCount > 0 ? `Restliche Starten (${remainingCount})` : "Alle Starten (Ohne Scan)")
+                        }
+                    </Button>
+                )}
+                
+                <Button onClick={onClose} fullWidth color="inherit">Schließen</Button>
+            </DialogActions>
+        )}
+      </Dialog>
+
+      {/* --- HARDCORE INTERCEPTOR DIALOG --- */}
+      <Dialog open={hardcoreDialogOpen} disableEscapeKeyDown>
+          <DialogTitle sx={{ color: PALETTE.accents.red, display: 'flex', alignItems: 'center', gap: 1 }}>
+              <ReportProblemIcon /> Hardcore Protokoll
+          </DialogTitle>
+          <DialogContent>
+              <DialogContentText sx={{ color: 'text.primary' }}>
+                  Der Start dieser Nacht-Session wurde vom Algorithmus flaggiert.
+                  <br /><br />
+                  <strong>Eine sofortige Sperma-Entladung wird gefordert.</strong>
+              </DialogContentText>
+          </DialogContent>
           <DialogActions sx={{ flexDirection: 'column', gap: 1, p: 2 }}>
-              
-              {instruction?.isAccepted && (
-                  <Button 
-                    variant="contained" 
-                    fullWidth 
-                    onClick={handleSmartStart}
-                    color={allDone ? "success" : "primary"}
-                    sx={{ mb: 1, py: 1.5 }}
-                  >
-                      {allDone 
-                        ? "Fertig / Schließen" 
-                        : (verifiedCount > 0 ? `Restliche Starten (${remainingCount})` : "Alle Starten (Ohne Scan)")
-                      }
-                  </Button>
-              )}
-              
-              <Button onClick={onClose} fullWidth color="inherit">Schließen</Button>
+              <Button 
+                  fullWidth variant="contained" 
+                  color="error" 
+                  onClick={handleHardcoreAccept}
+              >
+                  Akzeptieren & Entladen
+              </Button>
+              <Button 
+                  fullWidth variant="outlined" 
+                  color="warning" 
+                  onClick={handleHardcoreRefuse}
+              >
+                  Verweigern (Strafe + Start)
+              </Button>
           </DialogActions>
-      )}
-    </Dialog>
+      </Dialog>
+    </>
   );
 }
