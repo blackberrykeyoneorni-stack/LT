@@ -110,8 +110,6 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
         // 3. Filter für verfügbare Items
         // FIX: activeSessions auf Array prüfen
         const safeActiveSessions = Array.isArray(activeSessions) ? activeSessions : [];
-        const activeItemIds = safeActiveSessions.map(s => s.itemId); // Einfache Map, da activeSessions meist {itemId: ...} ist
-        
         // Erweiterter Check: Falls activeSessions komplexere Struktur hat (itemIds Array)
         const allActiveIds = new Set();
         safeActiveSessions.forEach(s => {
@@ -121,6 +119,9 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
 
         const futureBlockedIds = await getFutureBlockedItemIds(uid, restingHours);
         
+        // ANPASSUNG: Perioden-Check (Tag/Nacht)
+        const isNightInstruction = periodId && periodId.includes('night');
+
         const availableItems = items.filter(i => {
             if (i.status !== 'active') return false; 
             if (allActiveIds.has(i.id)) return false; 
@@ -130,6 +131,17 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
             
             // Ausschluss reservierter Items für ZUKÜNFTIGE Tage
             if (futureBlockedIds.includes(i.id)) return false;
+
+            // NEU: Tragezeitraum-Check (Tagestrageanweisung vs Nachttrageanweisung)
+            const itemPeriod = i.suitablePeriod || 'Beide'; // Fallback auf 'Beide', falls nicht gesetzt
+            
+            if (isNightInstruction) {
+                // Es ist Nacht: Schließe Items aus, die NUR für den Tag sind
+                if (itemPeriod === 'Tag') return false;
+            } else {
+                // Es ist Tag: Schließe Items aus, die NUR für die Nacht sind
+                if (itemPeriod === 'Nacht') return false;
+            }
 
             return true;
         });

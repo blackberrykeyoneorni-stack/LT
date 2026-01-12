@@ -5,6 +5,16 @@ import { motion } from 'framer-motion';
 import NightlightRoundIcon from '@mui/icons-material/NightlightRound';
 import LockIcon from '@mui/icons-material/Lock';
 
+// Helper zur Formatierung von Dezimal-Stunden in h und m
+const formatTargetTime = (decimalHours) => {
+    if (!decimalHours || isNaN(decimalHours)) return "0h 0m";
+    const h = Math.floor(decimalHours);
+    const m = Math.round((decimalHours - h) * 60);
+    
+    if (m === 60) return `${h + 1}h 0m`;
+    return `${h}h ${m}m`;
+};
+
 export default function ProgressBar({ currentMinutes, targetHours, isGoalMetToday, progressData }) {
     // Falls progressData fehlt (Fallback), nehmen wir die Props
     const percentage = progressData?.percentage || (isGoalMetToday ? 100 : Math.min(100, (currentMinutes / (targetHours * 60)) * 100));
@@ -47,7 +57,11 @@ export default function ProgressBar({ currentMinutes, targetHours, isGoalMetToda
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
                 <Typography variant="subtitle2" sx={{ fontWeight: 600, color: isLocked ? PALETTE.accents.red : 'text.primary' }}>
                     {isLocked ? "TAGESZIEL GESPERRT" : "Tagesfortschritt"}
-                    {!isLocked && <Typography component="span" color="text.secondary" sx={{ fontWeight: 400, ml: 1 }}>({targetHours}h Ziel)</Typography>}
+                    {!isLocked && (
+                        <Typography component="span" color="text.secondary" sx={{ fontWeight: 400, ml: 1 }}>
+                            ({formatTargetTime(targetHours)} Ziel)
+                        </Typography>
+                    )}
                 </Typography>
                 
                 {/* DER GOLDENE MOND / STATUS ICON */}

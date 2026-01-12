@@ -5,15 +5,7 @@ import {
     serverTimestamp, increment, arrayUnion 
 } from 'firebase/firestore';
 import { db } from '../../firebase';
-
-// --- HILFSFUNKTIONEN ---
-
-const safeToDate = (val) => {
-    if (!val) return null;
-    if (typeof val.toDate === 'function') return val.toDate();
-    if (val instanceof Date) return val;
-    return new Date(val);
-};
+import { safeDate } from '../../utils/dateUtils'; 
 
 // Bestimmt den Kontext für die Nacht-Prüfung
 const getPreviousNightContext = (referenceDate) => {
@@ -53,7 +45,7 @@ export default function useSessionProgress(currentUser, items) {
             if (pSnap.exists()) {
                 const data = pSnap.data();
                 currentTarget = data.dailyTargetHours || 3;
-                lastUpdate = data.lastWeeklyUpdate ? safeToDate(data.lastWeeklyUpdate) : null;
+                lastUpdate = data.lastWeeklyUpdate ? safeDate(data.lastWeeklyUpdate) : null;
                 setDailyTargetHours(currentTarget);
             }
 
@@ -61,6 +53,7 @@ export default function useSessionProgress(currentUser, items) {
             const now = new Date();
             const currentDay = now.getDay(); 
             
+            // Wir prüfen immer Montags (oder wenn das letzte Update älter als diese Woche ist)
             const thisWeekMonday = new Date(now);
             const dayShift = (currentDay + 6) % 7; 
             thisWeekMonday.setDate(now.getDate() - dayShift);
@@ -87,15 +80,26 @@ export default function useSessionProgress(currentUser, items) {
                 
                 let totalMinutes = 0;
                 pastSnap.forEach(d => {
-                    const dur = d.data().durationMinutes || 0;
+                    const data = d.data();
+                    
+                    // FIX: Nacht-Sessions ignorieren!
+                    // Wenn wir das Tagesziel berechnen, dürfen Schlaf-Stunden nicht zählen.
+                    if (data.period && typeof data.period === 'string' && data.period.includes('night')) {
+                        return; 
+                    }
+
+                    const dur = data.durationMinutes || 0;
                     totalMinutes += dur;
                 });
 
                 const averageMinutes = totalMinutes / 5;
                 const averageHours = averageMinutes / 60;
                 
+                // Runden auf 1 Nachkommastelle
                 const newTarget = Math.round(averageHours * 10) / 10;
 
+                // Nur erhöhen, wenn der Durchschnitt das aktuelle Ziel signifikant übersteigt
+                // Wir geben einen kleinen Puffer, damit es nicht bei jeder Minute springt
                 if (newTarget > currentTarget) {
                     await updateDoc(prefsRef, {
                         dailyTargetHours: newTarget,
@@ -105,6 +109,7 @@ export default function useSessionProgress(currentUser, items) {
                     setDailyTargetHours(newTarget);
                     console.log(`Target updated: ${currentTarget}h -> ${newTarget}h`);
                 } else {
+                    // Update Timestamp, auch wenn Ziel gleich bleibt
                     await updateDoc(prefsRef, {
                         lastWeeklyUpdate: serverTimestamp()
                     });
@@ -139,9 +144,9 @@ export default function useSessionProgress(currentUser, items) {
             let activeList = activeSnap.docs.map(d => ({ 
                 id: d.id, 
                 ...d.data(), 
-                startTime: safeToDate(d.data().startTime),
+                startTime: safeDate(d.data().startTime),
                 type: d.data().type || 'instruction',
-                currentDuration: Math.floor((new Date() - safeToDate(d.data().startTime)) / 60000)
+                currentDuration: Math.floor((new Date() - safeDate(d.data().startTime)) / 60000)
             }));
 
             activeList.sort((a, b) => b.startTime - a.startTime);
@@ -172,8 +177,8 @@ export default function useSessionProgress(currentUser, items) {
             const allCheckpointsMet = checkpoints.every(cpTime => {
                 return nightSnap.docs.some(d => {
                     const data = d.data();
-                    const start = safeToDate(data.startTime);
-                    const end = safeToDate(data.endTime) || new Date();
+                    const start = safeDate(data.startTime);
+                    const end = safeDate(data.endTime) || new Date();
                     return start <= cpTime && end >= cpTime;
                 });
             });
@@ -195,8 +200,8 @@ export default function useSessionProgress(currentUser, items) {
                 .map(d => ({
                     id: d.id,
                     ...d.data(),
-                    startTime: safeToDate(d.data().startTime),
-                    endTime: safeToDate(d.data().endTime)
+                    startTime: safeDate(d.data().startTime),
+                    endTime: safeDate(d.data().endTime)
                 }))
                 .filter(s => !s.period || !s.period.endsWith('-night'));
 
@@ -326,7 +331,7 @@ export default function useSessionProgress(currentUser, items) {
             let lagMinutes = 0;
             
             if (sessionData.acceptedAt) {
-                const acceptDate = safeToDate(sessionData.acceptedAt);
+                const acceptDate = safeDate(sessionData.acceptedAt);
                 if (acceptDate) {
                     const diffMs = Date.now() - acceptDate.getTime();
                     lagMinutes = Math.max(0, Math.floor(diffMs / 60000));
@@ -382,7 +387,7 @@ export default function useSessionProgress(currentUser, items) {
                 await updateDoc(doc(db, `users/${currentUser.uid}/items`, session.itemId), { 
                     status: 'active', 
                     wearCount: increment(1), 
-                    totalMinutes: increment(durationMinutes),
+                    totalMinutes: increment(durationMinutes), 
                     lastWorn: endTime 
                 });
             } else if (session.itemId) {

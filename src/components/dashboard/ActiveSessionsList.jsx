@@ -6,13 +6,7 @@ import LockClockIcon from '@mui/icons-material/LockClock';
 import StopCircleIcon from '@mui/icons-material/StopCircle';
 import LocalLaundryServiceIcon from '@mui/icons-material/LocalLaundryService';
 import { PALETTE } from '../../theme/obsidianDesign';
-
-// CRASH-FIX: Helper für sicheres Datumsparsen
-const safeDate = (val) => {
-    if (!val) return new Date();
-    if (typeof val.toDate === 'function') return val.toDate();
-    return new Date(val);
-};
+import { safeDate } from '../../utils/dateUtils'; // KORREKTUR: Zentraler Import
 
 export default function ActiveSessionsList({ 
   activeSessions, 

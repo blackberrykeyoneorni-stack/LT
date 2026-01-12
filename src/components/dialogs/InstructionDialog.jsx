@@ -24,8 +24,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 
 import { useNFCGlobal } from '../../contexts/NFCContext';
 import { useAuth } from '../../contexts/AuthContext';
-import { db } from '../../firebase';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { startSession as startSessionService } from '../../services/SessionService'; // NEU
 
 export default function InstructionDialog({ 
   open, 
@@ -43,7 +42,7 @@ export default function InstructionDialog({
   onNavigateItem,
   oathProgress,
   isHoldingOath,
-  showToast // NEU: Für Feedback
+  showToast 
 }) {
 
   // Contexts
@@ -62,9 +61,6 @@ export default function InstructionDialog({
           console.log("Verify Scan:", scannedTagId, "Target:", fullItem);
 
           // Prüfung: Stimmt der Tag mit irgendeiner ID des Items überein?
-          // 1. nfcTagId (gespeicherter Tag)
-          // 2. customId (manuelle ID)
-          // 3. id (Firestore Doc ID)
           const isMatch = (
               scannedTagId === fullItem.nfcTagId || 
               scannedTagId === fullItem.customId ||
@@ -72,24 +68,15 @@ export default function InstructionDialog({
           );
 
           if (isMatch) {
-              // 1. Session starten
+              // 1. Session starten (VIA SERVICE)
               try {
-                  // FIX: Lag berechnen und Period hinzufügen, damit Dashboard dies als Instruction erkennt
-                  let lagMinutes = 0;
-                  if (instruction && instruction.acceptedAt) {
-                        const acceptDate = new Date(instruction.acceptedAt);
-                        const diffMs = Date.now() - acceptDate.getTime();
-                        lagMinutes = Math.max(0, Math.floor(diffMs / 60000));
-                  }
-
-                  await addDoc(collection(db, `users/${currentUser.uid}/sessions`), {
-                      itemId: fullItem.id, 
-                      itemIds: [fullItem.id], 
-                      type: 'instruction', // Markiert als Teil einer Anweisung
-                      period: instruction.periodId, // WICHTIG: Verbindet Session mit Fortschrittsbalken
-                      complianceLagMinutes: lagMinutes,
-                      startTime: serverTimestamp(), 
-                      endTime: null,
+                  await startSessionService(currentUser.uid, {
+                      itemId: fullItem.id,
+                      // Wir übergeben das Item als Array, damit der Service weiß, dass es eine Instruction ist (Konsistenz)
+                      items: [fullItem], 
+                      type: 'instruction', 
+                      periodId: instruction.periodId, 
+                      acceptedAt: instruction.acceptedAt, // Übergeben für Lag-Berechnung
                       verifiedViaNfc: true
                   });
                   
@@ -158,7 +145,7 @@ export default function InstructionDialog({
                         </Box>
                         <Typography variant="h6" gutterBottom>{freeDayReason === 'Holiday' ? 'Feiertag' : 'Wochenende'}</Typography>
                         <Typography variant="body2" color="text.secondary">
-                            Genieße deine freie Zeit.
+                            Willst du nicht doch Nylons tragen?
                         </Typography>
                     </>
                 ) : (

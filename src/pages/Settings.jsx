@@ -1,13 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { doc, getDoc, setDoc, updateDoc, collection, getDocs, serverTimestamp, writeBatch } from 'firebase/firestore';
+import { 
+    doc, getDoc, setDoc, updateDoc, collection, getDocs, 
+    serverTimestamp, writeBatch 
+} from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { generateBackup, downloadBackupFile } from '../services/BackupService';
-import { enableBiometrics, disableBiometrics, isBiometricSupported } from '../services/BiometricService';
 import { useSecurity } from '../contexts/SecurityContext';
 import { useNFCGlobal } from '../contexts/NFCContext';
+import { generateBackup, downloadBackupFile } from '../services/BackupService';
+import { enableBiometrics, disableBiometrics, isBiometricSupported } from '../services/BiometricService';
+
 import {
-  Box, Typography, TextField, Button, Paper,
+  Box, Container, Typography, TextField, Button, Paper,
   Accordion, AccordionSummary, AccordionDetails,
   Chip, Stack, Switch, Slider, Snackbar, Alert, IconButton,
   Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions,
@@ -57,9 +61,8 @@ export default function Settings() {
   const [maxInstructionItems, setMaxInstructionItems] = useState(1);
   const [previousTarget, setPreviousTarget] = useState(null);
   
-  // STATE: Sissy Protokoll & Test State
+  // STATE: Flags
   const [sissyProtocolEnabled, setSissyProtocolEnabled] = useState(false);
-  const [tzdTestMode, setTzdTestMode] = useState(false);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
 
   // STATE: Gewichtung (Weights)
@@ -78,8 +81,10 @@ export default function Settings() {
   const handleCloseToast = () => setToast({ ...toast, open: false });
 
   useEffect(() => {
-    if (currentUser) loadAll();
-    checkBiometrics();
+    if (currentUser) {
+        loadAll();
+        checkBiometrics();
+    }
   }, [currentUser]);
 
   const checkBiometrics = async () => {
@@ -109,7 +114,6 @@ export default function Settings() {
         setMaxInstructionItems(data.maxInstructionItems || 1);
         setPreviousTarget(data.previousTargetHours || null);
         setSissyProtocolEnabled(data.sissyProtocolEnabled || false);
-        setTzdTestMode(data.tzdTestMode || false);
         setCategoryWeights(data.categoryWeights || {});
       }
 
@@ -161,7 +165,6 @@ export default function Settings() {
         nylonRestingHours,
         maxInstructionItems,
         sissyProtocolEnabled, 
-        tzdTestMode,
         categoryWeights
       });
       showToast("Alle Einstellungen gespeichert.", "success");
@@ -292,7 +295,7 @@ export default function Settings() {
     }
   };
 
-  // --- REPAIR DATABASE (SAFE CHUNKING FIX) ---
+  // --- REPAIR DATABASE ---
   const handleRepairDatabase = async () => {
     if (!window.confirm("Dies berechnet alle Statistiken (Tragezeit, Cost per Wear) neu. Fortfahren?")) return;
     setRepairLoading(true);
@@ -317,9 +320,9 @@ export default function Settings() {
         }
       });
 
-      // BATCH CHUNKING (Max 500 Ops per Batch)
+      // BATCH CHUNKING
       const updates = Object.entries(itemStats);
-      const CHUNK_SIZE = 450; // Sicherheitsabstand zu 500
+      const CHUNK_SIZE = 450;
       let processedCount = 0;
 
       for (let i = 0; i < updates.length; i += CHUNK_SIZE) {
@@ -386,9 +389,10 @@ export default function Settings() {
 
   return (
     <Box sx={DESIGN_TOKENS.bottomNavSpacer}>
+      <Container maxWidth="md">
       <Typography variant="h4" gutterBottom sx={DESIGN_TOKENS.textGradient}>Einstellungen</Typography>
 
-      {/* --- PREFERENCES (ACCORDION - GESCHLOSSEN) --- */}
+      {/* --- PREFERENCES --- */}
       <Accordion sx={{ ...accordionStyle, borderLeft: `4px solid ${PALETTE.primary.main}` }}>
         <AccordionSummary expandIcon={<Icons.Expand />}>
             <SectionHeader icon={Icons.Track} title="Ziele & Limits" color={PALETTE.primary.main} />
@@ -424,23 +428,13 @@ export default function Settings() {
             </Box>
 
             <Divider sx={{ my: 2, borderColor: 'rgba(255,255,255,0.1)' }} />
-            <Stack spacing={2}>
-                <Stack direction="row" justifyContent="space-between" alignItems="center">
+            
+            <Stack direction="row" justifyContent="space-between" alignItems="center">
                 <Box>
                     <Typography variant="body1" color={sissyProtocolEnabled ? "error" : "text.primary"} fontWeight={sissyProtocolEnabled ? "bold" : "normal"}>Hardcore Protokoll</Typography>
                     <Typography variant="caption" color="text.secondary">Erzwingt Ingestion bei Nacht-Sessions</Typography>
                 </Box>
                 <Switch checked={sissyProtocolEnabled} onChange={(e) => setSissyProtocolEnabled(e.target.checked)} color="error" />
-                </Stack>
-                <Stack direction="row" justifyContent="space-between" alignItems="center">
-                <Box>
-                    <Typography variant="body1" color={tzdTestMode ? "warning.main" : "text.secondary"} sx={{ display:'flex', alignItems:'center', gap:1 }}>
-                    <Icons.Build fontSize="small" /> Test-Modus (Dev)
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">Ignoriert 2026-Sperre</Typography>
-                </Box>
-                <Switch checked={tzdTestMode} onChange={(e) => setTzdTestMode(e.target.checked)} color="warning" disabled={!sissyProtocolEnabled} />
-                </Stack>
             </Stack>
         </AccordionDetails>
       </Accordion>
@@ -621,7 +615,7 @@ export default function Settings() {
            </AccordionDetails>
       </Accordion>
 
-      {/* --- SYSTEM (JETZT ALS ACCORDION) --- */}
+      {/* --- SYSTEM --- */}
       <Accordion sx={{ ...accordionStyle, borderLeft: `4px solid ${PALETTE.primary.main}` }}>
          <AccordionSummary expandIcon={<Icons.Expand />}><SectionHeader icon={Icons.Settings} title="System" color={PALETTE.primary.main} /></AccordionSummary>
          <AccordionDetails>
@@ -667,6 +661,7 @@ export default function Settings() {
         <DialogActions><Button onClick={() => setResetModalOpen(false)}>Abbrechen</Button><Button onClick={handleSmartReset} color="warning" variant="contained">Reset</Button></DialogActions>
       </Dialog>
       <Snackbar open={toast.open} autoHideDuration={3000} onClose={handleCloseToast}><Alert onClose={handleCloseToast} severity={toast.severity} sx={{ width: '100%' }}>{toast.message}</Alert></Snackbar>
+      </Container>
     </Box>
   );
 }

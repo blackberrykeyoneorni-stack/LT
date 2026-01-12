@@ -1,19 +1,10 @@
 import { db } from '../firebase';
-import { doc, updateDoc, serverTimestamp, addDoc, collection, getDoc, setDoc, increment } from 'firebase/firestore';
-
-// --- HELPER: CRASH PREVENTION ---
-const safeDate = (val) => {
-    if (!val) return null;
-    if (typeof val.toDate === 'function') return val.toDate(); 
-    if (val instanceof Date) return val;
-    return new Date(val); 
-};
+import { doc, updateDoc, serverTimestamp, setDoc, getDoc, increment } from 'firebase/firestore';
+import { safeDate } from '../utils/dateUtils';
+import { registerPunishment } from './PunishmentService';
 
 // --- KONSTANTEN ---
-const TZD_LIVE_DATE = new Date('2026-01-02T00:00:00');
-
-// UPDATE: 10% Chance (war 0.00)
-const TRIGGER_CHANCE = 0.10; 
+const TRIGGER_CHANCE = 0.08; // 8% Wahrscheinlichkeit
 
 const TIME_MATRIX = [
     { label: 'The Bait', min: 6, max: 12, cumulative: 0.20 },
@@ -21,22 +12,34 @@ const TIME_MATRIX = [
     { label: 'The Wall', min: 24, max: 36, cumulative: 1.00 }
 ];
 
-// --- FILTER-LOGIK ---
+// --- HELPER ---
+const determineSecretDuration = () => {
+    const rand = Math.random();
+    for (const zone of TIME_MATRIX) {
+        if (rand < zone.cumulative) {
+            const range = zone.max - zone.min;
+            const randomOffset = Math.floor(Math.random() * (range + 1));
+            return (zone.min + randomOffset) * 60; // Minuten
+        }
+    }
+    return 12 * 60; // Fallback
+};
+
+// --- ELIGIBILITY CHECK ---
 export const isItemEligibleForTZD = (item) => {
     if (!item) return false;
-
     const cat = (item.mainCategory || '').toLowerCase();
     const sub = (item.subCategory || '').toLowerCase();
     const brand = (item.brand || '').toLowerCase();
     const name = (item.name || '').toLowerCase();
 
-    // 1. STRUMPFHOSE
-    if (cat.includes('strumpfhose') || sub.includes('strumpfhose') || name.includes('strumpfhose') ||
+    // 1. Strumpfhosen
+    if (cat.includes('strumpfhose') || sub.includes('strumpfhose') || name.includes('strumpfhose') || 
         cat.includes('tights') || sub.includes('tights')) {
         return true;
     }
 
-    // 2. INTIMISSIMI HÖSCHEN
+    // 2. Intimissimi Unterteile
     if (brand.includes('intimissimi')) {
         if (sub.includes('slip') || sub.includes('panty') || sub.includes('string') || 
             sub.includes('thong') || sub.includes('höschen') || sub.includes('brief') ||
@@ -44,199 +47,165 @@ export const isItemEligibleForTZD = (item) => {
             return true;
         }
     }
+    return false;
+};
+
+// --- TRIGGER LOGIK (Für Dashboard) ---
+export const checkForTZDTrigger = async (userId, activeSessions, items) => {
+    // 1. Zeitfenster Prüfung (Sonntag 23:30 - Donnerstag 12:00)
+    const now = new Date();
+    const day = now.getDay(); 
+    const hour = now.getHours();
+    const min = now.getMinutes();
+
+    let inWindow = false;
+    if (day === 0) { // Sonntag ab 23:30
+        if (hour === 23 && min >= 30) inWindow = true;
+    } else if (day >= 1 && day <= 3) { // Mo, Di, Mi
+        inWindow = true;
+    } else if (day === 4) { // Donnerstag bis 12:00
+        if (hour < 12) inWindow = true;
+    }
+
+    if (!inWindow) return false;
+
+    // 2. Session Prüfung: Läuft eine INSTRUCTION Session?
+    const instructionSessions = activeSessions.filter(s => s.type === 'instruction');
+    if (instructionSessions.length === 0) return false;
+
+    // 3. Item Prüfung
+    const activeItemIds = new Set();
+    instructionSessions.forEach(s => {
+        if (s.itemId) activeItemIds.add(s.itemId);
+        if (s.itemIds) s.itemIds.forEach(id => activeItemIds.add(id));
+    });
+
+    const relevantItems = items.filter(i => activeItemIds.has(i.id) && isItemEligibleForTZD(i));
+    
+    if (relevantItems.length === 0) return false;
+
+    // 4. Wahrscheinlichkeit
+    const roll = Math.random();
+    // Debug: console.log(`TZD Roll: ${roll} vs ${TRIGGER_CHANCE}`);
+    
+    if (roll < TRIGGER_CHANCE) {
+        await startTZD(userId, relevantItems);
+        return true;
+    }
 
     return false;
 };
 
 /**
- * SCHRITT 1: Der Trigger-Check (Aktiviert)
- * Bedingung: Sonntag 23:30 bis Donnerstag 12:00 Uhr
+ * Startet das Protokoll
  */
-export const shouldTriggerProtocol = (settings) => {
-    const now = new Date();
-    
-    // Safety: Erst ab Live-Datum (oder wenn Testmodus an ist, was hier aber nicht geprüft wird)
-    if (now < TZD_LIVE_DATE && !settings?.tzdTestMode) return false;
-
-    const day = now.getDay(); // 0=So, 1=Mo, ..., 6=Sa
-    const hour = now.getHours();
-    const min = now.getMinutes();
-
-    let inWindow = false;
-
-    // ZEITFENSTER PRÜFUNG
-    if (day === 0) { // Sonntag
-        // Erst ab 23:30
-        if (hour === 23 && min >= 30) inWindow = true;
-    } else if (day >= 1 && day <= 3) { // Montag (1), Dienstag (2), Mittwoch (3)
-        // Ganztägig erlaubt
-        inWindow = true;
-    } else if (day === 4) { // Donnerstag
-        // Nur bis 12:00 Uhr
-        if (hour < 12) inWindow = true;
-    }
-    // Freitag (5) und Samstag (6) bleiben false
-
-    if (!inWindow) return false;
-
-    // ZUFALLS-TRIGGER
-    return Math.random() < TRIGGER_CHANCE;
-};
-
-/**
- * SCHRITT 2: Die Dauer-Berechnung
- */
-const determineSecretDuration = () => {
-    const rand = Math.random();
-    for (const zone of TIME_MATRIX) {
-        if (rand < zone.cumulative) {
-            const range = zone.max - zone.min;
-            const randomOffset = Math.floor(Math.random() * (range + 1));
-            return (zone.min + randomOffset) * 60;
-        }
-    }
-    return 12 * 60;
-};
-
-/**
- * Startet TZD 
- */
-export const startTZD = async (userId, item, isTestMode = false) => {
-    if (!isItemEligibleForTZD(item)) {
-        throw new Error("TZD VERWEIGERT: Item ist nicht für das Protokoll zugelassen.");
-    }
-
-    const checkInWindowStart = new Date();
-    const checkInWindowEnd = new Date();
-
-    if (isTestMode) {
-        checkInWindowStart.setHours(0, 0, 0, 0);
-        checkInWindowEnd.setHours(23, 59, 59, 999);
-    } else {
-        checkInWindowStart.setHours(18, 0, 0, 0); 
-        checkInWindowEnd.setHours(22, 0, 0, 0);
-    }
-
+export const startTZD = async (userId, targetItems) => {
     const targetDuration = determineSecretDuration();
+    
+    // Safety check falls targetItems kein Array ist (z.B. einzelnes Item übergeben)
+    const itemsArray = Array.isArray(targetItems) ? targetItems : [targetItems];
 
-    // 1. ECHTE SESSION STARTEN
-    const sessionRef = await addDoc(collection(db, `users/${userId}/sessions`), {
-        itemId: item.id,
-        itemIds: [item.id],
-        type: 'tzd',
-        startTime: serverTimestamp(),
-        endTime: null,
-        isShadowSession: true 
-    });
-
-    await updateDoc(doc(db, `users/${userId}/items`, item.id), { status: 'wearing' });
-
-    // 2. TZD STATUS SETZEN
     const tzdData = {
         isActive: true,
         startTime: serverTimestamp(),
         targetDurationMinutes: targetDuration,
-        itemId: item.id,
-        itemName: item.name,
+        lockedItems: itemsArray.map(i => ({
+            id: i.id,
+            name: i.name,
+            customId: i.customId || 'N/A',
+            brand: i.brand
+        })),
+        // Fallback für Overlay (nimmt das erste Item für Anzeige)
+        itemId: itemsArray[0]?.id, 
+        itemName: itemsArray[0]?.name,
+        
         accumulatedMinutes: 0,
-        phase: 'diurnal',
         lastCheckIn: serverTimestamp(),
-        checkInWindowStart: checkInWindowStart,
-        checkInWindowEnd: checkInWindowEnd,
-        stage: 'briefing',
-        isFailed: false,
-        linkedSessionId: sessionRef.id
+        stage: 'briefing', // Startet im Briefing Modus
+        isFailed: false
     };
 
     await setDoc(doc(db, `users/${userId}/status/tzd`), tzdData);
     return tzdData;
 };
 
-// ... Rest der Datei (performCheckIn, terminateTZD etc.) bleibt identisch ...
-export const performCheckIn = async (userId) => {
-    const status = await getTZDStatus(userId);
-    if (!status || !status.isActive) throw new Error("Kein aktives TZD.");
-    
-    const prefSnap = await getDoc(doc(db, `users/${userId}/settings/preferences`));
-    const prefs = prefSnap.exists() ? prefSnap.data() : {};
-    const isTestMode = prefs.tzdTestMode === true;
-
-    const now = new Date();
-    const startDate = safeDate(status.startDate) || new Date();
-    const elapsedRealSeconds = (now - startDate) / 1000;
-    
-    const multiplier = isTestMode ? 3600 : 1; 
-    const virtualSeconds = elapsedRealSeconds * multiplier;
-    const accumulatedMinutes = Math.floor(virtualSeconds / 60);
-
-    const targetMinutes = status.targetDurationMinutes || (12 * 60);
-    const isCompleted = accumulatedMinutes >= targetMinutes;
-
-    await updateDoc(doc(db, `users/${userId}/status/tzd`), {
-        lastCheckIn: serverTimestamp(),
-        accumulatedMinutes: accumulatedMinutes
-    });
-
-    return { completed: isCompleted, elapsedSeconds: virtualSeconds, isTestMode: isTestMode };
-};
-
-export const validateSessionCompliance = (sessionData) => {
-    const now = new Date();
-    const hour = now.getHours();
-    const isNight = hour >= 22 || hour < 6;
-    if (isNight) {
-        if (!sessionData.ingestionConfirmed) {
-            return { compliant: false, violation: 'NIGHT_PROTOCOL_BREACH', message: 'Verstoß: Ingestion bei Nacht-Session fehlgeschlagen.' };
-        }
-    }
-    return { compliant: true, message: 'Konform' };
-};
-
-export const logProtocolViolation = async (userId, violationData) => {
-    try {
-        await addDoc(collection(db, `users/${userId}/protocol_incidents`), { ...violationData, timestamp: serverTimestamp(), severity: 'CRITICAL', date: new Date() });
-    } catch (e) { console.error(e); }
-};
-
-export const getProtocolStatus = (settings) => {
-    return { isActive: false, mode: 'OFF', message: 'Protokoll deaktiviert', daysRemaining: 0 };
-};
+// --- STATUS & CHECK-IN ---
 
 export const getTZDStatus = async (userId) => {
     try {
-        const docRef = doc(db, `users/${userId}/status/tzd`);
-        const docSnap = await getDoc(docRef);
+        const docSnap = await getDoc(doc(db, `users/${userId}/status/tzd`));
         if (docSnap.exists()) {
             const data = docSnap.data();
             return {
                 ...data,
-                startDate: safeDate(data.startDate),
-                checkInWindowStart: safeDate(data.checkInWindowStart),
-                checkInWindowEnd: safeDate(data.checkInWindowEnd),
-                lastCheckIn: safeDate(data.lastCheckIn),
-                endTime: safeDate(data.endTime)
+                startTime: safeDate(data.startTime),
+                lastCheckIn: safeDate(data.lastCheckIn)
             };
         }
-        return null;
-    } catch (e) { return null; }
+        return { isActive: false };
+    } catch (e) { return { isActive: false }; }
 };
 
-export const confirmTZDBriefing = async (userId) => {
-    await updateDoc(doc(db, `users/${userId}/status/tzd`), { stage: 'running', startDate: serverTimestamp() });
-};
+// Wird vom Overlay aufgerufen (Timer Tick)
+export const performCheckIn = async (userId, statusData) => {
+    if (!statusData || !statusData.isActive) return null;
 
-export const toggleSleepMode = async (userId, isGoingToSleep) => {
-    await updateDoc(doc(db, `users/${userId}/status/tzd`), { phase: isGoingToSleep ? 'nocturnal' : 'diurnal', lastPhaseChange: serverTimestamp() });
-};
+    const now = new Date();
+    // Falls startTime noch null ist (Briefing Phase), nutze jetzigen Zeitpunkt
+    const start = safeDate(statusData.startTime) || now;
+    
+    const elapsedMinutes = Math.floor((now - start) / 60000);
+    const isCompleted = elapsedMinutes >= statusData.targetDurationMinutes;
 
-export const terminateTZD = async (userId) => {
-    const status = await getTZDStatus(userId);
-    const endTime = serverTimestamp();
-    await updateDoc(doc(db, `users/${userId}/status/tzd`), { isActive: false, endTime: endTime, stage: 'terminated' });
-    if (status && status.itemId) {
-        await updateDoc(doc(db, `users/${userId}/items`, status.itemId), { status: 'active', wearCount: increment(1), totalMinutes: increment(status.accumulatedMinutes || 0), lastWorn: endTime });
-        if (status.linkedSessionId) {
-            await updateDoc(doc(db, `users/${userId}/sessions`, status.linkedSessionId), { endTime: endTime, durationMinutes: status.accumulatedMinutes || 0, status: 'completed_tzd' });
-        }
+    if (isCompleted) {
+        await terminateTZD(userId, true);
+        return { isActive: false, completed: true };
+    } else {
+        await updateDoc(doc(db, `users/${userId}/status/tzd`), {
+            accumulatedMinutes: elapsedMinutes,
+            lastCheckIn: serverTimestamp()
+        });
+        return { ...statusData, accumulatedMinutes: elapsedMinutes, isActive: true };
     }
+};
+
+// --- EREIGNIS-HANDLER (EXPORTS FÜR OVERLAY) ---
+
+// 1. Briefing bestätigen (Startet den Timer wirklich)
+export const confirmTZDBriefing = async (userId) => {
+    await updateDoc(doc(db, `users/${userId}/status/tzd`), { 
+        stage: 'running',
+        startTime: serverTimestamp() // Reset Startzeit auf Bestätigung
+    });
+};
+
+// 2. Reguläres Beenden
+export const terminateTZD = async (userId, success = true) => {
+    const endTime = serverTimestamp();
+    const status = await getTZDStatus(userId);
+    
+    // Status deaktivieren
+    await updateDoc(doc(db, `users/${userId}/status/tzd`), { 
+        isActive: false, 
+        endTime: endTime, 
+        result: success ? 'completed' : 'failed' 
+    });
+
+    // Stats auf Item buchen (Optional, falls gewünscht)
+    if (success && status && status.itemId) {
+        await updateDoc(doc(db, `users/${userId}/items`, status.itemId), { 
+            wearCount: increment(1),
+            totalMinutes: increment(status.accumulatedMinutes || 0),
+            lastWorn: endTime
+        });
+    }
+};
+
+// 3. Notfall Abbruch
+export const emergencyBailout = async (userId) => {
+    // 1. Strafe registrieren
+    await registerPunishment(userId, "NOT-ABBRUCH: Zeitloses Diktat verweigert", 90);
+    
+    // 2. TZD beenden (Failed)
+    await terminateTZD(userId, false);
 };

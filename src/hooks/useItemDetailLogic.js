@@ -2,13 +2,14 @@ import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { 
     doc, getDoc, updateDoc, collection, query, where, getDocs, 
-    orderBy, serverTimestamp, arrayUnion, addDoc 
+    orderBy, serverTimestamp, arrayUnion 
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useNFCGlobal } from '../contexts/NFCContext'; 
 import { loadVibeTags } from '../services/ItemService';
+import { startSession as startSessionService } from '../services/SessionService'; // NEU
 import { safeDate } from '../utils/dateUtils';
 import { DEFAULT_ARCHIVE_REASONS, DEFAULT_RUN_LOCATIONS, DEFAULT_RUN_CAUSES } from '../utils/constants';
 
@@ -235,10 +236,10 @@ export function useItemDetailLogic() {
             if (!window.confirm(`ACHTUNG: Elasthan Recovery nicht abgeschlossen. Trotzdem tragen?`)) return;
         }
         try {
-            // Check Instruction Logic (wie zuvor)
-            let sessionType = 'voluntary';
+            // Check Instruction Logic (Smarte Erkennung bleibt hier, aber Logik im Service)
+            let type = 'voluntary';
             let periodId = null;
-            let lagMinutes = 0;
+            let acceptedAt = null;
 
             const instrRef = doc(db, `users/${currentUser.uid}/status/dailyInstruction`);
             const instrSnap = await getDoc(instrRef);
@@ -246,25 +247,21 @@ export function useItemDetailLogic() {
             if (instrSnap.exists()) {
                 const instr = instrSnap.data();
                 if (instr.items && instr.items.some(i => i.id === id)) {
-                    sessionType = 'instruction';
+                    type = 'instruction';
                     periodId = instr.periodId;
-                    if (instr.acceptedAt) {
-                        const acceptDate = new Date(instr.acceptedAt);
-                        const diffMs = Date.now() - acceptDate.getTime();
-                        lagMinutes = Math.max(0, Math.floor(diffMs / 60000));
-                    }
+                    acceptedAt = instr.acceptedAt; // WICHTIG: Übergeben für Lag-Berechnung
                 }
             }
 
-            await addDoc(collection(db, `users/${currentUser.uid}/sessions`), {
-                itemId: id, 
-                itemIds: [id], 
-                type: sessionType, 
-                startTime: serverTimestamp(), 
-                endTime: null,
-                ...(sessionType === 'instruction' ? { period: periodId, complianceLagMinutes: lagMinutes } : {}),
+            // REFACTOR: Service Aufruf statt direktem addDoc
+            await startSessionService(currentUser.uid, {
+                itemId: id,
+                type,
+                periodId,
+                acceptedAt,
                 verifiedViaNfc: viaNFC
             });
+
             navigate('/');
         } catch (e) { console.error(e); alert("Fehler beim Starten."); }
     };

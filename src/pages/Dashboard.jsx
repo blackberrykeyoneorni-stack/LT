@@ -21,10 +21,11 @@ import { isAuditDue, initializeAudit, confirmAuditItem } from '../services/Audit
 import { getPunishmentStatus, clearPunishment, findPunishmentItem, registerOathRefusal } from '../services/PunishmentService';
 import { loadMonthlyBudget, calculatePurchasePriority } from '../services/BudgetService';
 import { generateAndSaveInstruction } from '../services/InstructionService';
-import { registerReleaseSuccess } from '../services/ReleaseService';
-import { getProtocolStatus } from '../services/TZDService'; // TZD Restlogic
+import { registerRelease } from '../services/ReleaseService';
+import { checkForTZDTrigger, getTZDStatus } from '../services/TZDService'; // TZD INTEGRATION
 
 // COMPONENTS
+import TzdOverlay from '../components/dashboard/TzdOverlay'; 
 import ProgressBar from '../components/dashboard/ProgressBar';
 import FemIndexBar from '../components/dashboard/FemIndexBar';
 import ActionButtons from '../components/dashboard/ActionButtons';
@@ -37,7 +38,11 @@ import LaundryDialog from '../components/dialogs/LaundryDialog';
 
 // UI & THEME
 import { DESIGN_TOKENS, PALETTE } from '../theme/obsidianDesign';
-import { Box, Typography, Dialog, DialogTitle, DialogContent, DialogActions, Snackbar, Alert, FormGroup, FormControlLabel, Checkbox, TextField, Button, CircularProgress, Container, Paper, Chip, LinearProgress } from '@mui/material';
+import { 
+    Box, Typography, Dialog, DialogTitle, DialogContent, DialogActions, 
+    Snackbar, Alert, FormGroup, FormControlLabel, Checkbox, TextField, 
+    Button, CircularProgress, Container, Paper, Chip, LinearProgress 
+} from '@mui/material';
 import AnalyticsIcon from '@mui/icons-material/Analytics';
 import NightlightRoundIcon from '@mui/icons-material/NightlightRound';
 import TimerIcon from '@mui/icons-material/Timer';
@@ -125,7 +130,9 @@ export default function Dashboard() {
   const { startBindingScan, isScanning: isNfcScanning } = useNFCGlobal();
   
   // --- HOOKS ---
-  const { activeSessions, progress, loading: sessionsLoading, dailyTargetHours, startInstructionSession, stopSession, registerRelease, loadActiveSessions } = useSessionProgress(currentUser, items);
+  const { activeSessions, progress, loading: sessionsLoading, dailyTargetHours, startInstructionSession, stopSession, registerRelease: hookRegisterRelease, loadActiveSessions } = useSessionProgress(currentUser, items);
+  
+  // KPI Hook liefert jetzt das Datenobjekt direkt
   const kpis = useKPIs(items, activeSessions);
 
   // Local UI State
@@ -135,14 +142,14 @@ export default function Dashboard() {
   // Global initial load
   const [now, setNow] = useState(Date.now());
   
-  const [protocolStatus, setProtocolStatus] = useState({ isActive: false, mode: 'OFF', message: '', daysRemaining: 0 });
+  // TZD State
+  const [tzdActive, setTzdActive] = useState(false);
+
+  // Dialog & Flow States
   const [instructionOpen, setInstructionOpen] = useState(false);
   const [currentInstruction, setCurrentInstruction] = useState(null);
-  
   const [instructionStatus, setInstructionStatus] = useState('idle');
   
-  const [tzdState, setTzdState] = useState(null);
-
   const [reflectionOpen, setReflectionOpen] = useState(false);
   const [sessionToStop, setSessionToStop] = useState(null);
   const [selectedFeelings, setSelectedFeelings] = useState([]);
@@ -155,17 +162,22 @@ export default function Dashboard() {
   const hasInitialLoadHappened = useRef(false);
   
   const [laundryOpen, setLaundryOpen] = useState(false);
+  
+  // Audit States
   const [auditDue, setAuditDue] = useState(false);
   const [auditOpen, setAuditOpen] = useState(false);
   const [pendingAuditItems, setPendingAuditItems] = useState([]);
   const [currentAuditIndex, setCurrentAuditIndex] = useState(0);
   const [currentCondition, setCurrentCondition] = useState(5);
   const [currentLocationCorrect, setCurrentLocationCorrect] = useState(true);
+  
+  // Punishment States
   const [punishmentStatus, setPunishmentStatus] = useState({ active: false, deferred: false, reason: null, durationMinutes: 0 });
   const [punishmentItem, setPunishmentItem] = useState(null);
   const [punishmentScanOpen, setPunishmentScanOpen] = useState(false);
   const [punishmentScanMode, setPunishmentScanMode] = useState(null);
   
+  // Budget & Planning
   const [monthlyBudget, setMonthlyBudget] = useState(0);
   const [currentSpent, setCurrentSpent] = useState(0); 
   const [purchasePriority, setPurchasePriority] = useState([]);
@@ -175,11 +187,14 @@ export default function Dashboard() {
   const [isFreeDay, setIsFreeDay] = useState(false);
   const [freeDayReason, setFreeDayReason] = useState('');
 
+  // Release Protocol
   const [releaseDialogOpen, setReleaseDialogOpen] = useState(false);
   const [releaseStep, setReleaseStep] = useState('confirm');
   const [releaseTimer, setReleaseTimer] = useState(600);
   const [releaseIntensity, setReleaseIntensity] = useState(3);
   const releaseTimerInterval = useRef(null);
+  
+  // Detail Dialogs
   const [indexDialogOpen, setIndexDialogOpen] = useState(false);
   
   // TOAST SYSTEM
@@ -187,31 +202,59 @@ export default function Dashboard() {
   const showToast = (message, severity = 'success') => setToast({ open: true, message, severity });
   const handleCloseToast = () => setToast({ ...toast, open: false });
 
-  // --- TZD FUNKTION DEAKTIVIERT ---
-  const checkTZD = async (prefs) => {
-      return;
-  };
-
+  // --- SETTINGS LOAD ---
   const loadSettings = async () => { 
       const pSnap = await getDoc(doc(db, `users/${currentUser.uid}/settings/preferences`));
       let prefs = {};
       if (pSnap.exists()) { 
           prefs = pSnap.data();
           setMaxInstructionItems(prefs.maxInstructionItems || 1); 
-          setProtocolStatus(getProtocolStatus(prefs));
       }
       return prefs;
   };
+
   const loadWishlist = async () => {
       const s = await getDocs(query(collection(db, `users/${currentUser.uid}/wishlist`)));
       setWishlistCount(s.docs.length);
       return s.docs.map(d => ({id:d.id, ...d.data()}));
   };
+
   const loadBudgetInfo = async () => {
       const bRef = doc(db, `users/${currentUser.uid}/settings/budget`);
       const bSnap = await getDoc(bRef);
       if(bSnap.exists()) { setMonthlyBudget(bSnap.data().monthlyLimit || 0); setCurrentSpent(bSnap.data().currentSpent || 0); }
   };
+
+  // --- TZD LOGIC (THE TRIGGER) ---
+  useEffect(() => {
+    let interval;
+    const checkTZD = async () => {
+        if (!currentUser || itemsLoading) return;
+
+        // 1. Prüfen: Ist es bereits aktiv?
+        const status = await getTZDStatus(currentUser.uid);
+        if (status.isActive) {
+            if (!tzdActive) setTzdActive(true);
+            return; 
+        } else {
+            if (tzdActive) setTzdActive(false);
+        }
+
+        // 2. Trigger-Versuch
+        const triggered = await checkForTZDTrigger(currentUser.uid, activeSessions, items);
+        if (triggered) {
+            setTzdActive(true);
+        }
+    };
+
+    if (currentUser && !itemsLoading) {
+        checkTZD(); 
+        interval = setInterval(checkTZD, 300000); // Check alle 5 Minuten
+    }
+    
+    return () => clearInterval(interval);
+  }, [currentUser, items, activeSessions, itemsLoading, tzdActive]);
+
 
   useEffect(() => {
       const d = new Date(now);
@@ -223,6 +266,7 @@ export default function Dashboard() {
   }, [now]);
 
   const handleOpenRelease = () => { setReleaseStep('confirm'); setReleaseTimer(600); setReleaseIntensity(3); setReleaseDialogOpen(true); };
+  
   const handleStartReleaseTimer = () => {
       setReleaseStep('timer');
       if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current);
@@ -230,13 +274,21 @@ export default function Dashboard() {
           setReleaseTimer(prev => { if(prev <= 1) { clearInterval(releaseTimerInterval.current); setReleaseStep('decision'); return 0; } return prev - 1; });
       }, 1000);
   };
+  
   const handleSkipTimer = () => { if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current); setReleaseStep('decision'); };
+  
   const handleReleaseDecision = async (outcome) => {
       try {
-          await registerRelease(outcome, releaseIntensity);
+          // Wir nutzen den Hook für das Release-Registering, damit Stats korrekt aktualisiert werden
+          await hookRegisterRelease(outcome, releaseIntensity);
           if (outcome === 'maintained') showToast("Disziplin bewiesen.", "success");
           else showToast("Sessions beendet.", "warning");
-      } catch (e) { showToast("Fehler beim Release", "error"); } finally { setReleaseDialogOpen(false); if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current); }
+      } catch (e) { 
+          showToast("Fehler beim Release", "error"); 
+      } finally { 
+          setReleaseDialogOpen(false); 
+          if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current); 
+      }
   };
 
   const getPeriodId = useCallback(() => {
@@ -277,7 +329,7 @@ export default function Dashboard() {
       } catch (e) { setCurrentInstruction(null); } finally { setInstructionStatus('ready'); }
   };
 
-  // 1. Period Detection (Time based)
+  // 1. Period Detection
   useEffect(() => {
     if (items.length > 0 && !sessionsLoading) {
         const newPeriod = getPeriodId();
@@ -288,7 +340,7 @@ export default function Dashboard() {
     }
   }, [items.length, sessionsLoading, now, getPeriodId]);
 
-  // 2. Data Fetching (State based)
+  // 2. Data Fetching
   useEffect(() => {
     if (items.length > 0 && !sessionsLoading && currentPeriod) {
         const isIdle = instructionStatus === 'idle';
@@ -301,17 +353,45 @@ export default function Dashboard() {
   }, [items.length, sessionsLoading, currentPeriod, currentInstruction, instructionStatus]);
 
   const handleStartRequest = async (itemsToStart) => { 
+      // TZD BLOCKADE
+      if (tzdActive) {
+          showToast("ZUGRIFF VERWEIGERT: Das Zeitlose Diktat ist aktiv.", "error");
+          return;
+      }
+
       const targetItems = itemsToStart || currentInstruction?.items;
       if(targetItems && targetItems.length > 0) { 
-          const payload = { ...currentInstruction, items: targetItems };
+          // Payload bauen für startInstructionSession
+          const payload = { 
+              ...currentInstruction, 
+              items: targetItems 
+          };
           await startInstructionSession(payload); 
           setInstructionOpen(false); 
           showToast(`${targetItems.length} Sessions gestartet.`, "success");
       }
   };
   
-  const startOathPress = () => { setIsHoldingOath(true); setOathProgress(0); oathTimerRef.current = setInterval(() => { setOathProgress(prev => { if (prev >= 100) { clearInterval(oathTimerRef.current); handleAcceptOath(); return 100; } return prev + 0.4; }); }, 20); };
-  const cancelOathPress = () => { clearInterval(oathTimerRef.current); setIsHoldingOath(false); setOathProgress(0); };
+  const startOathPress = () => { 
+      setIsHoldingOath(true); 
+      setOathProgress(0); 
+      oathTimerRef.current = setInterval(() => { 
+          setOathProgress(prev => { 
+              if (prev >= 100) { 
+                  clearInterval(oathTimerRef.current); 
+                  handleAcceptOath(); 
+                  return 100; 
+              } 
+              return prev + 0.4; 
+          }); 
+      }, 20); 
+  };
+  
+  const cancelOathPress = () => { 
+      clearInterval(oathTimerRef.current); 
+      setIsHoldingOath(false); 
+      setOathProgress(0); 
+  };
   
   const handleAcceptOath = async () => { 
       const nowISO = new Date().toISOString(); 
@@ -322,27 +402,105 @@ export default function Dashboard() {
       setIsHoldingOath(false); 
   };
   
-  const handleDeclineOath = async () => { await registerOathRefusal(currentUser.uid); setPunishmentStatus(await getPunishmentStatus(currentUser.uid)); setInstructionOpen(false); setIsHoldingOath(false); };
+  const handleDeclineOath = async () => { 
+      await registerOathRefusal(currentUser.uid); 
+      setPunishmentStatus(await getPunishmentStatus(currentUser.uid)); 
+      setInstructionOpen(false); 
+      setIsHoldingOath(false); 
+  };
 
-  const executeStartPunishment = async () => { if(punishmentItem) { await addDoc(collection(db,`users/${currentUser.uid}/sessions`),{ itemId:punishmentItem.id, itemIds:[punishmentItem.id], type:'punishment', startTime:serverTimestamp(), endTime:null }); await updateDoc(doc(db,`users/${currentUser.uid}/status/punishment`),{active:true,deferred:false}); setPunishmentStatus(await getPunishmentStatus(currentUser.uid)); loadActiveSessions(); setPunishmentScanOpen(false); } };
-  const handlePunishmentScanTrigger = () => { startBindingScan((scannedId) => { if (punishmentItem && (scannedId === punishmentItem.nfcTagId || scannedId === punishmentItem.customId || scannedId === punishmentItem.id)) { if (punishmentScanMode === 'start') executeStartPunishment(); else if (punishmentScanMode === 'stop') { setPunishmentScanOpen(false); setSelectedFeelings([]); setReflectionNote(''); setReflectionOpen(true); } } else { showToast("Falscher Tag!", "error"); } }); };
+  const executeStartPunishment = async () => { 
+      if(punishmentItem) { 
+          await addDoc(collection(db,`users/${currentUser.uid}/sessions`),{ itemId:punishmentItem.id, itemIds:[punishmentItem.id], type:'punishment', startTime:serverTimestamp(), endTime:null }); 
+          await updateDoc(doc(db,`users/${currentUser.uid}/status/punishment`),{active:true,deferred:false}); 
+          setPunishmentStatus(await getPunishmentStatus(currentUser.uid)); 
+          loadActiveSessions(); 
+          setPunishmentScanOpen(false); 
+      } 
+  };
+  
+  const handlePunishmentScanTrigger = () => { 
+      startBindingScan((scannedId) => { 
+          if (punishmentItem && (scannedId === punishmentItem.nfcTagId || scannedId === punishmentItem.customId || scannedId === punishmentItem.id)) { 
+              if (punishmentScanMode === 'start') executeStartPunishment(); 
+              else if (punishmentScanMode === 'stop') { 
+                  setPunishmentScanOpen(false); 
+                  setSelectedFeelings([]); 
+                  setReflectionNote(''); 
+                  setReflectionOpen(true); 
+              } 
+          } else { 
+              showToast("Falscher Tag!", "error"); 
+          } 
+      }); 
+  };
 
-  const handleRequestStopSession = (session) => { if (session.type === 'punishment') { const elapsed = Math.floor((Date.now() - session.startTime.getTime()) / 60000); if (elapsed < (punishmentStatus.durationMinutes || 30)) return; if (punishmentItem?.nfcTagId) { setSessionToStop(session); setPunishmentScanMode('stop'); setPunishmentScanOpen(true); return; } } setSessionToStop(session); setSelectedFeelings([]); setReflectionNote(''); setReflectionOpen(true); };
-  const handleConfirmStopSession = async () => { if (!sessionToStop) return; setLoading(true); try { await stopSession(sessionToStop, { feelings: selectedFeelings, note: reflectionNote }); if(sessionToStop.type === 'punishment') { await clearPunishment(currentUser.uid); setPunishmentStatus(await getPunishmentStatus(currentUser.uid)); } } catch(e){ showToast("Fehler", "error"); } finally { setReflectionOpen(false); setSessionToStop(null); setLoading(false); } };
+  const handleRequestStopSession = (session) => { 
+      // TZD BLOCKADE
+      if (tzdActive) {
+          showToast("STOPPEN NICHT MÖGLICH. Objekt ist durch Protokoll gebunden.", "error");
+          return;
+      }
 
-  const handleStartAudit = async () => { const auditItems = await initializeAudit(currentUser.uid, items); setPendingAuditItems(auditItems); setCurrentAuditIndex(0); setAuditOpen(true); };
+      if (session.type === 'punishment') { 
+          const elapsed = Math.floor((Date.now() - session.startTime.getTime()) / 60000); 
+          if (elapsed < (punishmentStatus.durationMinutes || 30)) return; 
+          if (punishmentItem?.nfcTagId) { 
+              setSessionToStop(session); 
+              setPunishmentScanMode('stop'); 
+              setPunishmentScanOpen(true); 
+              return; 
+          } 
+      } 
+      setSessionToStop(session); 
+      setSelectedFeelings([]); 
+      setReflectionNote(''); 
+      setReflectionOpen(true); 
+  };
+  
+  const handleConfirmStopSession = async () => { 
+      if (!sessionToStop) return; 
+      setLoading(true); 
+      try { 
+          await stopSession(sessionToStop, { feelings: selectedFeelings, note: reflectionNote }); 
+          if(sessionToStop.type === 'punishment') { 
+              await clearPunishment(currentUser.uid); 
+              setPunishmentStatus(await getPunishmentStatus(currentUser.uid)); 
+          } 
+      } catch(e){ 
+          showToast("Fehler", "error"); 
+      } finally { 
+          setReflectionOpen(false); 
+          setSessionToStop(null); 
+          setLoading(false); 
+      } 
+  };
+
+  const handleStartAudit = async () => { 
+      const auditItems = await initializeAudit(currentUser.uid, items); 
+      setPendingAuditItems(auditItems); 
+      setCurrentAuditIndex(0); 
+      setAuditOpen(true); 
+  };
+  
   const handleConfirmAuditItem = async () => { 
       await confirmAuditItem(currentUser.uid, pendingAuditItems[currentAuditIndex].id, currentCondition, currentLocationCorrect);
       showToast(`${pendingAuditItems[currentAuditIndex].name} geprüft`, "success"); 
-      if(currentAuditIndex<pendingAuditItems.length-1) setCurrentAuditIndex(prev=>prev+1); else { setAuditOpen(false); setAuditDue(false); showToast("Audit abgeschlossen", "success"); } 
+      if(currentAuditIndex<pendingAuditItems.length-1) setCurrentAuditIndex(prev=>prev+1); 
+      else { 
+          setAuditOpen(false); 
+          setAuditDue(false); 
+          showToast("Audit abgeschlossen", "success"); 
+      } 
   };
 
+  // INITIAL LOAD
   useEffect(() => {
     if (!currentUser || hasInitialLoadHappened.current || itemsLoading) return;
     const initLoad = async () => {
         setLoading(true);
         try {
-            const prefs = await loadSettings(); 
+            await loadSettings(); 
             const statusData = await getPunishmentStatus(currentUser.uid);
             const [, wishlistData] = await Promise.all([ Promise.resolve(), loadWishlist() ]);
             
@@ -360,6 +518,7 @@ export default function Dashboard() {
   }, [currentUser, items, itemsLoading]);
 
   const isGlobalLoading = loading || itemsLoading || sessionsLoading;
+  
   if (isGlobalLoading && !activeSessions.length) return <Box sx={{display:'flex', justifyContent:'center', mt:10}}><CircularProgress /></Box>;
   
   const isNight = currentPeriod && currentPeriod.includes('night');
@@ -367,18 +526,23 @@ export default function Dashboard() {
   return (
     <Box sx={DESIGN_TOKENS.bottomNavSpacer}>
       <Container maxWidth="md">
+        
+        {/* TZD OVERLAY - Always on Top */}
+        <TzdOverlay active={tzdActive} onRefresh={loadActiveSessions} />
+
         {/* FRAMER MOTION CONTAINER */}
         <motion.div
             variants={containerVariants}
             initial="hidden"
             animate="visible"
         >
+            {/* 1. Header */}
             <motion.div variants={itemVariants}>
                 <Typography variant="h4" gutterBottom sx={DESIGN_TOKENS.textGradient}>Dashboard</Typography>
             </motion.div>
             
+            {/* 2. Progress Ring */}
             <motion.div variants={itemVariants}>
-                {/* WICHTIG: Das ganze progress Objekt übergeben! */}
                 <ProgressBar 
                     currentMinutes={progress.currentContinuousMinutes} 
                     targetHours={dailyTargetHours} 
@@ -387,12 +551,14 @@ export default function Dashboard() {
                 />
             </motion.div>
             
+            {/* 3. Fem Index */}
             <motion.div variants={itemVariants}>
                 <Box onClick={() => setIndexDialogOpen(true)} sx={{ cursor: 'pointer', transition: 'transform 0.2s', '&:hover': { transform: 'scale(1.02)' } }}>
-                <FemIndexBar femIndex={kpis.femIndex.score} loading={false} />
+                    <FemIndexBar femIndex={kpis?.femIndex?.score || 0} loading={itemsLoading} />
                 </Box>
             </motion.div>
 
+            {/* 4. Action Buttons */}
             <motion.div variants={itemVariants}>
                 <ActionButtons 
                     punishmentStatus={punishmentStatus} auditDue={auditDue} isFreeDay={isFreeDay}
@@ -402,15 +568,18 @@ export default function Dashboard() {
                 />
             </motion.div>
             
+            {/* 5. Active Sessions List */}
             <motion.div variants={itemVariants}>
                 <ActiveSessionsList 
                     activeSessions={activeSessions} items={items} punishmentStatus={punishmentStatus}
-                    washingItemsCount={kpis.basics.washing} 
+                    washingItemsCount={kpis?.basics?.washing || 0} 
                     onNavigateItem={(id) => navigate(`/item/${id}`)}
                     onOpenRelease={handleOpenRelease} onStopSession={handleRequestStopSession} onOpenLaundry={() => setLaundryOpen(true)}
+                    isLocked={tzdActive} // Visual lock for list
                 />
             </motion.div>
             
+            {/* 6. Info Tiles */}
             <motion.div variants={itemVariants}>
                 <InfoTiles 
                     kpis={kpis}
@@ -421,6 +590,7 @@ export default function Dashboard() {
                 />
             </motion.div>
 
+            {/* 7. Budget Quick View */}
             <motion.div variants={itemVariants}>
                 <Paper 
                     sx={{ 
@@ -441,7 +611,7 @@ export default function Dashboard() {
                         </Box>
                     </Box>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        {kpis.health.wornOutCount > 0 && (
+                        {kpis?.health?.wornOutCount > 0 && (
                             <Chip label={`${kpis.health.wornOutCount} Ersetzen`} size="small" color="warning" variant="outlined" icon={<WarningAmberIcon />} sx={{ height: 24, '.MuiChip-label': { px: 1 } }} />
                         )}
                         <ArrowForwardIosIcon sx={{ fontSize: 14, color: 'text.disabled' }} />
@@ -450,16 +620,20 @@ export default function Dashboard() {
             </motion.div>
         </motion.div>
 
+        {/* --- DIALOGS & OVERLAYS --- */}
+
         <ReleaseProtocolDialog 
             open={releaseDialogOpen} onClose={() => setReleaseDialogOpen(false)}
             step={releaseStep} timer={releaseTimer} intensity={releaseIntensity} setIntensity={setReleaseIntensity}
             onStartTimer={handleStartReleaseTimer} onSkipTimer={handleSkipTimer} onDecision={handleReleaseDecision}
         />
+        
         <LaundryDialog 
             open={laundryOpen} onClose={() => setLaundryOpen(false)} washingItems={items.filter(i => i.status === 'washing')} 
-            onWashItem={async (id) => { try { await updateDoc(doc(db, `users/${currentUser.uid}/items`, id), { status: 'active', cleanDate: serverTimestamp(), historyLog: arrayUnion({ type: 'wash', date: new Date().toISOString() }) }); if(kpis.basics.washing <= 1) setLaundryOpen(false); } catch(e){}} }
+            onWashItem={async (id) => { try { await updateDoc(doc(db, `users/${currentUser.uid}/items`, id), { status: 'active', cleanDate: serverTimestamp(), historyLog: arrayUnion({ type: 'wash', date: new Date().toISOString() }) }); if(kpis?.basics?.washing <= 1) setLaundryOpen(false); } catch(e){}} }
             onWashAll={async () => { try { const timestamp = new Date().toISOString(); const promises = items.filter(i=>i.status==='washing').map(i => updateDoc(doc(db, `users/${currentUser.uid}/items`, i.id), { status: 'active', cleanDate: serverTimestamp(), historyLog: arrayUnion({ type: 'wash', date: timestamp }) })); await Promise.all(promises); setLaundryOpen(false); } catch (e) {} }}
         />
+        
         <InstructionDialog 
             open={instructionOpen} onClose={() => setInstructionOpen(false)} instruction={currentInstruction} items={items}
             isHoldingOath={isHoldingOath} oathProgress={oathProgress} onStartOath={startOathPress} onCancelOath={cancelOathPress}
@@ -469,18 +643,30 @@ export default function Dashboard() {
             isNight={isNight}
             showToast={showToast}
         />
-        <PunishmentDialog open={punishmentScanOpen} onClose={() => setPunishmentScanOpen(false)} mode={punishmentScanMode} punishmentItem={punishmentItem} isScanning={isNfcScanning} onScan={handlePunishmentScanTrigger} />
+        
+        <PunishmentDialog 
+            open={punishmentScanOpen} 
+            onClose={() => setPunishmentScanOpen(false)} 
+            mode={punishmentScanMode} 
+            punishmentItem={punishmentItem} 
+            isScanning={isNfcScanning} 
+            onScan={handlePunishmentScanTrigger} 
+        />
+        
         <Dialog open={auditOpen} onClose={() => setAuditOpen(false)} fullWidth>
           <DialogTitle>Audit: {pendingAuditItems[currentAuditIndex]?.name}</DialogTitle>
           <DialogContent><TextField type="number" label="Zustand (1-5)" value={currentCondition} onChange={e => setCurrentCondition(parseInt(e.target.value))} fullWidth sx={{mt:2}} /></DialogContent>
           <DialogActions><Button onClick={() => setAuditOpen(false)} color="inherit">Abbrechen</Button><Button onClick={handleConfirmAuditItem} variant="contained" color="warning">Bestätigen</Button></DialogActions>
         </Dialog>
+        
         <Dialog open={reflectionOpen} onClose={() => setReflectionOpen(false)} fullWidth maxWidth="sm">
           <DialogTitle>Reflektion</DialogTitle>
           <DialogContent><FormGroup>{REFLECTION_TAGS.map(t => (<FormControlLabel key={t} control={<Checkbox onChange={() => setSelectedFeelings(prev => prev.includes(t) ? prev.filter(f => f !== t) : [...prev, t])}/>} label={t}/>))}</FormGroup></DialogContent>
           <DialogActions><Button onClick={() => setReflectionOpen(false)} color="inherit">Abbrechen</Button><Button onClick={handleConfirmStopSession}>Bestätigen</Button></DialogActions>
         </Dialog>
-        <IndexDetailDialog open={indexDialogOpen} onClose={() => setIndexDialogOpen(false)} details={kpis.femIndex.details} />
+        
+        <IndexDetailDialog open={indexDialogOpen} onClose={() => setIndexDialogOpen(false)} details={kpis?.femIndex?.details} />
+        
         <Snackbar open={toast.open} autoHideDuration={3000} onClose={handleCloseToast}><Alert severity={toast.severity}>{toast.message}</Alert></Snackbar>
       </Container>
     </Box>

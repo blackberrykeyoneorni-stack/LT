@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useItems } from '../contexts/ItemContext';
 import { useNFCGlobal } from '../contexts/NFCContext';
 import { safeDate } from '../utils/dateUtils'; 
+
+// COMPONENTS
+import ItemInfoGrid from '../components/item-detail/ItemInfoGrid'; // Wiederverwendung deiner Info-Komponente
 
 // FRAMER MOTION
 import { motion } from 'framer-motion';
@@ -14,7 +17,8 @@ import { motion } from 'framer-motion';
 import { 
   Grid, Card, CardMedia, CardContent, Typography, 
   Fab, Box, Rating, Chip, Stack, Drawer, TextField, 
-  MenuItem, Button, IconButton, CardActionArea, CircularProgress, Tooltip 
+  MenuItem, Button, IconButton, CardActionArea, CircularProgress, Tooltip,
+  Container, Divider
 } from '@mui/material';
 
 // Icons
@@ -28,6 +32,8 @@ import Inventory2Icon from '@mui/icons-material/Inventory2';
 import CheckroomIcon from '@mui/icons-material/Checkroom'; 
 import FingerprintIcon from '@mui/icons-material/Fingerprint';
 import LocalLaundryServiceIcon from '@mui/icons-material/LocalLaundryService'; 
+import SaveIcon from '@mui/icons-material/Save';
+import ImageSearchIcon from '@mui/icons-material/ImageSearch';
 
 // --- ZENTRALES DESIGN ---
 import { DESIGN_TOKENS, PALETTE, getCategoryColor } from '../theme/obsidianDesign';
@@ -38,7 +44,8 @@ const containerVariants = {
   visible: {
     opacity: 1,
     transition: {
-      staggerChildren: 0.1 // Staggering für die Kinder (Items)
+      staggerChildren: 0.08,
+      when: "beforeChildren"
     }
   }
 };
@@ -48,8 +55,16 @@ const itemVariants = {
   visible: {
     y: 0,
     opacity: 1,
-    transition: { type: 'spring', stiffness: 100 }
+    transition: { type: 'spring', stiffness: 300, damping: 24 }
   }
+};
+
+// DEFAULT STATE FÜR NEUES ITEM
+const defaultNewItem = {
+    name: '', brand: '', model: '', mainCategory: 'Nylons', subCategory: '',
+    material: '', color: '', cost: '', condition: 5, suitablePeriod: 'Beide',
+    purchaseDate: new Date().toISOString().split('T')[0],
+    notes: '', vibeTags: [], location: '', imageUrl: '', customId: ''
 };
 
 export default function Inventory() {
@@ -63,10 +78,19 @@ export default function Inventory() {
   const { startGlobalScan, isScanning: nfcScanning } = useNFCGlobal();
 
   // Settings & Filter States
-  const [settings, setSettings] = useState({ brands: [], materials: [] });
-  const [restingHours, setRestingHours] = useState(24); // Standardwert
-  const [filterOpen, setFilterOpen] = useState(false);
+  const [dropdowns, setDropdowns] = useState({ 
+      brands: [], materials: [], locations: [], 
+      categoryStructure: {}, vibeTagsList: [] 
+  });
+  const [restingHours, setRestingHours] = useState(24);
   
+  // UI States
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [addItemOpen, setAddItemOpen] = useState(false); // NEU: Bottom Sheet State
+  const [newItem, setNewItem] = useState(defaultNewItem); // NEU: Form Data
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Filter Values
   const [filterStatus, setFilterStatus] = useState('active');
   const [filterCategory, setFilterCategory] = useState('All');
   const [filterBrand, setFilterBrand] = useState('All');
@@ -75,20 +99,26 @@ export default function Inventory() {
   const [sortBy, setSortBy] = useState('dateDesc');
   const [scannedLocation, setScannedLocation] = useState(null);
 
-  // LOAD SETTINGS
+  // LOAD SETTINGS (Erweitert um Locations & Categories & Vibes)
   useEffect(() => {
     if (!currentUser) return;
     const loadSettings = async () => {
       try {
-        const [bSnap, mSnap, pSnap] = await Promise.all([
+        const [bSnap, mSnap, pSnap, lSnap, cSnap, vSnap] = await Promise.all([
             getDoc(doc(db, `users/${currentUser.uid}/settings/brands`)),
             getDoc(doc(db, `users/${currentUser.uid}/settings/materials`)),
-            getDoc(doc(db, `users/${currentUser.uid}/settings/preferences`))
+            getDoc(doc(db, `users/${currentUser.uid}/settings/preferences`)),
+            getDoc(doc(db, `users/${currentUser.uid}/settings/locations`)),
+            getDoc(doc(db, `users/${currentUser.uid}/settings/categories`)),
+            getDoc(doc(db, `users/${currentUser.uid}/settings/vibes`)) // Optional, falls existiert
         ]);
 
-        setSettings({
-          brands: bSnap.exists() ? bSnap.data().list : [],
-          materials: mSnap.exists() ? mSnap.data().list : []
+        setDropdowns({
+            brands: bSnap.exists() ? bSnap.data().list : [],
+            materials: mSnap.exists() ? mSnap.data().list : [],
+            locations: lSnap.exists() ? lSnap.data().list : [],
+            categoryStructure: cSnap.exists() ? cSnap.data().structure : {},
+            vibeTagsList: vSnap.exists() ? vSnap.data().list : ['Business', 'Casual', 'Shiny', 'Matte', 'Reinforced'] // Fallback
         });
 
         if (pSnap.exists()) {
@@ -101,7 +131,7 @@ export default function Inventory() {
     loadSettings();
   }, [currentUser]);
 
-  // ROUTER STATE LISTENER (NFC Navigation)
+  // ROUTER STATE LISTENER
   useEffect(() => {
       if (locationRouter.state?.filterLocation) {
           setScannedLocation(locationRouter.state.filterLocation);
@@ -109,47 +139,62 @@ export default function Inventory() {
       }
   }, [locationRouter]);
 
-  // --- HELPER: Recovery Status berechnen ---
+  // --- SAVE NEW ITEM HANDLER ---
+  const handleSaveItem = async () => {
+      if (!newItem.brand || !newItem.mainCategory) {
+          alert("Bitte mindestens Marke und Kategorie angeben.");
+          return;
+      }
+      setIsSaving(true);
+      try {
+        await addDoc(collection(db, `users/${currentUser.uid}/items`), {
+            ...newItem,
+            cost: parseFloat(newItem.cost) || 0,
+            createdAt: serverTimestamp(),
+            status: 'active',
+            wearCount: 0,
+            totalMinutes: 0,
+            lastWorn: null
+        });
+        setAddItemOpen(false);
+        setNewItem(defaultNewItem);
+        // Optional: Toast message hier
+      } catch (e) {
+          console.error(e);
+          alert("Fehler beim Speichern: " + e.message);
+      } finally {
+          setIsSaving(false);
+      }
+  };
+
+  // --- FILTER LOGIC ---
   const getRecoveryInfo = (item) => {
       if (!item || item.mainCategory !== 'Nylons') return null;
-      
       const lastWornDate = safeDate(item.lastWorn); 
       if (!lastWornDate) return null;
-
       const hoursSince = (new Date() - lastWornDate) / (1000 * 60 * 60);
-      
       if (hoursSince < restingHours) {
-          return {
-              isResting: true,
-              remaining: Math.ceil(restingHours - hoursSince)
-          };
+          return { isResting: true, remaining: Math.ceil(restingHours - hoursSince) };
       }
       return null;
   };
 
-  // FILTER LOGIC
   useEffect(() => {
     let res = [...items];
-
-    // 1. Location Filter (NFC Priorität)
     if (scannedLocation) {
         res = res.filter(i => i.storageLocation && i.storageLocation.trim() === scannedLocation.trim());
     } else {
-        // 2. Status Filter
         if (filterStatus === 'active') {
             res = res.filter(i => (i.status === 'active' || !i.status));
         } else if (filterStatus !== 'All') {
             res = res.filter(i => i.status === filterStatus);
         }
     }
-
-    // 3. Attribute Filter
     if (filterCategory !== 'All') res = res.filter(i => i.mainCategory === filterCategory || i.category === filterCategory);
     if (filterBrand !== 'All') res = res.filter(i => i.brand === filterBrand);
     if (filterMaterial !== 'All') res = res.filter(i => i.material === filterMaterial); 
     if (filterMinRating > 0) res = res.filter(i => i.condition >= filterMinRating);
     
-    // 4. Sortierung
     res.sort((a, b) => {
       switch (sortBy) {
         case 'dateDesc': return (safeDate(b.purchaseDate) || 0) - (safeDate(a.purchaseDate) || 0);
@@ -157,7 +202,6 @@ export default function Inventory() {
         case 'priceDesc': return (b.cost || 0) - (a.cost || 0);
         case 'priceAsc': return (a.cost || 0) - (b.cost || 0);
         case 'conditionDesc': return (b.condition || 0) - (a.condition || 0);
-        case 'conditionAsc': return (a.condition || 0) - (b.condition || 0);
         case 'nameAsc': return (a.brand + a.model).localeCompare(b.brand + b.model);
         default: return 0;
       }
@@ -171,21 +215,17 @@ export default function Inventory() {
     if (item.images && item.images.length > 0) return item.images[0];
     return null; 
   };
-
   const categories = ['All', ...new Set(items.map(i => i.mainCategory || i.category).filter(Boolean))];
   
   if (loading) return <Box sx={{display:'flex', justifyContent:'center', mt:10}}><CircularProgress/></Box>;
 
+  const listKey = `${filterCategory}-${filterBrand}-${filterMaterial}-${filterStatus}-${sortBy}-${scannedLocation}-${filteredItems.length}`;
+
   return (
     <Box sx={DESIGN_TOKENS.bottomNavSpacer}>
-      <motion.div
-        variants={containerVariants}
-        initial="hidden"
-        animate="visible"
-      >
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
           {/* HEADER */}
-          <motion.div variants={itemVariants}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                 <Typography variant="h4" sx={DESIGN_TOKENS.textGradient}>Inventar ({filteredItems.length})</Typography>
                 <Box>
                     <IconButton color="primary" onClick={startGlobalScan} disabled={nfcScanning}>
@@ -193,33 +233,25 @@ export default function Inventory() {
                     </IconButton>
                     <IconButton onClick={() => setFilterOpen(true)}><FilterListIcon /></IconButton>
                 </Box>
-            </Box>
-          </motion.div>
+          </Box>
 
-          {/* ACTIVE FILTERS CHIPS */}
-          <motion.div variants={itemVariants}>
-            <Box sx={{ mb: 2, display: 'flex', gap: 1, overflowX: 'auto', pb: 1 }}>
+          {/* ACTIVE FILTERS */}
+          <Box sx={{ mb: 2, display: 'flex', gap: 1, overflowX: 'auto', pb: 1 }}>
                 {scannedLocation && <Chip icon={<Inventory2Icon />} label={`Ort: ${scannedLocation}`} onDelete={() => { setScannedLocation(null); }} color="success"/>}
                 {filterCategory !== 'All' && <Chip label={filterCategory} onDelete={() => setFilterCategory('All')} />}
                 {filterBrand !== 'All' && <Chip label={filterBrand} onDelete={() => setFilterBrand('All')} />}
                 {sortBy !== 'dateDesc' && <Chip icon={<SortIcon />} label="Sortiert" onDelete={() => setSortBy('dateDesc')} />}
-            </Box>
-          </motion.div>
+          </Box>
 
-          {/* GRID - JETZT MIT MOTION COMPONENT UND VARIANTS FÜR KORREKTES STAGGERING */}
-          <Grid 
-            container 
-            spacing={2} 
-            component={motion.div} 
-            variants={containerVariants} // Nutzt staggerChildren für die Items
-          >
+          {/* GRID */}
+          <Grid container spacing={2} component={motion.div} key={listKey} variants={containerVariants} initial="hidden" animate="visible">
             {filteredItems.map((item) => {
             const recoveryInfo = getRecoveryInfo(item);
             const isResting = recoveryInfo?.isResting;
             const imgUrl = getImage(item);
             const catColors = getCategoryColor(item.mainCategory);
-            const isArchived = item.status === 'archived';
             const isWashing = item.status === 'washing';
+            const isArchived = item.status === 'archived';
 
             let borderColor = catColors.border;
             let background = catColors.bg;
@@ -241,51 +273,28 @@ export default function Inventory() {
                 <Grid item xs={6} sm={4} md={3} key={item.id} component={motion.div} variants={itemVariants} layout>
                     <Card sx={{ 
                         height: '100%', display: 'flex', flexDirection: 'column',
-                        ...DESIGN_TOKENS.glassCard, 
-                        borderColor: borderColor,
-                        background: background,
+                        ...DESIGN_TOKENS.glassCard, borderColor: borderColor, background: background,
                         transition: 'transform 0.2s', '&:hover': { transform: 'translateY(-2px)' }
                     }}>
                         <CardActionArea sx={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'stretch' }} onClick={() => navigate('/item/' + item.id)}>
                         <Box sx={{ position: 'relative', pt: '100%', bgcolor: 'rgba(0,0,0,0.2)', overflow: 'hidden' }}>
                             {imgUrl ? (
-                                <CardMedia component="img" image={imgUrl} alt={getDisplayName(item)} 
-                                    sx={{ 
-                                        position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', objectFit: 'cover',
-                                        filter: imgFilter 
-                                    }} 
-                                />
+                                <CardMedia component="img" image={imgUrl} alt={getDisplayName(item)} sx={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', objectFit: 'cover', filter: imgFilter }} />
                             ) : (<CheckroomIcon sx={{ position: 'absolute', top: '35%', left: '35%', fontSize: 40, opacity: 0.3 }} />)}
                             
-                            {item.customId && (
-                                <Chip icon={<FingerprintIcon style={{ fontSize: 16, color: 'white' }} />} label={item.customId} size="small" sx={{ position: 'absolute', top: 8, left: 8, bgcolor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', color: 'white', fontWeight: 'bold' }} />
-                            )}
-                            
-                            {(isWashing) && (
-                                <LocalLaundryServiceIcon sx={{ position: 'absolute', bottom: 8, right: 8, color: PALETTE.accents.blue, filter: 'drop-shadow(0 0 4px black)' }} />
-                            )}
-                            
+                            {item.customId && <Chip icon={<FingerprintIcon style={{ fontSize: 16, color: 'white' }} />} label={item.customId} size="small" sx={{ position: 'absolute', top: 8, left: 8, bgcolor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', color: 'white', fontWeight: 'bold' }} />}
+                            {isWashing && <LocalLaundryServiceIcon sx={{ position: 'absolute', bottom: 8, right: 8, color: PALETTE.accents.blue, filter: 'drop-shadow(0 0 4px black)' }} />}
                             {isResting && item.status === 'active' && (
                                 <Tooltip title={`Erholung: noch ${recoveryInfo.remaining}h`}>
-                                    <Chip 
-                                        icon={<SnoozeIcon style={{ fontSize: 16, color: '#fff' }} />} 
-                                        label={`${recoveryInfo.remaining}h`} 
-                                        size="small" 
-                                        sx={{ 
-                                            position: 'absolute', top: 8, right: 8, 
-                                            bgcolor: 'rgba(0,0,0,0.7)', color: '#fff', border: `1px solid ${PALETTE.secondary.main}`,
-                                            backdropFilter: 'blur(4px)'
-                                        }} 
-                                    />
+                                    <Chip icon={<SnoozeIcon style={{ fontSize: 16, color: '#fff' }} />} label={`${recoveryInfo.remaining}h`} size="small" sx={{ position: 'absolute', top: 8, right: 8, bgcolor: 'rgba(0,0,0,0.7)', color: '#fff', border: `1px solid ${PALETTE.secondary.main}`, backdropFilter: 'blur(4px)' }} />
                                 </Tooltip>
                             )}
                         </Box>
-
                         <CardContent sx={{ flexGrow: 1, p: 1.5 }}>
                             <Typography variant="subtitle2" noWrap sx={{ fontWeight: 'bold' }}>{getDisplayName(item)}</Typography>
                             <Typography variant="caption" color="text.secondary" noWrap display="block">{item.mainCategory}</Typography>
                             <Stack direction="row" spacing={1} sx={{ mt: 1, alignItems: 'center', justifyContent: 'space-between' }}>
-                            <Chip label={item.brand} size="small" variant="outlined" sx={{ fontSize: '0.65rem', height: 20 }} />
+                                <Chip label={item.brand} size="small" variant="outlined" sx={{ fontSize: '0.65rem', height: 20 }} />
                                 <Rating value={item.condition} readOnly size="small" max={5} sx={{ fontSize: '0.8rem' }} />
                             </Stack>
                         </CardContent>
@@ -297,37 +306,97 @@ export default function Inventory() {
           </Grid>
       </motion.div>
       
-      {/* FILTER DRAWER */}
-      <Drawer anchor="right" open={filterOpen} onClose={() => setFilterOpen(false)} PaperProps={{ sx: { bgcolor: '#121212', borderLeft: '1px solid #333' } }}>
-        <Box sx={{ width: 280, p: 3, pt: 8, height: '100%', overflowY: 'auto' }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}><Typography variant="h6">Filtern & Sortieren</Typography><IconButton onClick={() => setFilterOpen(false)}><CloseIcon /></IconButton></Box>
-          
-          <Typography variant="subtitle2" color="primary" sx={{ mt: 2 }}>Sortierung</Typography>
-          <TextField select fullWidth size="small" margin="dense" value={sortBy} onChange={e => setSortBy(e.target.value)}>
-            <MenuItem value="dateDesc">Neueste zuerst</MenuItem>
-            <MenuItem value="dateAsc">Älteste zuerst</MenuItem>
-            <MenuItem value="priceDesc">Preis (Hoch {'>'} Niedrig)</MenuItem>
-            <MenuItem value="priceAsc">Preis (Niedrig {'>'} Hoch)</MenuItem>
-            <MenuItem value="conditionDesc">Zustand (Best)</MenuItem>
-            <MenuItem value="nameAsc">Name (A-Z)</MenuItem>
-          </TextField>
+      {/* --- ADD ITEM BOTTOM SHEET (DRAWER) --- */}
+      <Drawer 
+        anchor="bottom" 
+        open={addItemOpen} 
+        onClose={() => setAddItemOpen(false)}
+        PaperProps={{ 
+            sx: { 
+                ...DESIGN_TOKENS.glassCard, 
+                borderTop: `1px solid ${PALETTE.primary.main}`,
+                borderRadius: '24px 24px 0 0', // Runder "Sheet" Look
+                height: '85vh', // Fast Fullscreen für viel Platz
+                maxHeight: '85vh'
+            } 
+        }}
+      >
+        <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+            {/* SHEET HEADER */}
+            <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <AddIcon color="primary" />
+                    <Typography variant="h6">Neues Item erfassen</Typography>
+                </Box>
+                <IconButton onClick={() => setAddItemOpen(false)}><CloseIcon /></IconButton>
+            </Box>
 
-          <Typography variant="subtitle2" color="primary" sx={{ mt: 3 }}>Filter</Typography>
-          <TextField select fullWidth label="Status" margin="dense" size="small" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}><MenuItem value="active">Verfügbar</MenuItem><MenuItem value="All">Alle</MenuItem><MenuItem value="washing">In der Wäsche</MenuItem><MenuItem value="archived">Archiviert</MenuItem></TextField>
-          <TextField select fullWidth label="Kategorie" margin="dense" size="small" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}><MenuItem value="All">Alle</MenuItem>{categories.map(c => <MenuItem key={c} value={c}>{c}</MenuItem>)}</TextField>
-          <TextField select fullWidth label="Marke" margin="dense" size="small" value={filterBrand} onChange={e => setFilterBrand(e.target.value)}><MenuItem value="All">Alle Marken</MenuItem>{settings.brands.map(b => <MenuItem key={b} value={b}>{b}</MenuItem>)}</TextField>
-          <TextField select fullWidth label="Material" margin="dense" size="small" value={filterMaterial} onChange={e => setFilterMaterial(e.target.value)}><MenuItem value="All">Alle Materialien</MenuItem>{settings.materials.map(m => <MenuItem key={m} value={m}>{m}</MenuItem>)}</TextField>
-          
-          <Typography gutterBottom sx={{ mt: 2, fontSize: '0.9rem' }}>Mindest-Zustand</Typography>
-          <Rating value={filterMinRating} onChange={(e, v) => setFilterMinRating(v)} />
-          
-          <Button variant="outlined" fullWidth sx={{ mt: 4 }} onClick={() => { setFilterStatus('active');
-            setFilterCategory('All'); setFilterBrand('All'); setFilterMaterial('All'); setFilterMinRating(0); setSortBy('dateDesc'); setScannedLocation(null); }}>Zurücksetzen</Button>
+            {/* SCROLLABLE CONTENT */}
+            <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 2 }}>
+                <Container maxWidth="sm" disableGutters>
+                    {/* Extra Image URL Field since it's missing in Grid */}
+                    <Box sx={{ mb: 3, display: 'flex', alignItems: 'flex-end', gap: 1 }}>
+                        <ImageSearchIcon sx={{ color: 'text.secondary', mb: 0.5 }} />
+                        <TextField 
+                            label="Bild URL (Optional)" 
+                            variant="standard" 
+                            fullWidth 
+                            value={newItem.imageUrl} 
+                            onChange={e => setNewItem({...newItem, imageUrl: e.target.value})}
+                        />
+                    </Box>
+                    <Divider sx={{ mb: 3, borderColor: 'rgba(255,255,255,0.1)' }} />
+                    
+                    {/* REUSED ITEM GRID */}
+                    <ItemInfoGrid 
+                        isEditing={true}
+                        formData={newItem}
+                        setFormData={setNewItem}
+                        dropdowns={dropdowns}
+                        item={{}} // Leeres item object, da neu
+                    />
+                </Container>
+            </Box>
+
+            {/* SHEET FOOTER ACTIONS */}
+            <Box sx={{ p: 2, borderTop: '1px solid rgba(255,255,255,0.1)', bgcolor: 'rgba(0,0,0,0.4)' }}>
+                <Button 
+                    variant="contained" 
+                    fullWidth 
+                    size="large"
+                    startIcon={isSaving ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
+                    onClick={handleSaveItem}
+                    disabled={isSaving}
+                    sx={{ ...DESIGN_TOKENS.buttonGradient, height: 56 }}
+                >
+                    {isSaving ? "Speichere..." : "Item Hinzufügen"}
+                </Button>
+            </Box>
         </Box>
       </Drawer>
 
-      {/* FAB - ADD BUTTON */}
-      <Fab color="primary" sx={{ position: 'fixed', bottom: 80, right: 20 }} onClick={() => navigate('/add')}><AddIcon /></Fab>
+      {/* --- FILTER DRAWER --- */}
+      <Drawer anchor="right" open={filterOpen} onClose={() => setFilterOpen(false)} PaperProps={{ sx: { bgcolor: '#121212', borderLeft: '1px solid #333' } }}>
+        <Box sx={{ width: 280, p: 3, pt: 8, height: '100%', overflowY: 'auto' }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}><Typography variant="h6">Filtern & Sortieren</Typography><IconButton onClick={() => setFilterOpen(false)}><CloseIcon /></IconButton></Box>
+          <TextField select fullWidth size="small" margin="dense" value={sortBy} onChange={e => setSortBy(e.target.value)}>
+            <MenuItem value="dateDesc">Neueste zuerst</MenuItem>
+            <MenuItem value="priceDesc">Preis (Hoch {'>'} Niedrig)</MenuItem>
+            <MenuItem value="conditionDesc">Zustand (Best)</MenuItem>
+          </TextField>
+          <Typography variant="subtitle2" color="primary" sx={{ mt: 3 }}>Filter</Typography>
+          <TextField select fullWidth label="Status" margin="dense" size="small" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}><MenuItem value="active">Verfügbar</MenuItem><MenuItem value="All">Alle</MenuItem><MenuItem value="washing">In der Wäsche</MenuItem><MenuItem value="archived">Archiviert</MenuItem></TextField>
+          <TextField select fullWidth label="Kategorie" margin="dense" size="small" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}><MenuItem value="All">Alle</MenuItem>{categories.map(c => <MenuItem key={c} value={c}>{c}</MenuItem>)}</TextField>
+          <TextField select fullWidth label="Marke" margin="dense" size="small" value={filterBrand} onChange={e => setFilterBrand(e.target.value)}><MenuItem value="All">Alle Marken</MenuItem>{dropdowns.brands.map(b => <MenuItem key={b} value={b}>{b}</MenuItem>)}</TextField>
+          <TextField select fullWidth label="Material" margin="dense" size="small" value={filterMaterial} onChange={e => setFilterMaterial(e.target.value)}><MenuItem value="All">Alle Materialien</MenuItem>{dropdowns.materials.map(m => <MenuItem key={m} value={m}>{m}</MenuItem>)}</TextField>
+          <Button variant="outlined" fullWidth sx={{ mt: 4 }} onClick={() => { setFilterStatus('active'); setFilterCategory('All'); setFilterBrand('All'); setFilterMaterial('All'); setFilterMinRating(0); setSortBy('dateDesc'); setScannedLocation(null); }}>Zurücksetzen</Button>
+        </Box>
+      </Drawer>
+
+      {/* FAB - JETZT ÖFFNET ER DEN DRAWER STATT ROUTING */}
+      <Fab color="primary" sx={{ position: 'fixed', bottom: 80, right: 20 }} onClick={() => setAddItemOpen(true)}>
+        <AddIcon />
+      </Fab>
     </Box>
   );
 }

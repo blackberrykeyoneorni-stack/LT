@@ -13,10 +13,9 @@ import Inventory2Icon from '@mui/icons-material/Inventory2';
 import LocationOnIcon from '@mui/icons-material/LocationOn';
 import NotesIcon from '@mui/icons-material/Notes';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
-import { MAIN_CATEGORIES } from '../../utils/constants';
 
-// --- NEUE UNIFIED FIELD KOMPONENTE ---
-// Sorgt dafür, dass Edit & View fast gleich aussehen
+// --- UNIFIED FIELD KOMPONENTE ---
+// Handhabt intelligent den Wechsel zwischen Anzeige (Text) und Bearbeitung (Input)
 const UnifiedField = ({ 
     label, value, icon, isEditing, 
     onChange, type = "text", options = [], 
@@ -40,7 +39,7 @@ const UnifiedField = ({
             {isEditing ? (
                 type === 'select' ? (
                     <Select
-                        value={value}
+                        value={value || ''}
                         onChange={onChange}
                         variant="standard"
                         disableUnderline
@@ -64,12 +63,13 @@ const UnifiedField = ({
                     />
                 ) : (
                     <InputBase
-                        value={value}
+                        value={value || ''}
                         onChange={onChange}
                         type={type}
                         multiline={multiline}
                         rows={rows}
                         fullWidth
+                        placeholder="-"
                         sx={{ 
                             color: '#fff', 
                             fontSize: '1rem', 
@@ -93,166 +93,177 @@ const UnifiedField = ({
 
 export default function ItemInfoGrid({ isEditing, formData, item, setFormData, dropdowns }) {
     
-    // Sub-Kategorien basierend auf der gewählten Hauptkategorie laden
-    // Wenn 'dropdowns.categoryStructure' nicht existiert, Fallback auf leeres Array
-    const availableSubCats = (dropdowns.categoryStructure && formData.mainCategory) 
-        ? (dropdowns.categoryStructure[formData.mainCategory] || [])
-        : (dropdowns.categories || []); // Fallback für alte Logik
+    // Fallback, falls dropdowns noch nicht geladen sind oder Struktur fehlt
+    const safeDropdowns = dropdowns || { brands: [], materials: [], locations: [], categories: [], vibeTagsList: [] };
+    
+    // Dynamische Sub-Kategorien Logik
+    const availableSubCats = (safeDropdowns.categoryStructure && formData?.mainCategory) 
+        ? (safeDropdowns.categoryStructure[formData.mainCategory] || [])
+        : (safeDropdowns.categories || []);
+
+    // Helper für Form-Updates
+    const handleChange = (field, val) => {
+        if (setFormData) {
+            setFormData(prev => ({ ...prev, [field]: val }));
+        }
+    };
+
+    const displayItem = isEditing ? formData : item;
 
     return (
         <>
-            {/* Header / Titel (Inline um Keyboard-Bug zu fixen) */}
+            {/* Header / Titel Area */}
             <Box sx={{ mb: 4, textAlign: 'center' }}>
                 {isEditing ? (
                     <TextField 
-                        label="Bezeichnung" 
+                        label="Bezeichnung / Name" 
                         variant="outlined" 
                         fullWidth 
-                        value={formData.name} 
-                        onChange={e => setFormData({...formData, name: e.target.value})} 
-                        sx={{ '& .MuiInputBase-input': { fontSize: '1.5rem', textAlign: 'center' } }}
+                        value={formData.name || ''} 
+                        onChange={e => handleChange('name', e.target.value)} 
+                        sx={{ '& .MuiInputBase-input': { fontSize: '1.2rem', textAlign: 'center' } }}
                     />
                 ) : (
                     <>
                         <Typography variant="overline" color="primary" sx={{ letterSpacing: 2, fontWeight: 'bold' }}>
-                            {item.brand ? item.brand.toUpperCase() : 'NO BRAND'}
+                            {displayItem.brand ? displayItem.brand.toUpperCase() : 'NO BRAND'}
                         </Typography>
                         <Typography variant="h4" sx={{ fontWeight: 700, mb: 0.5, textShadow: '0 2px 10px rgba(0,0,0,0.5)' }}>
-                            {item.name}
+                            {displayItem.name}
                         </Typography>
                         <Typography variant="body1" color="text.secondary">
-                            {item.model}
+                            {displayItem.model}
                         </Typography>
                     </>
                 )}
             </Box>
 
             <Grid container spacing={2}>
-                {/* ROW 1 */}
+                {/* ROW 1: ID & DATE */}
                 <Grid item xs={6}>
                     <UnifiedField 
-                        label="ID" 
-                        value={isEditing ? formData.customId : item.customId} 
+                        label="Custom ID" 
+                        value={displayItem.customId} 
                         icon={<LabelIcon fontSize="inherit"/>}
                         isEditing={isEditing}
-                        onChange={e => setFormData({...formData, customId: e.target.value})}
+                        onChange={e => handleChange('customId', e.target.value)}
                     />
                 </Grid>
                 <Grid item xs={6}>
                     <UnifiedField 
                         label="Erworben" 
-                        value={isEditing ? formData.purchaseDate : item.purchaseDate} 
+                        value={displayItem.purchaseDate} 
                         type="date"
                         icon={<CalendarMonthIcon fontSize="inherit"/>}
                         isEditing={isEditing}
-                        onChange={e => setFormData({...formData, purchaseDate: e.target.value})}
+                        onChange={e => handleChange('purchaseDate', e.target.value)}
                     />
                 </Grid>
 
-                {/* ROW 2 */}
+                {/* ROW 2: BRAND & MODEL */}
                 <Grid item xs={6}>
                     <UnifiedField 
                         label="Marke" 
-                        value={isEditing ? formData.brand : item.brand} 
+                        value={displayItem.brand} 
                         type="select"
-                        options={dropdowns.brands}
+                        options={safeDropdowns.brands}
                         icon={<BrandingWatermarkIcon fontSize="inherit"/>}
                         isEditing={isEditing}
-                        onChange={e => setFormData({...formData, brand: e.target.value})}
+                        onChange={e => handleChange('brand', e.target.value)}
                     />
                 </Grid>
                 <Grid item xs={6}>
                     <UnifiedField 
                         label="Modell" 
-                        value={isEditing ? formData.model : item.model} 
+                        value={displayItem.model} 
                         icon={<StyleIcon fontSize="inherit"/>}
                         isEditing={isEditing}
-                        onChange={e => setFormData({...formData, model: e.target.value})}
+                        onChange={e => handleChange('model', e.target.value)}
                     />
                 </Grid>
 
-                {/* ROW 3 - ANGEPASSTE KATEGORIEN */}
+                {/* ROW 3: CATEGORIES */}
                 <Grid item xs={6}>
                     <UnifiedField 
                         label="Kategorie" 
-                        value={isEditing ? formData.mainCategory : item.mainCategory} 
+                        value={displayItem.mainCategory} 
                         type="select"
-                        options={["Nylons", "Dessous", "Accessoires"]} // STRIKT GEFILTERT
+                        options={["Nylons", "Dessous", "Accessoires", "Schuhe"]}
                         icon={<CategoryIcon fontSize="inherit"/>}
                         isEditing={isEditing}
                         onChange={e => {
-                            // Reset Subcategory wenn Main sich ändert
-                            setFormData({...formData, mainCategory: e.target.value, subCategory: ''});
+                            handleChange('mainCategory', e.target.value);
+                            handleChange('subCategory', ''); // Reset Subcat bei Wechsel
                         }}
                     />
                 </Grid>
                 <Grid item xs={6}>
                     <UnifiedField 
-                        label="Typ" 
-                        value={isEditing ? formData.subCategory : item.subCategory} 
+                        label="Typ / Sub" 
+                        value={displayItem.subCategory} 
                         type="select"
-                        options={availableSubCats} // Dynamische Liste hier nutzen
+                        options={availableSubCats}
                         icon={<CategoryIcon fontSize="inherit"/>}
                         isEditing={isEditing}
-                        onChange={e => setFormData({...formData, subCategory: e.target.value})}
+                        onChange={e => handleChange('subCategory', e.target.value)}
                     />
                 </Grid>
 
-                {/* ROW 4 */}
+                {/* ROW 4: PRICE & MATERIAL */}
                 <Grid item xs={6}>
                     <UnifiedField 
                         label="Preis" 
-                        value={isEditing ? formData.cost : (item.cost ? `${parseFloat(item.cost).toFixed(2)} €` : '-')} 
+                        value={displayItem.cost} 
                         type={isEditing ? "number" : "text"}
                         icon={<AttachMoneyIcon fontSize="inherit"/>}
                         isEditing={isEditing}
-                        onChange={e => setFormData({...formData, cost: e.target.value})}
+                        onChange={e => handleChange('cost', e.target.value)}
                     />
                 </Grid>
                 <Grid item xs={6}>
                     <UnifiedField 
                         label="Material" 
-                        value={isEditing ? formData.material : item.material} 
+                        value={displayItem.material} 
                         type="select"
-                        options={dropdowns.materials}
+                        options={safeDropdowns.materials}
                         icon={<Inventory2Icon fontSize="inherit"/>}
                         isEditing={isEditing}
-                        onChange={e => setFormData({...formData, material: e.target.value})}
+                        onChange={e => handleChange('material', e.target.value)}
                     />
                 </Grid>
 
-                {/* ROW 5 - ZUSTAND & TRAGEZEIT */}
+                {/* ROW 5: CONDITION & PERIOD */}
                 <Grid item xs={6}>
                     <UnifiedField 
                         label="Zustand" 
-                        value={isEditing ? formData.condition : item.condition} 
+                        value={displayItem.condition} 
                         type="rating"
                         isEditing={isEditing}
-                        onChange={e => setFormData({...formData, condition: e.target.value})}
+                        onChange={e => handleChange('condition', e.target.value)}
                     />
                 </Grid>
                 <Grid item xs={6}>
                      <UnifiedField 
                         label="Tragezeit" 
-                        value={isEditing ? formData.suitablePeriod : item.suitablePeriod} 
+                        value={displayItem.suitablePeriod} 
                         type="select"
                         options={["Tag", "Nacht", "Beide"]}
                         icon={<AccessTimeIcon fontSize="inherit"/>}
                         isEditing={isEditing}
-                        onChange={e => setFormData({...formData, suitablePeriod: e.target.value})}
+                        onChange={e => handleChange('suitablePeriod', e.target.value)}
                     />
                 </Grid>
 
-                {/* ROW 6 - LAGERORT */}
+                {/* ROW 6: LOCATION */}
                 <Grid item xs={12}>
                     <UnifiedField 
                         label="Lagerort" 
-                        value={isEditing ? formData.location : item.location} 
+                        value={displayItem.location || displayItem.storageLocation} 
                         type="select"
-                        options={dropdowns.locations}
+                        options={safeDropdowns.locations}
                         icon={<LocationOnIcon fontSize="inherit"/>}
                         isEditing={isEditing}
-                        onChange={e => setFormData({...formData, location: e.target.value})}
+                        onChange={e => handleChange('location', e.target.value)}
                     />
                 </Grid>
             </Grid>
@@ -268,7 +279,7 @@ export default function ItemInfoGrid({ isEditing, formData, item, setFormData, d
                             rows={3}
                             icon={<NotesIcon fontSize="inherit" />}
                             isEditing={true}
-                            onChange={e => setFormData({...formData, notes: e.target.value})}
+                            onChange={e => handleChange('notes', e.target.value)}
                         />
                         
                         <FormControl fullWidth sx={{ mt: 2 }}>
@@ -276,7 +287,10 @@ export default function ItemInfoGrid({ isEditing, formData, item, setFormData, d
                             <Select
                                 multiple
                                 value={Array.isArray(formData.vibeTags) ? formData.vibeTags : []}
-                                onChange={(e) => setFormData({...formData, vibeTags: typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value})}
+                                onChange={(e) => {
+                                    const val = typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value;
+                                    handleChange('vibeTags', val);
+                                }}
                                 input={<OutlinedInput label="Vibe Tags" />}
                                 renderValue={(selected) => (
                                     <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
@@ -284,24 +298,26 @@ export default function ItemInfoGrid({ isEditing, formData, item, setFormData, d
                                     </Box>
                                 )}
                             >
-                                {dropdowns.vibeTagsList.map((tag) => <MenuItem key={tag} value={tag}>{tag}</MenuItem>)}
+                                {safeDropdowns.vibeTagsList && safeDropdowns.vibeTagsList.map((tag) => (
+                                    <MenuItem key={tag} value={tag}>{tag}</MenuItem>
+                                ))}
                             </Select>
                         </FormControl>
                     </Box>
                 ) : (
                     <>
-                    {item.vibeTags && item.vibeTags.length > 0 && (
+                    {displayItem.vibeTags && displayItem.vibeTags.length > 0 && (
                         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2, justifyContent: 'center' }}>
-                            {item.vibeTags.map(tag => (
+                            {displayItem.vibeTags.map(tag => (
                                 <Chip key={tag} label={tag} size="small" sx={{ bgcolor: 'rgba(255,255,255,0.08)', border: 'none' }} />
                             ))}
                         </Box>
                     )}
-                    {item.notes && (
+                    {displayItem.notes && (
                         <Box sx={{ p: 2, bgcolor: 'rgba(255,255,255,0.03)', borderRadius: 2, display:'flex', gap:1 }}>
                             <NotesIcon color="action" fontSize="small" />
                             <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-                                "{item.notes}"
+                                "{displayItem.notes}"
                             </Typography>
                         </Box>
                     )}

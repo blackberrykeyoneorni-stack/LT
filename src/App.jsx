@@ -11,11 +11,10 @@ import { getObsidianTheme } from './theme/obsidianDesign';
 import Dashboard from './pages/Dashboard';
 import Login from './pages/Login';
 import Inventory from './pages/Inventory';
-import AddItem from './pages/AddItem';
 import ItemDetail from './pages/ItemDetail';
 import Settings from './pages/Settings';
 import Wishlist from './pages/Wishlist';
-import StatsPage from './pages/Stats'; 
+import StatsPage from './pages/Stats';
 import CalendarPage from './pages/Calendar';
 import Budget from './pages/Budget'; // NEU: Budget Modul
 
@@ -47,7 +46,7 @@ function AppContent() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/inventory" element={<Inventory />} />
-            <Route path="/add" element={<AddItem />} />
+            {/* Route /add wurde entfernt, da AddItem jetzt ein BottomSheet im Inventory ist */}
             <Route path="/item/:id" element={<ItemDetail />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/wishlist" element={<Wishlist />} />
