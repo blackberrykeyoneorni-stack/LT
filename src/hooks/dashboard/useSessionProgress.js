@@ -78,19 +78,54 @@ export default function useSessionProgress(currentUser, items) {
                 
                 const pastSnap = await getDocs(qPast);
                 
-                let totalMinutes = 0;
+                // FIX: Berechnung der effektiven Zeit mittels Intervall-Merging
+                // Verhindert doppelte Zählung bei gleichzeitigen Items
+                let timeIntervals = [];
+
                 pastSnap.forEach(d => {
                     const data = d.data();
                     
-                    // FIX: Nacht-Sessions ignorieren!
-                    // Wenn wir das Tagesziel berechnen, dürfen Schlaf-Stunden nicht zählen.
+                    // Nacht-Sessions ignorieren!
                     if (data.period && typeof data.period === 'string' && data.period.includes('night')) {
                         return; 
                     }
 
+                    const start = safeDate(data.startTime);
                     const dur = data.durationMinutes || 0;
-                    totalMinutes += dur;
+
+                    if (start && dur > 0) {
+                        timeIntervals.push({
+                            start: start.getTime(),
+                            end: start.getTime() + (dur * 60000)
+                        });
+                    }
                 });
+
+                // Intervalle sortieren
+                timeIntervals.sort((a, b) => a.start - b.start);
+
+                // Intervalle verschmelzen (Merging overlapping intervals)
+                let mergedIntervals = [];
+                if (timeIntervals.length > 0) {
+                    let current = timeIntervals[0];
+                    for (let i = 1; i < timeIntervals.length; i++) {
+                        const next = timeIntervals[i];
+                        if (next.start < current.end) {
+                            // Überlappung: Ende erweitern
+                            current.end = Math.max(current.end, next.end);
+                        } else {
+                            // Keine Überlappung: speichern und weiter
+                            mergedIntervals.push(current);
+                            current = next;
+                        }
+                    }
+                    mergedIntervals.push(current);
+                }
+
+                // Summe der bereinigten Intervalle berechnen
+                const totalMinutes = mergedIntervals.reduce((sum, interval) => {
+                    return sum + (interval.end - interval.start) / 60000;
+                }, 0);
 
                 const averageMinutes = totalMinutes / 5;
                 const averageHours = averageMinutes / 60;
@@ -99,7 +134,6 @@ export default function useSessionProgress(currentUser, items) {
                 const newTarget = Math.round(averageHours * 10) / 10;
 
                 // Nur erhöhen, wenn der Durchschnitt das aktuelle Ziel signifikant übersteigt
-                // Wir geben einen kleinen Puffer, damit es nicht bei jeder Minute springt
                 if (newTarget > currentTarget) {
                     await updateDoc(prefsRef, {
                         dailyTargetHours: newTarget,
