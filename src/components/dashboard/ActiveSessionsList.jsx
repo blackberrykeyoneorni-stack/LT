@@ -5,18 +5,12 @@ import WaterDropIcon from '@mui/icons-material/WaterDrop';
 import LockClockIcon from '@mui/icons-material/LockClock';
 import StopCircleIcon from '@mui/icons-material/StopCircle';
 import LocalLaundryServiceIcon from '@mui/icons-material/LocalLaundryService';
-import { PALETTE } from '../../theme/obsidianDesign';
-import { safeDate } from '../../utils/dateUtils'; // KORREKTUR: Zentraler Import
+import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
+import { safeDate } from '../../utils/dateUtils';
 
 export default function ActiveSessionsList({ 
-  activeSessions, 
-  items, 
-  punishmentStatus, 
-  washingItemsCount, 
-  onNavigateItem, 
-  onOpenRelease, 
-  onStopSession, 
-  onOpenLaundry 
+  activeSessions, items, punishmentStatus, washingItemsCount, 
+  onNavigateItem, onOpenRelease, onStopSession, onOpenLaundry 
 }) {
 
   const formatMinutes = (min) => {
@@ -29,15 +23,17 @@ export default function ActiveSessionsList({
   return (
     <>
       {activeSessions.length > 0 && (
-          <Paper sx={{ p: 2, mb: 3, border: `1px solid ${PALETTE.accents.pink}`, background: `${PALETTE.accents.pink}10` }}>
+          <Paper sx={{ 
+              p: 2, mb: 3, 
+              ...DESIGN_TOKENS.glassCard,
+              borderColor: PALETTE.accents.pink, 
+              background: `linear-gradient(180deg, ${PALETTE.accents.pink}15 0%, rgba(0,0,0,0) 100%)`
+          }}>
               <Stack spacing={2}>
                   {activeSessions.map(s => {
                       const item = items.find(i => i.id === s.itemId);
-                      
-                      // CRASH-FIX: Verwendung von safeDate
                       const startTime = safeDate(s.startTime);
                       const elapsed = Math.floor((now - startTime.getTime())/60000);
-                      
                       const isPunishment = s.type === 'punishment';
                       const durationLabel = isPunishment ? `${elapsed}m / ${punishmentStatus.durationMinutes || '?'}m` : formatMinutes(elapsed);
 
@@ -45,22 +41,33 @@ export default function ActiveSessionsList({
                           <Box key={s.id} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                               <Typography 
                                 variant="body1" 
-                                sx={{ textDecoration: 'underline', textDecorationColor: PALETTE.accents.pink, cursor: 'pointer' }} 
+                                sx={{ 
+                                    textDecoration: 'underline', 
+                                    textDecorationColor: PALETTE.accents.pink, 
+                                    cursor: 'pointer',
+                                    color: PALETTE.text.primary
+                                }} 
                                 onClick={() => onNavigateItem(item.id)}
                               >
-                                {item.name || item.brand}{item.subCategory ? ` (${item.subCategory})` : ''}
+                                {item.name || item.brand}
                               </Typography>
                               <Stack direction="row" spacing={1} alignItems="center">
                                   <Chip 
                                       label={durationLabel} 
-                                      color={isPunishment ? "error" : "primary"} 
+                                      size="small"
+                                      sx={{ 
+                                          bgcolor: isPunishment ? `${PALETTE.accents.red}33` : `${PALETTE.primary.main}33`, 
+                                          color: isPunishment ? PALETTE.accents.red : PALETTE.primary.main,
+                                          border: `1px solid ${isPunishment ? PALETTE.accents.red : PALETTE.primary.main}`
+                                      }}
                                       icon={isPunishment ? <AccessTimeIcon style={{fontSize:16}}/> : null} 
                                   />
                                   <Button 
-                                      variant="contained" size="small" 
+                                      variant="outlined" size="small" 
                                       color={isPunishment ? 'error' : 'secondary'} 
                                       startIcon={isPunishment ? <LockClockIcon /> : <StopCircleIcon />} 
                                       onClick={() => onStopSession(s)}
+                                      sx={{ borderRadius: 8 }}
                                   >
                                       Stop
                                   </Button>
@@ -69,19 +76,15 @@ export default function ActiveSessionsList({
                       ) : null;
                   })}
 
-                  {/* GLOBALER ENTLADUNGS-BALKEN */}
                   {!activeSessions.some(s => s.type === 'punishment') && (
                       <Button
-                          variant="outlined"
-                          fullWidth
+                          variant="outlined" fullWidth
                           onClick={() => onOpenRelease(activeSessions)}
                           sx={{ 
-                              mt: 1, 
-                              py: 1.5, 
+                              mt: 1, py: 1.5, 
                               borderColor: PALETTE.accents.blue, 
                               color: PALETTE.accents.blue,
-                              fontWeight: 'bold',
-                              letterSpacing: '1px',
+                              fontWeight: 'bold', letterSpacing: '1px',
                               background: `${PALETTE.accents.blue}08`,
                               '&:hover': { background: `${PALETTE.accents.blue}15`, borderColor: PALETTE.accents.blue }
                           }}
@@ -96,14 +99,22 @@ export default function ActiveSessionsList({
 
       {washingItemsCount > 0 && (
           <Paper 
-            sx={{ p: 2, mb: 3, bgcolor: `${PALETTE.accents.blue}1A`, border: `1px solid ${PALETTE.accents.blue}`, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+            sx={{ 
+                p: 2, mb: 3, 
+                ...DESIGN_TOKENS.glassCard,
+                bgcolor: `${PALETTE.accents.blue}10`, 
+                borderColor: PALETTE.accents.blue, 
+                cursor: 'pointer', 
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                transition: 'transform 0.2s', '&:hover': { transform: 'scale(1.02)' }
+            }}
             onClick={onOpenLaundry}
           >
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                  <LocalLaundryServiceIcon color="info" />
+                  <LocalLaundryServiceIcon sx={{ color: PALETTE.accents.blue }} />
                   <Typography variant="subtitle1" fontWeight="bold">Wäschekorb</Typography>
               </Box>
-              <Chip label={`${washingItemsCount} Stk.`} color="info" size="small" />
+              <Chip label={`${washingItemsCount} Stk.`} size="small" sx={{ bgcolor: PALETTE.accents.blue, color: '#000', fontWeight: 'bold' }} />
           </Paper>
       )}
     </>

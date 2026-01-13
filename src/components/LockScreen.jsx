@@ -1,7 +1,7 @@
 import React from 'react';
-import { Box, Typography, Button, Container, Paper } from '@mui/material';
+import { Box, Typography, Button, Container } from '@mui/material'; // Paper entfernt, da nicht genutzt
 import { useSecurity } from '../contexts/SecurityContext';
-import { useAuth } from '../contexts/AuthContext'; // NEU: Für Fallback
+import { useAuth } from '../contexts/AuthContext';
 
 // --- NEW SYSTEM IMPORTS ---
 import { DESIGN_TOKENS, PALETTE } from '../theme/obsidianDesign';
@@ -9,13 +9,11 @@ import { Icons } from '../theme/appIcons';
 
 export default function LockScreen() {
   const { unlock, forceUnlock } = useSecurity();
-  const { login } = useAuth(); // Nutzen wir für Re-Auth
+  const { login } = useAuth(); 
 
   const handleFallback = async () => {
     try {
-      // Erzwingt Google Login als Sicherheitsnachweis
       await login(); 
-      // Wenn erfolgreich (kein Error), entsperren wir
       forceUnlock();
     } catch (e) {
       console.error("Fallback fehlgeschlagen", e);
@@ -29,8 +27,8 @@ export default function LockScreen() {
       left: 0, 
       right: 0, 
       bottom: 0, 
-      bgcolor: '#050505', 
-      backgroundImage: 'linear-gradient(to bottom, #050505, #121212)',
+      // ZENTRALISIERTER HINTERGRUND
+      background: PALETTE.gradients.dark,
       zIndex: 9999, 
       display: 'flex', 
       alignItems: 'center', 
@@ -43,9 +41,11 @@ export default function LockScreen() {
           display: 'inline-flex', 
           p: 4, 
           borderRadius: '50%',
+          // ZENTRALISIERTE GLAS-OPTIK
           ...DESIGN_TOKENS.glassCard,
           border: `1px solid ${PALETTE.primary.main}33`,
-          mb: 4
+          mb: 4,
+          boxShadow: `0 0 30px ${PALETTE.primary.main}20` // Zusätzlicher Glow passend zum Theme
         }}>
            <Icons.Lock sx={{ fontSize: 60, color: PALETTE.primary.main }} />
         </Box>
@@ -53,7 +53,7 @@ export default function LockScreen() {
         <Typography variant="h4" gutterBottom sx={DESIGN_TOKENS.textGradient}>
           LACE TRACKER
         </Typography>
-        <Typography variant="body1" color="text.secondary" sx={{ mb: 8, opacity: 0.6 }}>
+        <Typography variant="body1" sx={{ mb: 8, color: PALETTE.text.secondary }}>
           Sicherer Bereich
         </Typography>
 
@@ -78,9 +78,8 @@ export default function LockScreen() {
           <Button 
             variant="text" 
             size="small" 
-            color="secondary"
             onClick={handleFallback}
-            sx={{ opacity: 0.5, fontSize: '0.75rem' }}
+            sx={{ opacity: 0.5, fontSize: '0.75rem', color: PALETTE.text.muted }}
           >
             Biometrie defekt? Login nutzen
           </Button>

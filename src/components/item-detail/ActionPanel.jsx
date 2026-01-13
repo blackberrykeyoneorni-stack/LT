@@ -7,7 +7,7 @@ import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
 
 export default function ActionPanel({ isBusy, recoveryInfo, onStartSession }) {
     
-    // Fall 1: Elasthan Recovery (Goldgelb)
+    // Fall 1: Recovery Mode
     if (recoveryInfo?.isResting && !isBusy) {
         return (
             <Box sx={{ mb: 4 }}>
@@ -23,10 +23,10 @@ export default function ActionPanel({ isBusy, recoveryInfo, onStartSession }) {
                         </Avatar>
                         <Box>
                             <Typography variant="h6" sx={{ fontSize: '1.1rem', fontWeight: 600, color: PALETTE.accents.gold }}>
-                                Elasthan Recovery Mode
+                                Recovery Mode
                             </Typography>
                             <Typography variant="body2" color="text.secondary">
-                                Struktur-Erholung läuft. Verbleibend: <strong>{recoveryInfo.remainingHours} Std.</strong>
+                                Material-Erholung. Verbleibend: <strong>{recoveryInfo.remainingHours} Std.</strong>
                             </Typography>
                         </Box>
                     </Stack>
@@ -42,28 +42,21 @@ export default function ActionPanel({ isBusy, recoveryInfo, onStartSession }) {
                     />
                     
                     <Button 
-                        variant="outlined" 
-                        size="small"
-                        startIcon={<WarningAmberIcon />}
-                        onClick={() => onStartSession(true)} // Force start
+                        variant="outlined" size="small" startIcon={<WarningAmberIcon />}
+                        onClick={() => onStartSession(true)}
                         sx={{ 
-                            justifyContent: 'flex-start',
-                            color: PALETTE.accents.gold,
-                            borderColor: `${PALETTE.accents.gold}66`,
-                            '&:hover': { 
-                                borderColor: PALETTE.accents.gold,
-                                bgcolor: `${PALETTE.accents.gold}11`
-                            }
+                            justifyContent: 'flex-start', color: PALETTE.accents.gold, borderColor: `${PALETTE.accents.gold}66`,
+                            '&:hover': { borderColor: PALETTE.accents.gold, bgcolor: `${PALETTE.accents.gold}11` }
                         }}
                     >
-                        Trotzdem tragen (Verschleiß riskieren)
+                        Trotzdem tragen (Risk)
                     </Button>
                 </Paper>
             </Box>
         );
     }
 
-    // Fall 2: Normaler Start
+    // Fall 2: Startbereit
     if (!isBusy) {
         return (
             <Box sx={{ mb: 4 }}>
@@ -71,10 +64,7 @@ export default function ActionPanel({ isBusy, recoveryInfo, onStartSession }) {
                     variant="contained" fullWidth size="large"
                     onClick={() => onStartSession(false)}
                     startIcon={<PlayArrowIcon />}
-                    sx={{ 
-                        py: 1.5, fontWeight: 'bold', mb: 1,
-                        ...DESIGN_TOKENS.buttonGradient
-                    }}
+                    sx={{ py: 1.5, fontWeight: 'bold', mb: 1, ...DESIGN_TOKENS.buttonGradient }}
                 >
                     TRAGEN BEGINNEN
                 </Button>
@@ -82,11 +72,11 @@ export default function ActionPanel({ isBusy, recoveryInfo, onStartSession }) {
         );
     }
 
-    // Fall 3: Wird getragen
+    // Fall 3: Aktiv
     return (
         <Box sx={{ mb: 4 }}>
              <Paper sx={{ ...DESIGN_TOKENS.glassCard, p: 2, bgcolor: `${PALETTE.accents.green}20`, border: `1px solid ${PALETTE.accents.green}`, textAlign: 'center' }}>
-                <Typography variant="h6" color="success.main" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
+                <Typography variant="h6" sx={{ color: PALETTE.accents.green, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
                   <PlayArrowIcon /> WIRD GERADE GETRAGEN
                 </Typography>
             </Paper>

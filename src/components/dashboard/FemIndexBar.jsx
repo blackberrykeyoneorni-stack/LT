@@ -1,22 +1,13 @@
 import React from 'react';
-import { Paper, Box, Typography, LinearProgress, useTheme } from '@mui/material';
+import { Paper, Box, Typography, LinearProgress } from '@mui/material';
 import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
+import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
 
 export default function FemIndexBar({ femIndex, loading }) {
-  const theme = useTheme(); // Zugriff auf das aktive Theme (sicher)
-  
-  // Wir holen die Farben aus dem Theme-Objekt
-  // Fallback-Werte ('#...') dienen als doppelte Absicherung
-  const secondaryColor = theme.palette.secondary.main || '#546E7A';
-  const primaryColor = theme.palette.primary.main || '#E6C2BF';
-  // accents greifen wir nun auch über das Theme ab (siehe obsidianDesign.js Änderung)
-  const pinkColor = theme.palette.accents?.pink || '#f48fb1';
-  const glassColor = theme.palette.background.glass || 'rgba(255, 255, 255, 0.03)';
-
   const getBarColor = (value) => {
-    if (value < 30) return secondaryColor;
-    if (value < 85) return pinkColor; 
-    return primaryColor; 
+    if (value < 30) return PALETTE.secondary.main;
+    if (value < 85) return PALETTE.accents.pink; 
+    return PALETTE.primary.main; 
   };
 
   const currentColor = getBarColor(femIndex);
@@ -24,10 +15,10 @@ export default function FemIndexBar({ femIndex, loading }) {
   return (
     <Paper sx={{ 
         p: 2, mb: 3, 
+        ...DESIGN_TOKENS.glassCard,
         border: '1px solid', 
-        borderColor: femIndex > 90 ? primaryColor : `${pinkColor}4D`,
-        boxShadow: femIndex > 90 ? `0 0 20px ${primaryColor}4D` : 'none',
-        bgcolor: glassColor
+        borderColor: femIndex > 90 ? PALETTE.primary.main : `${PALETTE.accents.pink}4D`,
+        boxShadow: femIndex > 90 ? `0 0 20px ${PALETTE.primary.main}4D` : 'none',
     }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
               <Typography variant="subtitle2" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -46,7 +37,7 @@ export default function FemIndexBar({ femIndex, loading }) {
                   borderRadius: 5, 
                   bgcolor: 'rgba(255,255,255,0.05)',
                   '& .MuiLinearProgress-bar': {
-                    background: `linear-gradient(90deg, ${secondaryColor} 0%, ${pinkColor} 50%, ${primaryColor} 100%)`
+                    background: `linear-gradient(90deg, ${PALETTE.secondary.main} 0%, ${PALETTE.accents.pink} 50%, ${PALETTE.primary.main} 100%)`
                   }
               }} 
           />

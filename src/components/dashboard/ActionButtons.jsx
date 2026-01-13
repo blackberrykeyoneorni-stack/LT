@@ -6,32 +6,32 @@ import CelebrationIcon from '@mui/icons-material/Celebration';
 import WeekendIcon from '@mui/icons-material/Weekend';
 import DarkModeIcon from '@mui/icons-material/DarkMode';
 import LightModeIcon from '@mui/icons-material/LightMode';
-import { DESIGN_TOKENS } from '../../theme/obsidianDesign';
+import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
 import { isPunishmentWindowOpen } from '../../services/PunishmentService';
 
 export default function ActionButtons({ 
-  punishmentStatus, 
-  auditDue, 
-  isFreeDay, 
-  freeDayReason, 
-  currentInstruction, 
-  currentPeriod, 
-  isHoldingOath, 
-  onStartPunishment, 
-  onStartAudit, 
-  onOpenInstruction 
+  punishmentStatus, auditDue, isFreeDay, freeDayReason, 
+  currentInstruction, currentPeriod, isHoldingOath, 
+  onStartPunishment, onStartAudit, onOpenInstruction 
 }) {
 
-  // Prüfen ob Straf-Fenster offen ist
   const punishmentWindowOpen = isPunishmentWindowOpen();
+  const isNight = currentPeriod && currentPeriod.includes('night');
+  const instructionAlreadyStarted = currentInstruction && currentInstruction.isAccepted;
+  const showFreeMode = isFreeDay && !isNight && !instructionAlreadyStarted;
 
-  // 1. STRAFE (Höchste Prio)
+  // 1. STRAFE (Priorität)
   if (punishmentStatus.active && punishmentWindowOpen) {
     return (
       <Box sx={{ mb: 3 }}>
         <Button 
-            variant="contained" fullWidth size="large" color="error" 
-            sx={{ py: 2, fontWeight: 'bold', fontSize: '1.1rem' }} 
+            variant="contained" fullWidth size="large"
+            sx={{ 
+                py: 2, fontWeight: 'bold', fontSize: '1.1rem',
+                bgcolor: PALETTE.accents.red, color: '#fff',
+                boxShadow: `0 0 20px ${PALETTE.accents.red}66`,
+                '&:hover': { bgcolor: '#b71c1c' }
+            }} 
             startIcon={<SportsScoreIcon />} 
             onClick={onStartPunishment} 
         >
@@ -45,7 +45,7 @@ export default function ActionButtons({
   if (punishmentStatus.deferred) {
     return (
       <Box sx={{ mb: 3 }}>
-         <Alert severity="warning" sx={{ py: 2, justifyContent: 'center', fontWeight: 'bold' }}>
+         <Alert severity="warning" variant="filled" sx={{ py: 2, justifyContent: 'center', fontWeight: 'bold', bgcolor: `${PALETTE.accents.gold}22`, color: PALETTE.accents.gold, border: `1px solid ${PALETTE.accents.gold}` }}>
              STRAFE ({punishmentStatus.durationMinutes || '?'}m) AUFGESCHOBEN
          </Alert>
       </Box>
@@ -57,8 +57,8 @@ export default function ActionButtons({
     return (
       <Box sx={{ mb: 3 }}>
         <Button 
-            variant="contained" fullWidth size="large" color="error" 
-            sx={{ py: 2, fontWeight: 'bold', fontSize: '1.1rem' }} 
+            variant="contained" fullWidth size="large"
+            sx={{ py: 2, fontWeight: 'bold', fontSize: '1.1rem', bgcolor: PALETTE.accents.gold, color: '#000' }} 
             startIcon={<GradingIcon />} 
             onClick={onStartAudit}
         >
@@ -68,43 +68,26 @@ export default function ActionButtons({
     );
   }
 
-  // 4. ANWEISUNG ODER FREI
-  // LOGIK-ANPASSUNG: Nachtanweisungen sind IMMER möglich, auch an Feiertagen.
-  // "Frei" gilt nur, wenn es TAG ist und Feiertag.
-  
-  const instructionAlreadyStarted = currentInstruction && currentInstruction.isAccepted;
-  const isNight = currentPeriod && currentPeriod.includes('night');
-  
-  // Zeige "Frei" nur an, wenn:
-  // 1. Es ein Feiertag ist
-  // 2. UND wir NICHT in der Nacht-Phase sind
-  // 3. UND die Anweisung noch nicht gestartet wurde
-  const showFreeMode = isFreeDay && !isNight && !instructionAlreadyStarted;
-
+  // 4. ANWEISUNG / FREI
   return (
     <Box sx={{ mb: 3 }}>
         <Button 
             variant="contained" fullWidth size="large" 
-            // UX-FIX: Button nicht deaktivieren, sondern nur semantisch markieren
             aria-disabled={showFreeMode}
             sx={{ 
                 py: 2, fontWeight: 'bold', fontSize: '1.1rem',
-                // Gradient nur wenn NICHT frei und (Nacht oder keine Anweisung geladen)
+                // Bedingtes Styling
                 ...(!showFreeMode && (isNight || !currentInstruction) ? DESIGN_TOKENS.buttonGradient : {}),
+                ...(showFreeMode ? { 
+                    background: 'transparent', 
+                    border: `1px solid ${PALETTE.text.muted}`,
+                    color: PALETTE.text.muted 
+                } : {}),
                 
-                // Grauer Style für Frei-Modus
-                background: showFreeMode ? '#424242' : undefined,
-                color: showFreeMode ? '#888' : '#000',
-                
-                boxShadow: '0 3px 5px 2px rgba(244, 143, 177, .3)',
-                transition: isHoldingOath ? 'background-color 5s linear' : 'background-color 0.2s'
+                transition: isHoldingOath ? 'background-color 5s linear' : 'all 0.2s'
             }} 
             onClick={onOpenInstruction} 
-            startIcon={
-                showFreeMode
-                ? (freeDayReason === 'Holiday' ? <CelebrationIcon /> : <WeekendIcon />) 
-                : (isNight ? <DarkModeIcon /> : <LightModeIcon />)
-            }
+            startIcon={showFreeMode ? (freeDayReason === 'Holiday' ? <CelebrationIcon /> : <WeekendIcon />) : (isNight ? <DarkModeIcon /> : <LightModeIcon />)}
         >
             {showFreeMode
                 ? (freeDayReason === 'Holiday' ? "FEIERTAG (FREI)" : "WOCHENENDE (FREI)") 

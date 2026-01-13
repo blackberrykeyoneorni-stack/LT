@@ -1,19 +1,18 @@
 import React from 'react';
-import { Box, Typography, FormControl, InputLabel, Select, MenuItem, Stack, Button, Dialog } from '@mui/material';
+import { Box, Typography, FormControl, InputLabel, Select, MenuItem, Stack, Button, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material';
+import { DESIGN_TOKENS } from '../../theme/obsidianDesign';
 
 export default function ArchiveDialog({ open, onClose, onConfirm, dropdowns, values, setValues }) {
     return (
-        <Dialog open={open} onClose={onClose}>
-            <Box sx={{ p: 3 }}>
-                <Typography variant="h6" gutterBottom>Item Archivieren</Typography>
-                <Typography variant="body2" color="text.secondary" paragraph>Wähle den Grund für das Archivieren.</Typography>
+        <Dialog open={open} onClose={onClose} PaperProps={DESIGN_TOKENS.dialog.paper}>
+            <DialogTitle sx={DESIGN_TOKENS.dialog.title.sx}>Item Archivieren</DialogTitle>
+            <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
+                <Typography variant="body2" color="text.secondary" paragraph sx={{mt:1}}>Wähle den Grund für das Archivieren.</Typography>
                 
                 <FormControl fullWidth sx={{ mb: 2 }}>
                     <InputLabel>Grund</InputLabel>
                     <Select value={values.reason} onChange={(e) => setValues(prev => ({...prev, reason: e.target.value}))} label="Grund">
-                        {dropdowns.archiveReasons.map(r => (
-                            <MenuItem key={r.value} value={r.value}>{r.label}</MenuItem>
-                        ))}
+                        {dropdowns.archiveReasons.map(r => (<MenuItem key={r.value} value={r.value}>{r.label}</MenuItem>))}
                     </Select>
                 </FormControl>
 
@@ -33,12 +32,11 @@ export default function ArchiveDialog({ open, onClose, onConfirm, dropdowns, val
                         </FormControl>
                     </Stack>
                 )}
-
-                <Stack direction="row" spacing={2} justifyContent="flex-end">
-                    <Button onClick={onClose}>Abbrechen</Button>
-                    <Button onClick={onConfirm} variant="contained" color="error">Bestätigen</Button>
-                </Stack>
-            </Box>
+            </DialogContent>
+            <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}>
+                <Button onClick={onClose} color="inherit">Abbrechen</Button>
+                <Button onClick={onConfirm} variant="contained" color="error">Archivieren</Button>
+            </DialogActions>
         </Dialog>
     );
 }

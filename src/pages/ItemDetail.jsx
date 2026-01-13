@@ -18,7 +18,7 @@ export default function ItemDetail() {
     const { 
         item, loading, isEditing, isBusy, recoveryInfo, 
         formData, dropdowns, stats, historyEvents, archiveDialog,
-        galleryImages, // NEU: Kombinierte Bilderliste (Bestand + Preview)
+        galleryImages, 
         setIsEditing, setFormData, setArchiveDialog,
         actions 
     } = useItemDetailLogic();
@@ -27,7 +27,9 @@ export default function ItemDetail() {
     if (!item) return null;
 
     return (
-        <Box sx={{ pb: 10 }}>
+        // WRAPPER FÜR HINTERGRUND & SPACING
+        <Box sx={DESIGN_TOKENS.bottomNavSpacer}>
+            
             {/* 1. Header Bild & Toolbar */}
             <ItemGallery 
                 item={item} 
@@ -35,14 +37,14 @@ export default function ItemDetail() {
                 onToggleEdit={() => setIsEditing(!isEditing)}
                 onSave={actions.save}
                 onWriteNFC={actions.writeNFC}
-                onAddImages={actions.addImages} // NEU
-                displayImages={galleryImages}   // NEU
+                onAddImages={actions.addImages}
+                displayImages={galleryImages}
             />
 
-            <Container sx={{ mt: -3, position: 'relative', zIndex: 2 }}>
+            <Container sx={{ mt: -3, position: 'relative', zIndex: 2, pb: 10 }}>
                 <Paper sx={{ p: 3, mb: 3, ...DESIGN_TOKENS.glassCard }}>
                     
-                    {/* 2. Actions & Status (Only when not editing) */}
+                    {/* 2. Actions & Status */}
                     {!isEditing && (
                         <ActionPanel 
                             isBusy={isBusy} 
@@ -70,7 +72,7 @@ export default function ItemDetail() {
                     )}
                 </Paper>
 
-                {/* 5. Footer Actions (Waschen / Archiv) */}
+                {/* 5. Footer Actions */}
                 {!isEditing && (
                     <FooterActions 
                         onWash={actions.wash} 

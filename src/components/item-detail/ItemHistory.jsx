@@ -5,13 +5,14 @@ import WaterDropIcon from '@mui/icons-material/WaterDrop';
 import LocalLaundryServiceIcon from '@mui/icons-material/LocalLaundryService';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { formatDuration } from '../../utils/formatters';
+import { PALETTE } from '../../theme/obsidianDesign';
 
 export default function ItemHistory({ historyEvents }) {
     if (!historyEvents || historyEvents.length === 0) return null;
 
     return (
         <Box sx={{ mb: 10 }}>
-            <Typography variant="h6" gutterBottom sx={{ borderBottom: '1px solid #333', pb: 1 }}>Historie</Typography>
+            <Typography variant="h6" gutterBottom sx={{ borderBottom: `1px solid ${PALETTE.background.glassBorder}`, pb: 1 }}>Historie</Typography>
             <Stack spacing={1}>
                 {historyEvents.map((event, idx) => {
                     let label = '';
@@ -23,16 +24,13 @@ export default function ItemHistory({ historyEvents }) {
                     if (event.type === 'session') {
                         const s = event.data;
                         const typeLabel = s.type === 'instruction' ? 'Anweisung' : (s.type === 'voluntary' ? 'Freiwillig' : 'Session');
-                        const subType = s.subtype ? ` (${s.subtype})` : '';
-                        label = `${typeLabel}${subType}`;
+                        label = `${typeLabel}${s.subtype ? ` (${s.subtype})` : ''}`;
                         color = s.type === 'instruction' ? 'secondary' : 'default';
                         icon = <AccessTimeIcon style={{ fontSize: 16 }} />;
                         
                         const endTime = s.endTime ? s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime) : null;
                         if (endTime) {
-                            const startTimeStr = event.date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-                            const endTimeStr = endTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-                            sub = `${event.date.toLocaleDateString()}, ${startTimeStr} - ${endTimeStr}`;
+                            sub = `${event.date.toLocaleDateString()}, ${event.date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} - ${endTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`;
                             durationLabel = formatDuration(s.durationMinutes || 0);
                         } else {
                             sub = `${event.date.toLocaleDateString()} - Laufend`;
@@ -47,7 +45,7 @@ export default function ItemHistory({ historyEvents }) {
                         durationLabel = r.outcome === 'maintained' ? 'Maintained' : 'Removed';
                     } else if (event.type === 'wash') {
                         label = "Reinigung";
-                        sub = `${event.date.toLocaleDateString()} • Gewaschen & Einsortiert`;
+                        sub = `${event.date.toLocaleDateString()} • Gewaschen`;
                         color = "success";
                         icon = <LocalLaundryServiceIcon style={{ fontSize: 16 }} />;
                         durationLabel = 'Sauber';
@@ -60,21 +58,12 @@ export default function ItemHistory({ historyEvents }) {
                     }
 
                     return (
-                        <Paper key={idx} sx={{ p: 2, bgcolor: 'rgba(255,255,255,0.03)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Paper key={idx} sx={{ p: 2, bgcolor: PALETTE.background.lightGlass, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <Box>
-                                <Typography variant="body2" sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 1 }}>
-                                    {icon} {label}
-                                </Typography>
-                                <Typography variant="caption" color="text.secondary">
-                                    {sub}
-                                </Typography>
+                                <Typography variant="body2" sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 1 }}>{icon} {label}</Typography>
+                                <Typography variant="caption" color="text.secondary">{sub}</Typography>
                             </Box>
-                            <Chip 
-                                label={durationLabel} 
-                                color={color === 'default' ? 'default' : color} 
-                                size="small" 
-                                variant="outlined"
-                            />
+                            <Chip label={durationLabel} color={color} size="small" variant="outlined" />
                         </Paper>
                     );
                 })}
