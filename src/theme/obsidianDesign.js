@@ -1,337 +1,228 @@
 // src/theme/obsidianDesign.js
+import { materialTheme } from './materialTheme';
 
-// --- 1. ATOMIC COLORS & PALETTE ---
+// Zugriff auf die M3 Tokens
+const t = materialTheme.palette.m3;
+
+/**
+ * ADAPTER: OBSIDIAN -> MATERIAL 3
+ * Übersetzt alte Design-Tokens in strikte Material Design 3 Werte.
+ * Verhindert "bunte" Ausreißer.
+ */
+
 export const PALETTE = {
   background: {
-    default: '#000000', // Deep Black
-    paper: '#121212',   // Obsidian Base
-    glass: 'rgba(20, 20, 20, 0.6)',
-    glassBorder: 'rgba(255, 255, 255, 0.08)',
-    lightGlass: 'rgba(255, 255, 255, 0.05)',
+    default: t.background,
+    paper: t.surfaceContainer,
+    glass: t.surfaceContainer, // Kein Glas mehr -> Solid Surface
+    glassBorder: 'transparent', // M3 nutzt keine Borders für Tiefe
+    lightGlass: t.surfaceContainerHigh, 
   },
   primary: {
-    main: '#00e5ff',    // Cyan/Electric Blue
-    dark: '#00b2cc',
-    contrastText: '#000',
+    main: t.primary,
+    dark: t.onPrimary,
+    contrastText: t.onPrimary,
   },
   secondary: {
-    main: '#ff0055',    // Neon Pink/Red
-    contrastText: '#fff',
+    main: t.secondary,
+    contrastText: t.onSecondary,
   },
   text: {
-    primary: '#ffffff',
-    secondary: 'rgba(255, 255, 255, 0.7)',
-    muted: 'rgba(255, 255, 255, 0.5)',
+    primary: t.onSurface,
+    secondary: t.onSurfaceVariant,
+    muted: t.outline,
   },
+  // Mapping der alten "Bunten Farben" auf das M3 Schema
+  // Das erzwingt Konsistenz.
   accents: {
-    purple: '#bf5af2',
-    blue: '#0a84ff',
-    green: '#30d158',
-    red: '#ff453a',
-    gold: '#ffd60a',
-    pink: '#ff375f',
-    grey: '#8e8e93',
-    crimson: '#d32f2f'
+    purple: t.tertiary,      // Wird zum tertiären Akzent
+    blue: t.secondary,       // Wird zum sekundären Akzent
+    green: t.primary,        // Erfolgs-Indikatoren folgen Primary oder Custom Success
+    red: t.error,            // Fehler bleiben rot (M3 Error)
+    gold: t.tertiaryContainer, // Warnungen nutzen Tertiary Container
+    pink: t.tertiary,        
+    grey: t.outlineVariant,
+    crimson: t.errorContainer
   },
   gradients: {
-    primary: 'linear-gradient(135deg, #00e5ff 0%, #2979ff 100%)',
-    secondary: 'linear-gradient(135deg, #ff0055 0%, #ff375f 100%)',
-    dark: 'linear-gradient(180deg, rgba(20,20,20,0.95) 0%, rgba(0,0,0,0.98) 100%)',
-    glass: 'linear-gradient(145deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.01) 100%)',
+    // Löschen aller Verläufe. M3 ist Flat/Tonal.
+    primary: t.primary, 
+    secondary: t.secondary,
+    dark: t.background,
+    glass: t.surfaceContainer, 
   }
 };
 
-// --- 2. CORE SHAPES & EFFECTS ---
-const EFFECTS = {
-  glass: {
-    backdropFilter: 'blur(12px)',
-    WebkitBackdropFilter: 'blur(12px)',
-    backgroundColor: PALETTE.background.glass,
-    border: `1px solid ${PALETTE.background.glassBorder}`,
-    boxShadow: '0 4px 30px rgba(0, 0, 0, 0.1)',
-  },
-  glassCard: {
-    background: 'rgba(25, 25, 25, 0.6)', 
-    backdropFilter: 'blur(10px)',
-    WebkitBackdropFilter: 'blur(10px)',
-    border: `1px solid rgba(255, 255, 255, 0.05)`,
-    borderRadius: '16px',
-    boxShadow: '0 8px 32px 0 rgba(0, 0, 0, 0.3)',
-  },
-  glow: (color) => ({
-    boxShadow: `0 0 10px ${color}40, 0 0 20px ${color}20`,
-  }),
+// M3 Card Style Definition für Wiederverwendung
+const M3_CARD_STYLE = {
+    backgroundColor: t.surfaceContainer,
+    borderRadius: '16px', // M3 Standard
+    border: 'none',
+    boxShadow: 'none',
+    color: t.onSurface,
+    transition: 'background-color 0.2s',
+    '&:hover': {
+        backgroundColor: t.surfaceContainerHigh, // Hover State Layer
+    }
 };
 
-// --- 3. COMPONENT PRESETS (The "Classes") ---
 export const DESIGN_TOKENS = {
-  // Layout
   bottomNavSpacer: {
     pb: '80px', 
     minHeight: '100vh',
-    background: 'radial-gradient(circle at 50% -20%, #1a1a1a 0%, #000000 100%)',
+    background: t.background,
   },
-  container: {
-    maxWidth: 'md',
-    disableGutters: false,
-    sx: { px: 2, pt: 2 }
-  },
+  container: { maxWidth: 'md', disableGutters: false, sx: { px: 2, pt: 2 } },
 
-  // Typography
+  // Text Gradient entfernt -> Plain Text
   textGradient: {
-    background: `linear-gradient(45deg, ${PALETTE.text.primary} 30%, ${PALETTE.primary.main} 90%)`,
-    WebkitBackgroundClip: 'text',
-    WebkitTextFillColor: 'transparent',
-    fontWeight: 800,
-    letterSpacing: '-0.5px',
+    color: t.onSurface,
+    fontWeight: 400,
+    background: 'none',
+    WebkitBackgroundClip: 'unset',
+    WebkitTextFillColor: 'unset',
   },
+  
   sectionHeader: {
-    fontSize: '1.1rem',
-    fontWeight: 600,
-    letterSpacing: '0.5px',
-    textTransform: 'uppercase',
-    color: PALETTE.text.muted,
-    mb: 2,
-    mt: 4,
-    display: 'flex',
-    alignItems: 'center',
-    gap: 1,
-    '&::after': {
-      content: '""',
-      flex: 1,
-      height: '1px',
-      background: `linear-gradient(90deg, ${PALETTE.background.glassBorder}, transparent)`,
+    fontSize: '14px', // Label Large
+    fontWeight: 500,
+    letterSpacing: '0.1px',
+    textTransform: 'none', // Sentence Case
+    color: t.primary,
+    mb: 2, mt: 4, 
+    display: 'flex', alignItems: 'center', gap: 2,
+    '&::after': { 
+        content: '""', flex: 1, height: '1px', 
+        background: t.outlineVariant 
     }
   },
   
-  // Cards
-  glassCard: {
-    ...EFFECTS.glassCard,
-    overflow: 'hidden',
-    transition: 'transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.2s',
-    '&:hover': {
-      transform: 'translateY(-2px)',
-      borderColor: 'rgba(255, 255, 255, 0.15)',
-    }
-  },
+  glassCard: M3_CARD_STYLE,
   
-  // Buttons
+  // Button Gradient entfernt -> Filled Button (Pill)
   buttonGradient: {
-    background: PALETTE.gradients.primary,
-    color: '#000',
-    fontWeight: 'bold',
-    borderRadius: '12px',
+    background: t.primary, 
+    color: t.onPrimary,
+    fontWeight: 500,
+    borderRadius: '9999px', // Pill Shape erzwungen
     textTransform: 'none',
-    boxShadow: '0 4px 15px rgba(0, 229, 255, 0.3)',
-    transition: 'all 0.2s',
+    boxShadow: 'none',
     '&:hover': {
-      boxShadow: '0 6px 20px rgba(0, 229, 255, 0.4)',
-      transform: 'scale(1.02)',
+      backgroundColor: t.primary, // State Layer wird durch MUI gehandhabt
+      boxShadow: 'none',
     },
     '&:disabled': {
-        background: 'rgba(255,255,255,0.1)',
-        color: 'rgba(255,255,255,0.3)',
-        boxShadow: 'none'
-    }
-  },
-  buttonSecondary: {
-    border: `1px solid ${PALETTE.background.glassBorder}`,
-    color: PALETTE.text.primary,
-    borderRadius: '12px',
-    textTransform: 'none',
-    '&:hover': {
-        background: 'rgba(255,255,255,0.05)',
-        borderColor: PALETTE.text.secondary
+        background: t.onSurface + '1F', 
+        color: t.onSurface + '61', 
     }
   },
 
-  // Inputs & Forms (wiederhergestellt)
+  buttonSecondary: {
+    border: `1px solid ${t.outline}`,
+    color: t.primary,
+    borderRadius: '9999px', // Pill Shape erzwungen
+    textTransform: 'none',
+    background: 'transparent',
+    '&:hover': {
+        background: t.primary + '14', 
+        borderColor: t.primary
+    }
+  },
+
   inputField: {
     '& .MuiOutlinedInput-root': {
-        borderRadius: '12px',
-        bgcolor: 'rgba(255,255,255,0.02)',
-        '& fieldset': { borderColor: 'rgba(255,255,255,0.1)' },
-        '&:hover fieldset': { borderColor: 'rgba(255,255,255,0.3)' },
-        '&.Mui-focused fieldset': { borderColor: PALETTE.primary.main },
+        borderRadius: '4px', 
+        bgcolor: t.surfaceContainerHighest,
+        '& fieldset': { border: 'none' }, 
+        '&:hover fieldset': { border: 'none' },
+        '&.Mui-focused fieldset': { border: `2px solid ${t.primary}` },
+        '& input': { color: t.onSurface }
     },
-    '& .MuiInputLabel-root': { color: PALETTE.text.secondary },
-    '& .MuiInputLabel-root.Mui-focused': { color: PALETTE.primary.main },
+    '& .MuiInputLabel-root': { color: t.onSurfaceVariant },
+    '& .MuiInputLabel-root.Mui-focused': { color: t.primary },
   },
 
-  // Dialogs (Zentralisiert)
   dialog: {
       paper: {
           sx: {
-            ...EFFECTS.glass,
-            borderRadius: '24px',
-            bgcolor: 'rgba(18, 18, 18, 0.95)',
-            border: `1px solid ${PALETTE.background.glassBorder}`,
+            borderRadius: '28px', // Extra Large
+            bgcolor: t.surfaceContainerHigh,
             backgroundImage: 'none',
-            boxShadow: '0 24px 48px rgba(0,0,0,0.5)',
+            boxShadow: 'none',
           }
       },
-      title: {
-          sx: {
-              borderBottom: `1px solid ${PALETTE.background.glassBorder}`,
-              pb: 2,
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: 1.5,
-              fontSize: '1.2rem',
-              fontWeight: 600
-          }
-      },
-      content: {
-          sx: { py: 3 },
-          dividers: true
-      },
-      actions: {
-          sx: {
-              borderTop: `1px solid ${PALETTE.background.glassBorder}`,
-              p: 2,
-              gap: 1
-          }
-      }
+      title: { sx: { pb: 2, fontSize: '24px', fontWeight: 400, color: t.onSurface, textAlign: 'center' } },
+      content: { sx: { py: 2 }, dividers: false },
+      actions: { sx: { p: 3, justifyContent: 'flex-end', gap: 1 } }
   },
 
-  // Sheets
-  bottomSheet: {
-    sx: {
-        ...EFFECTS.glass,
-        background: '#121212', 
-        borderTop: `1px solid ${PALETTE.primary.main}`,
-        borderRadius: '24px 24px 0 0',
-        maxHeight: '90vh',
-    }
-  },
+  bottomSheet: { sx: { background: t.surfaceContainer, borderRadius: '28px 28px 0 0' } },
 
-  // Accordion
+  // Accordion -> Expansion Panels (Flat)
   accordion: {
     root: {
-      bgcolor: 'transparent',
+      bgcolor: t.surfaceContainerLow,
       backgroundImage: 'none',
       boxShadow: 'none',
-      border: `1px solid ${PALETTE.background.glassBorder}`,
-      borderRadius: '12px !important',
-      marginBottom: 2,
-      overflow: 'hidden',
-      transition: 'border-color 0.2s',
+      borderRadius: '16px !important',
+      marginBottom: 8,
       '&:before': { display: 'none' },
-      '&.Mui-expanded': {
-        margin: '0 0 16px 0',
-        borderColor: PALETTE.primary.main, 
-        backgroundColor: 'rgba(0, 229, 255, 0.03)', 
+      '&.Mui-expanded': { 
+          bgcolor: t.surfaceContainer,
+          marginBottom: 16 
       },
     },
-    details: {
-       borderTop: `1px solid ${PALETTE.background.glassBorder}`,
-       padding: 2,
-    }
+    details: { padding: 16, color: t.onSurfaceVariant }
   },
 
-  // Chips
   chip: {
-    default: {
-        bgcolor: 'rgba(255,255,255,0.05)',
-        border: '1px solid rgba(255,255,255,0.1)',
-        color: PALETTE.text.primary,
+    default: { 
+        bgcolor: t.surfaceContainerHighest, 
+        color: t.onSurfaceVariant,
+        borderRadius: '8px',
+        border: '1px solid ' + t.outlineVariant,
+        fontWeight: 500
     },
-    active: {
-        bgcolor: `${PALETTE.primary.main}22`,
-        border: `1px solid ${PALETTE.primary.main}`,
-        color: PALETTE.primary.main,
+    active: { 
+        bgcolor: t.secondaryContainer, 
+        color: t.onSecondaryContainer,
+        borderRadius: '8px',
+        border: 'none',
+        fontWeight: 500
     }
   },
 
-  // Calendar Styles (NEU)
   calendar: {
-    '.react-calendar': { 
-        width: '100%', backgroundColor: 'transparent', border: 'none', fontFamily: 'inherit' 
-    },
-    '.react-calendar__navigation': { 
-        height: 'auto', marginBottom: '1rem', display: 'flex', alignItems: 'center' 
-    },
-    '.react-calendar__navigation button': { 
-        color: PALETTE.primary.main, minWidth: '44px', background: 'none', fontSize: '1.2rem', fontWeight: 800, textTransform: 'capitalize' 
-    },
-    '.react-calendar__navigation button:disabled': { backgroundColor: 'transparent', color: PALETTE.text.muted },
-    '.react-calendar__navigation button:enabled:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: 8 },
-    '.react-calendar__month-view__weekdays': { 
-        textAlign: 'center', textTransform: 'uppercase', fontWeight: 'bold', fontSize: '0.75rem', color: PALETTE.text.muted, marginBottom: '0.5rem', textDecoration: 'none' 
-    },
-    '.react-calendar__month-view__weekdays__weekday': { padding: '0.5rem', abbr: { textDecoration: 'none' } },
-    '.react-calendar__tile': { 
-        padding: '1rem 0.5rem', background: 'none', textAlign: 'center', lineHeight: '16px', color: '#fff', fontSize: '0.9rem', position: 'relative', overflow: 'visible', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start', height: '80px' 
-    },
-    '.react-calendar__tile:enabled:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: '12px' },
-    '.react-calendar__tile--now': { 
-        background: 'transparent', border: `1px solid ${PALETTE.accents.gold}`, borderRadius: '12px', color: PALETTE.accents.gold 
-    },
-    '.react-calendar__tile--active': { 
-        background: `${PALETTE.primary.main} !important`, color: '#000 !important', borderRadius: '12px', fontWeight: 'bold' 
-    },
+    '.react-calendar': { width: '100%', backgroundColor: 'transparent', border: 'none', fontFamily: 'inherit' },
+    '.react-calendar__navigation button': { color: t.onSurface, fontSize: '1rem', fontWeight: 500 },
+    '.react-calendar__month-view__weekdays': { textTransform: 'uppercase', fontSize: '0.75rem', color: t.onSurfaceVariant, fontWeight: 500 },
+    '.react-calendar__tile': { padding: '10px 0', color: t.onSurface, fontSize: '0.9rem' },
+    '.react-calendar__tile:enabled:hover': { backgroundColor: t.surfaceContainerHighest, borderRadius: '20px' }, 
+    '.react-calendar__tile--now': { background: 'transparent', border: `1px solid ${t.primary}`, borderRadius: '20px', color: t.primary },
+    '.react-calendar__tile--active': { background: `${t.primary} !important`, color: `${t.onPrimary} !important`, borderRadius: '20px' },
   }
 };
 
-// --- 4. UTILITY FUNCTIONS & THEMES ---
 export const CHART_THEME = {
     background: 'transparent',
-    textColor: PALETTE.text.secondary,
-    grid: {
-        line: { stroke: PALETTE.background.glassBorder, strokeWidth: 1 }
-    },
-    axis: {
-        domain: { line: { stroke: 'transparent' } },
-        ticks: { text: { fill: PALETTE.text.muted, fontSize: 10 } }
+    textColor: t.onSurfaceVariant,
+    grid: { line: { stroke: t.outlineVariant, strokeWidth: 1, strokeDasharray: '4 4' } },
+    axis: { 
+        domain: { line: { stroke: 'transparent' } }, 
+        ticks: { text: { fill: t.onSurfaceVariant, fontSize: 11 } } 
     },
     tooltip: {
-        container: {
-            background: '#121212',
-            color: '#fff',
-            fontSize: '12px',
-            borderRadius: '8px',
-            border: `1px solid ${PALETTE.background.glassBorder}`,
-            boxShadow: '0 8px 16px rgba(0,0,0,0.5)'
-        }
+        container: { background: t.surfaceContainerHighest, color: t.onSurface, borderRadius: '12px', border: 'none' }
     },
-    colors: [PALETTE.primary.main, PALETTE.accents.purple, PALETTE.accents.pink, PALETTE.accents.green, PALETTE.accents.gold]
+    colors: [t.primary, t.secondary, t.tertiary, t.error, t.outline]
 };
 
-export const getCategoryColor = (category) => {
-    const map = {
-        'Halsband': { border: PALETTE.accents.gold, bg: `${PALETTE.accents.gold}15` },
-        'Cuffs': { border: PALETTE.accents.grey, bg: `${PALETTE.accents.grey}15` },
-        'Keuschheit': { border: PALETTE.accents.pink, bg: `${PALETTE.accents.pink}15` },
-        'Toys': { border: PALETTE.accents.purple, bg: `${PALETTE.accents.purple}15` },
-        'Nylons': { border: PALETTE.primary.main, bg: `${PALETTE.primary.main}15` },
-        'Accessoires': { border: PALETTE.accents.green, bg: `${PALETTE.accents.green}15` },
-    };
-    return map[category] || { border: 'rgba(255,255,255,0.1)', bg: 'rgba(255,255,255,0.02)' };
-};
+export const getCategoryColor = () => ({ border: 'transparent', bg: t.surfaceContainerHigh });
 
 export const MOTION = {
-    page: {
-        initial: { opacity: 0, y: 10 },
-        animate: { opacity: 1, y: 0 },
-        exit: { opacity: 0, y: -10 },
-        transition: { duration: 0.3 }
-    },
-    listContainer: {
-        hidden: { opacity: 0 },
-        show: {
-            opacity: 1,
-            transition: { staggerChildren: 0.08 }
-        }
-    },
-    listItem: {
-        hidden: { opacity: 0, y: 20 },
-        show: { opacity: 1, y: 0 }
-    },
+    page: { initial: { opacity: 0, y: 10 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0 }, transition: { duration: 0.3, ease: [0.2, 0.0, 0, 1.0] } },
+    listContainer: { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.05 } } },
+    listItem: { hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } },
     tap: { scale: 0.98 },
-    pop: {
-        initial: { scale: 0 },
-        animate: { scale: 1 },
-        exit: { scale: 0 },
-        transition: { type: "spring", stiffness: 300, damping: 20 }
-    }
+    pop: { initial: { scale: 0.9, opacity: 0 }, animate: { scale: 1, opacity: 1 }, transition: { type: "spring", stiffness: 300, damping: 25 } }
 };
