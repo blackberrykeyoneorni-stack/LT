@@ -41,7 +41,10 @@ export default function Settings() {
   // Preferences
   const [dailyTargetHours, setDailyTargetHours] = useState(3); const [nylonRestingHours, setNylonRestingHours] = useState(24); const [maxInstructionItems, setMaxInstructionItems] = useState(1); const [previousTarget, setPreviousTarget] = useState(null);
   const [sissyProtocolEnabled, setSissyProtocolEnabled] = useState(false); const [nightReleaseProbability, setNightReleaseProbability] = useState(15);
+  
+  // FIX: Singular/Plural Konsistenz hergestellt
   const [biometricAvailable, setBiometricAvailable] = useState(false);
+  
   const [categoryWeights, setCategoryWeights] = useState({}); const [weightTarget, setWeightTarget] = useState(''); const [weightValue, setWeightValue] = useState(2);
   
   // UI States
@@ -50,7 +53,7 @@ export default function Settings() {
   const showToast = (message, severity = 'success') => setToast({ open: true, message, severity });
   const handleCloseToast = () => setToast({ ...toast, open: false });
 
-  // LOAD ALL DATA (WIEDERHERGESTELLT)
+  // LOAD ALL DATA
   useEffect(() => { 
     if (currentUser) { 
         loadAll(); 
@@ -90,7 +93,6 @@ export default function Settings() {
               setPreviousTarget(d.previousDailyTarget || null);
           }
 
-          // Defaults für Archive-Listen falls leer
           setArchiveReasons(arSnap.exists() ? arSnap.data().list : [{label:'Laufmasche', value:'run'}, {label:'Verschlissen', value:'worn'}, {label:'Verloren', value:'lost'}]);
           setRunLocations(rlSnap.exists() ? rlSnap.data().list : ['Zehe', 'Ferse', 'Oberschenkel', 'Zwickel']);
           setRunCauses(rcSnap.exists() ? rcSnap.data().list : ['Schuhe', 'Nägel', 'Schmuck', 'Unbekannt']);
@@ -105,7 +107,7 @@ export default function Settings() {
 
   const checkBiometrics = async () => {
       const avail = await isBiometricSupported();
-      setBiometricsAvailable(avail);
+      setBiometricAvailable(avail); // KORRIGIERT: Singular (ohne 's')
   };
 
   // --- ACTIONS ---
@@ -196,7 +198,6 @@ export default function Settings() {
       }
   };
 
-  // Section Header Helper
   const SectionHeader = ({ icon: Icon, title, color }) => (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1, color: color || 'text.primary' }}>
       <Avatar sx={{ bgcolor: `${color}22`, color: color, width: 32, height: 32 }}>
@@ -208,7 +209,7 @@ export default function Settings() {
 
   if (loading) return <Box sx={{ display: 'flex', justifyContent: 'center', mt: 10 }}><CircularProgress /></Box>;
 
-  // Flatten Categories for Dropdown
+  // Flatten Categories
   const allCategoryOptions = [];
   Object.keys(catStructure).forEach(main => {
       allCategoryOptions.push({ label: `HAUPT: ${main}`, value: main });
@@ -272,7 +273,7 @@ export default function Settings() {
       <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, borderLeft: `4px solid ${PALETTE.accents.purple}` }}>
          <AccordionSummary expandIcon={<Icons.Expand />}><SectionHeader icon={Icons.Brain} title="Algorithmus" color={PALETTE.accents.purple} /></AccordionSummary>
          <AccordionDetails sx={DESIGN_TOKENS.accordion.details}>
-            <Alert severity="info" sx={{mb: 2, bgcolor: 'rgba(255,255,255,0.05)', color: '#fff'}}>Weighted Randomness für die Anweisung.</Alert>
+            <Alert severity="info" sx={{mb: 2, bgcolor: 'rgba(255,255,255,0.05)', color: '#fff'}}>Weighted Randomness Anpassung.</Alert>
             <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-end', mb: 3 }}>
                 <FormControl fullWidth size="small">
                     <InputLabel>Kategorie</InputLabel>
@@ -294,7 +295,7 @@ export default function Settings() {
          </AccordionDetails>
       </Accordion>
 
-      {/* --- LISTEN MANAGER (Marken, Material, etc.) --- */}
+      {/* --- LISTEN MANAGER --- */}
       <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, borderLeft: `4px solid ${PALETTE.accents.blue}` }}>
          <AccordionSummary expandIcon={<Icons.Expand />}><SectionHeader icon={Icons.Inventory} title="Listen & Orte" color={PALETTE.accents.blue} /></AccordionSummary>
          <AccordionDetails sx={DESIGN_TOKENS.accordion.details}>
