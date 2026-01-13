@@ -35,3 +35,12 @@ export const formatTime = (date) => {
         minute: '2-digit'
     });
 };
+
+// Generiert eine Begrüßung basierend auf der Uhrzeit (FEHLTE VORHER)
+export const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 5) return 'Gute Nacht';
+    if (hour < 11) return 'Guten Morgen';
+    if (hour < 18) return 'Guten Tag';
+    return 'Guten Abend';
+};

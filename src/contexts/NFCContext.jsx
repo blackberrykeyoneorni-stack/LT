@@ -11,7 +11,8 @@ const NFCContext = createContext();
 
 export const useNFCGlobal = () => useContext(NFCContext);
 
-export const NFCProvider = ({ children }) => {
+// UMBENANNT: NFCGlobalProvider (passend zu App.jsx)
+export const NFCGlobalProvider = ({ children }) => {
     const { currentUser } = useAuth();
     const navigate = useNavigate();
     const location = useLocation();
