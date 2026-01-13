@@ -70,6 +70,21 @@ const checkTodayPlan = async (uid, allItems) => {
     }
 };
 
+// Lädt die letzte generierte Instruction (FEHLTE VORHER)
+export const getLastInstruction = async (uid) => {
+    try {
+        const docRef = doc(db, `users/${uid}/status/dailyInstruction`);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+            return docSnap.data();
+        }
+        return null;
+    } catch (e) {
+        console.error("Error fetching last instruction:", e);
+        return null;
+    }
+};
+
 export const generateAndSaveInstruction = async (uid, items, activeSessions, periodId) => {
     try {
         // 1. Hole Präferenzen
@@ -197,3 +212,6 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
         return null; 
     }
 };
+
+// ALIAS für Abwärtskompatibilität mit Dashboard.jsx
+export const generateDailyInstruction = generateAndSaveInstruction;
