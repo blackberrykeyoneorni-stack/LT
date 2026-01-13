@@ -22,7 +22,6 @@ import ErrorBoundary from './components/ErrorBoundary';
 import SecurityLock from './components/SecurityLock';
 
 // --- THEME GENERIERUNG AUS OBSIDIAN DESIGN ---
-// Dies ermöglicht später den Wechsel auf M3, indem nur die Palette getauscht wird.
 const darkTheme = createTheme({
   palette: {
     mode: 'dark',
@@ -42,32 +41,32 @@ const darkTheme = createTheme({
     fontFamily: '"Inter", "Roboto", "Helvetica", "Arial", sans-serif',
     h4: { fontWeight: 800, letterSpacing: '-0.02em' },
     h6: { fontWeight: 600, letterSpacing: '0.01em' },
-    button: { fontWeight: 600, textTransform: 'none' }, // Keine Großbuchstaben-Zwang
+    button: { fontWeight: 600, textTransform: 'none' },
   },
   shape: {
-    borderRadius: 16, // Globaler Radius passend zu glassCard
+    borderRadius: 16,
   },
   components: {
     MuiCssBaseline: {
       styleOverrides: {
         body: {
           backgroundColor: PALETTE.background.default,
-          scrollbarWidth: 'none', // Firefox
-          '&::-webkit-scrollbar': { display: 'none' }, // Chrome/Safari
+          scrollbarWidth: 'none', 
+          '&::-webkit-scrollbar': { display: 'none' },
         },
       },
     },
     MuiPaper: {
       styleOverrides: {
         root: {
-          backgroundImage: 'none', // Material Default Gradient entfernen für cleanen Glass-Look
+          backgroundImage: 'none',
         },
       },
     },
     MuiButton: {
       styleOverrides: {
         root: {
-          borderRadius: 12, // Konsistent mit Tokens
+          borderRadius: 12,
         }
       }
     }
@@ -79,7 +78,7 @@ function PrivateRoute({ children }) {
   const { currentUser, loading } = useAuth();
   const { isLocked, isAuthenticated } = useSecurity();
 
-  if (loading) return null; // Oder Loading Spinner
+  if (loading) return null; 
   
   if (!currentUser) return <Navigate to="/login" />;
   
@@ -97,8 +96,9 @@ export default function App() {
       <ThemeProvider theme={darkTheme}>
         <CssBaseline />
         <Router>
-          <SecurityProvider>
-            <AuthProvider>
+          {/* REIHENFOLGE KORRIGIERT: Auth muss VOR Security kommen */}
+          <AuthProvider>
+            <SecurityProvider>
               <NFCGlobalProvider>
                 <ItemProvider>
                   <Routes>
@@ -119,8 +119,8 @@ export default function App() {
                   </Routes>
                 </ItemProvider>
               </NFCGlobalProvider>
-            </AuthProvider>
-          </SecurityProvider>
+            </SecurityProvider>
+          </AuthProvider>
         </Router>
       </ThemeProvider>
     </ErrorBoundary>
