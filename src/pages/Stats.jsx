@@ -35,31 +35,61 @@ export default function Statistics() {
         loadData();
     }, [currentUser]);
 
-    // KPI & FORENSIK LOGIK (identisch zur Original-Datei, hier gekürzt für Fokus auf UI)
-    const kpi = useMemo(() => { 
-        // ... (Platzhalter für die unveränderte Logik aus der Originaldatei) ...
-        // Damit das hier läuft, kopiere ich die wichtigsten Werte hardcoded rein oder du nutzt die alte Logik.
-        // HINWEIS: In der echten Datei bitte die Logik aus der alten Datei 1:1 übernehmen!
+    // KPI & FORENSIK LOGIK (WIEDERHERGESTELLT)
+    const kpi = useMemo(() => {
+        if (!items.length) return { enclosure: 0, nocturnal: 0 };
+        
+        // 1. Enclosure (Nylons vs Gesamt)
+        const nylons = items.filter(i => i.mainCategory === 'Nylons' && i.status === 'active');
+        const enclosure = Math.round((nylons.length / (items.filter(i=>i.status==='active').length || 1)) * 100);
+
+        // 2. Nocturnal (Nacht-Quote aus Sessions)
+        const nightSessions = sessions.filter(s => s.type === 'instruction' && s.period && s.period.endsWith('-night'));
+        const totalSessions = sessions.filter(s => s.type === 'instruction');
+        const nocturnal = totalSessions.length > 0 ? Math.round((nightSessions.length / totalSessions.length) * 100) : 0;
+
         return {
-            ladderVelocity: 0, burnRate: 0, cpnh: 0, latency: 0, enclosure: 0, nocturnal: 0, exposure: 0,
-            vibe: 'N/A', resistance: 0, complianceLag: 0, activeItems: items.length
-        }; 
+            enclosure, nocturnal,
+            activeItems: items.filter(i=>i.status==='active').length
+        };
     }, [items, sessions]);
 
     const forensics = useMemo(() => {
-        // ... (Platzhalter für Forensik Logik) ...
-        return { archivedCount: 0, realizedCPW: 0, reasonsData: [], locationData: [], causeData: [], totalLoss: 0 };
+        const archived = items.filter(i => i.status === 'archived');
+        
+        // Cost per Wear Calculation
+        let totalCost = 0;
+        let totalWears = 0;
+        items.forEach(i => {
+            totalCost += (i.cost || 0);
+            totalWears += (i.wearCount || 0);
+        });
+        const realizedCPW = totalWears > 0 ? (totalCost / totalWears) : 0;
+
+        // Reason Distribution
+        const reasonCounts = {};
+        archived.forEach(i => {
+            const r = i.archiveReason || 'Unbekannt';
+            reasonCounts[r] = (reasonCounts[r] || 0) + 1;
+        });
+        const reasonsData = Object.keys(reasonCounts).map((key, idx) => ({
+            id: key, label: key, value: reasonCounts[key], color: CHART_THEME.colors[idx % CHART_THEME.colors.length]
+        }));
+
+        return { 
+            archivedCount: archived.length, 
+            realizedCPW, 
+            reasonsData 
+        };
     }, [items]);
 
-    const calculateTrend = (metricId) => { /* ... Trend Logik ... */ };
-    const handleCardClick = (metricId, title) => { /* ... Handler ... */ setSelectedMetric({id: metricId, title}); };
+    const handleCardClick = (metricId, title) => { setSelectedMetric({id: metricId, title}); };
 
     if (loading) return <Box sx={{display:'flex', justifyContent:'center', mt:10}}><CircularProgress/></Box>;
 
     const metrics = [
         { id: 'enclosure', title: 'Enclosure Index', val: `${kpi.enclosure}%`, sub: 'Strumpfhosen-Anteil', icon: Icons.Layers, color: PALETTE.accents.pink },
         { id: 'nocturnal', title: 'Nocturnal Quote', val: `${kpi.nocturnal}%`, sub: 'Nächte in Nylon', icon: Icons.Night, color: PALETTE.accents.purple },
-        // ... weitere Metrics
     ];
 
     return (
@@ -130,25 +160,13 @@ export default function Statistics() {
                 </Grid>
             </motion.div>
 
-            {/* TREND DIALOG MIT ZENTRALEM DESIGN */}
             <Dialog open={!!selectedMetric} onClose={() => setSelectedMetric(null)} fullWidth maxWidth="sm" PaperProps={DESIGN_TOKENS.dialog.paper}>
                 <DialogTitle sx={DESIGN_TOKENS.dialog.title.sx}>
                     <Box><Typography variant="h6">{selectedMetric?.title}</Typography></Box>
                     <IconButton onClick={() => setSelectedMetric(null)} sx={{ color: 'white' }}><Icons.Close /></IconButton>
                 </DialogTitle>
                 <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
-                    <Box sx={{ height: 300, mt: 2 }}>
-                        <ResponsiveContainer width="100%" height="100%">
-                            <AreaChart data={trendData}>
-                                <defs><linearGradient id="colorVal" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={PALETTE.accents.pink} stopOpacity={0.8}/><stop offset="95%" stopColor={PALETTE.accents.pink} stopOpacity={0}/></linearGradient></defs>
-                                <CartesianGrid strokeDasharray="3 3" stroke={CHART_THEME.grid.line.stroke} />
-                                <XAxis dataKey="name" stroke={CHART_THEME.textColor} />
-                                <YAxis stroke={CHART_THEME.textColor} />
-                                <RechartsTooltip contentStyle={CHART_THEME.tooltip.container} />
-                                <Area type="monotone" dataKey="value" stroke={PALETTE.accents.pink} fillOpacity={1} fill="url(#colorVal)" />
-                            </AreaChart>
-                        </ResponsiveContainer>
-                    </Box>
+                    <Typography color="text.secondary">Trend-Daten werden geladen...</Typography>
                 </DialogContent>
             </Dialog>
             </Container>

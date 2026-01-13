@@ -34,11 +34,10 @@ import CheckroomIcon from '@mui/icons-material/Checkroom';
 import FingerprintIcon from '@mui/icons-material/Fingerprint';
 import LocalLaundryServiceIcon from '@mui/icons-material/LocalLaundryService'; 
 import SaveIcon from '@mui/icons-material/Save';
-import ImageSearchIcon from '@mui/icons-material/ImageSearch';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload'; 
 import DeleteIcon from '@mui/icons-material/Delete';
 
-// --- DESIGN SYSTEM (ZENTRALISIERT) ---
+// DESIGN SYSTEM
 import { DESIGN_TOKENS, PALETTE, getCategoryColor, MOTION } from '../theme/obsidianDesign';
 
 // DEFAULT STATE
@@ -71,7 +70,7 @@ export default function Inventory() {
   const [newItem, setNewItem] = useState(defaultNewItem);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Image Upload
+  // Image Upload State
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
 
@@ -109,7 +108,9 @@ export default function Inventory() {
         if (pSnap.exists()) {
             setRestingHours(pSnap.data().nylonRestingHours || 24);
         }
-      } catch (e) { console.error(e); }
+      } catch (e) {
+          console.error("Error loading inventory settings:", e);
+      }
     };
     loadSettings();
   }, [currentUser]);
@@ -122,9 +123,14 @@ export default function Inventory() {
       }
   }, [locationRouter]);
 
-  // Cleanup Preview
-  useEffect(() => { return () => { if (imagePreview) URL.revokeObjectURL(imagePreview); } }, [imagePreview]);
+  // Cleanup Preview URL
+  useEffect(() => {
+      return () => {
+          if (imagePreview) URL.revokeObjectURL(imagePreview);
+      }
+  }, [imagePreview]);
 
+  // --- IMAGE HANDLERS ---
   const handleImageChange = (e) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
@@ -132,33 +138,64 @@ export default function Inventory() {
       setImagePreview(URL.createObjectURL(file));
     }
   };
-  const handleRemoveImage = () => { setImageFile(null); setImagePreview(null); };
 
+  const handleRemoveImage = () => {
+      setImageFile(null);
+      setImagePreview(null);
+  };
+
+  // --- SAVE NEW ITEM HANDLER ---
   const handleSaveItem = async () => {
-      if (!newItem.brand || !newItem.mainCategory) { alert("Bitte Marke und Kategorie angeben."); return; }
+      if (!newItem.brand || !newItem.mainCategory) {
+          alert("Bitte mindestens Marke und Kategorie angeben.");
+          return;
+      }
       setIsSaving(true);
       try {
-        let finalImageUrl = newItem.imageUrl;
+        let finalImageUrl = newItem.imageUrl; // Fallback auf existierenden Wert
+
+        // 1. Upload Image if selected
         if (imageFile) {
             const storageRef = ref(storage, `users/${currentUser.uid}/items/${Date.now()}_${imageFile.name}`);
             const snapshot = await uploadBytes(storageRef, imageFile);
             finalImageUrl = await getDownloadURL(snapshot.ref);
         }
+
+        // 2. Create Firestore Doc
         await addDoc(collection(db, `users/${currentUser.uid}/items`), {
-            ...newItem, imageUrl: finalImageUrl, cost: parseFloat(newItem.cost) || 0,
-            createdAt: serverTimestamp(), status: 'active', wearCount: 0, totalMinutes: 0, lastWorn: null
+            ...newItem,
+            imageUrl: finalImageUrl,
+            cost: parseFloat(newItem.cost) || 0,
+            createdAt: serverTimestamp(),
+            status: 'active',
+            wearCount: 0,
+            totalMinutes: 0,
+            lastWorn: null
         });
-        setAddItemOpen(false); setNewItem(defaultNewItem); setImageFile(null); setImagePreview(null);
-      } catch (e) { console.error(e); alert("Fehler: " + e.message); } finally { setIsSaving(false); }
+
+        // 3. Reset
+        setAddItemOpen(false);
+        setNewItem(defaultNewItem);
+        setImageFile(null);
+        setImagePreview(null);
+
+      } catch (e) {
+          console.error(e);
+          alert("Fehler beim Speichern: " + e.message);
+      } finally {
+          setIsSaving(false);
+      }
   };
 
-  // FILTER LOGIC
+  // --- FILTER LOGIC ---
   const getRecoveryInfo = (item) => {
       if (!item || item.mainCategory !== 'Nylons') return null;
       const lastWornDate = safeDate(item.lastWorn); 
       if (!lastWornDate) return null;
       const hoursSince = (new Date() - lastWornDate) / (1000 * 60 * 60);
-      if (hoursSince < restingHours) return { isResting: true, remaining: Math.ceil(restingHours - hoursSince) };
+      if (hoursSince < restingHours) {
+          return { isResting: true, remaining: Math.ceil(restingHours - hoursSince) };
+      }
       return null;
   };
 
@@ -167,41 +204,47 @@ export default function Inventory() {
     if (scannedLocation) {
         res = res.filter(i => i.storageLocation && i.storageLocation.trim() === scannedLocation.trim());
     } else {
-        if (filterStatus === 'active') res = res.filter(i => (i.status === 'active' || !i.status));
-        else if (filterStatus !== 'All') res = res.filter(i => i.status === filterStatus);
+        if (filterStatus === 'active') {
+            res = res.filter(i => (i.status === 'active' || !i.status));
+        } else if (filterStatus !== 'All') {
+            res = res.filter(i => i.status === filterStatus);
+        }
     }
     if (filterCategory !== 'All') res = res.filter(i => i.mainCategory === filterCategory || i.category === filterCategory);
     if (filterBrand !== 'All') res = res.filter(i => i.brand === filterBrand);
     if (filterMaterial !== 'All') res = res.filter(i => i.material === filterMaterial); 
     if (filterMinRating > 0) res = res.filter(i => i.condition >= filterMinRating);
     
-    res.sort((a, b) => { /* Sort Logic unchanged */ return 0; }); // (Gekürzt für Übersicht, Logik bleibt identisch)
-    
-    // Sort Logic (aus Platzgründen hier gekürzt dargestellt, aber Funktion bleibt erhalten)
-     res.sort((a, b) => {
+    // Sortierung mit Crash-Schutz
+    res.sort((a, b) => {
       switch (sortBy) {
         case 'dateDesc': return (safeDate(b.purchaseDate) || 0) - (safeDate(a.purchaseDate) || 0);
         case 'dateAsc': return (safeDate(a.purchaseDate) || 0) - (safeDate(b.purchaseDate) || 0);
         case 'priceDesc': return (b.cost || 0) - (a.cost || 0);
         case 'priceAsc': return (a.cost || 0) - (b.cost || 0);
         case 'conditionDesc': return (b.condition || 0) - (a.condition || 0);
-        case 'nameAsc': return (a.brand + a.model).localeCompare(b.brand + b.model);
+        case 'nameAsc': 
+            const nameA = (a.brand || '') + (a.model || '') + (a.name || '');
+            const nameB = (b.brand || '') + (b.model || '') + (b.name || '');
+            return nameA.localeCompare(nameB);
         default: return 0;
       }
     });
-
     setFilteredItems(res);
   }, [items, filterCategory, filterBrand, filterMaterial, filterMinRating, filterStatus, sortBy, scannedLocation, restingHours]);
 
   const getDisplayName = (item) => item.name || `${item.brand} ${item.model}`;
-  const getImage = (item) => item.imageUrl || (item.images && item.images[0]) || null;
+  const getImage = (item) => {
+    if (item.imageUrl) return item.imageUrl;
+    if (item.images && item.images.length > 0) return item.images[0];
+    return null; 
+  };
   const categories = ['All', ...new Set(items.map(i => i.mainCategory || i.category).filter(Boolean))];
   
   if (loading) return <Box sx={{display:'flex', justifyContent:'center', mt:10}}><CircularProgress/></Box>;
 
   return (
     <Container maxWidth="md" disableGutters sx={{ pt: 1, pb: 10 }}> 
-      {/* Verwendung globaler Motion-Varianten */}
       <motion.div initial="hidden" animate="show" variants={MOTION.listContainer}>
           
           {/* HEADER */}
@@ -215,7 +258,7 @@ export default function Inventory() {
                 </Box>
           </Box>
 
-          {/* ACTIVE FILTERS (Chips Style zentralisiert) */}
+          {/* ACTIVE FILTERS */}
           <Box sx={{ mb: 2, px: 2, display: 'flex', gap: 1, overflowX: 'auto', pb: 1 }}>
                 {scannedLocation && <Chip icon={<Inventory2Icon />} label={`Ort: ${scannedLocation}`} onDelete={() => { setScannedLocation(null); }} sx={DESIGN_TOKENS.chip.active}/>}
                 {filterCategory !== 'All' && <Chip label={filterCategory} onDelete={() => setFilterCategory('All')} sx={DESIGN_TOKENS.chip.active} />}
@@ -236,18 +279,23 @@ export default function Inventory() {
             let background = catColors.bg;
             let imgFilter = 'none';
             
-            if (isWashing) { borderColor = PALETTE.accents.blue; background = `${PALETTE.accents.blue}1A`; imgFilter = 'grayscale(0.8)'; } 
-            else if (isArchived) { borderColor = PALETTE.accents.red; background = 'rgba(20, 0, 0, 0.4)'; imgFilter = 'grayscale(1)'; } 
-            else if (isResting) { imgFilter = 'brightness(0.5) grayscale(0.3)'; }
+            if (isWashing) {
+                borderColor = PALETTE.accents.blue;
+                background = `${PALETTE.accents.blue}1A`;
+                imgFilter = 'grayscale(0.8)';
+            } else if (isArchived) {
+                borderColor = PALETTE.accents.red;
+                background = 'rgba(20, 0, 0, 0.4)';
+                imgFilter = 'grayscale(1)';
+            } else if (isResting) {
+                imgFilter = 'brightness(0.5) grayscale(0.3)';
+            }
 
             return (
                 <Grid item xs={6} sm={4} md={3} key={item.id} component={motion.div} variants={MOTION.listItem} layout>
                     <Card sx={{ 
                         height: '100%', display: 'flex', flexDirection: 'column',
-                        // ZENTRALE CARD DEFINITION + DYNAMISCHE ÜBERSCHREIBUNG
-                        ...DESIGN_TOKENS.glassCard, 
-                        borderColor: borderColor, 
-                        background: background,
+                        ...DESIGN_TOKENS.glassCard, borderColor: borderColor, background: background,
                     }}>
                         <CardActionArea sx={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'stretch' }} onClick={() => navigate('/item/' + item.id)}>
                         <Box sx={{ position: 'relative', pt: '100%', bgcolor: 'rgba(0,0,0,0.2)', overflow: 'hidden' }}>
@@ -284,67 +332,147 @@ export default function Inventory() {
         anchor="bottom" 
         open={addItemOpen} 
         onClose={() => setAddItemOpen(false)}
-        PaperProps={DESIGN_TOKENS.bottomSheet} // <-- HIER GREIFT DAS SYSTEM
+        PaperProps={DESIGN_TOKENS.bottomSheet}
       >
         <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
             <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                     <AddIcon color="primary" />
-                    <Typography variant="h6">Neues Item</Typography>
+                    <Typography variant="h6">Neues Item erfassen</Typography>
                 </Box>
                 <IconButton onClick={() => setAddItemOpen(false)}><CloseIcon /></IconButton>
             </Box>
 
             <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 2 }}>
                 <Container maxWidth="sm" disableGutters>
-                    {/* Upload UI */}
+                    
+                    {/* IMAGE UPLOAD UI */}
                     <Box sx={{ mb: 3, textAlign: 'center' }}>
-                        <input accept="image/*" style={{ display: 'none' }} id="raised-button-file" type="file" onChange={handleImageChange} />
+                        <input
+                            accept="image/*"
+                            style={{ display: 'none' }}
+                            id="raised-button-file"
+                            type="file"
+                            onChange={handleImageChange}
+                        />
                         <label htmlFor="raised-button-file">
                             <Box sx={{
-                                width: '100%', height: 200, borderRadius: 2,
+                                width: '100%',
+                                height: 200,
+                                borderRadius: 2,
                                 border: `2px dashed ${imagePreview ? PALETTE.accents.green : PALETTE.primary.main}`,
-                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                cursor: 'pointer', overflow: 'hidden', position: 'relative',
-                                bgcolor: 'rgba(0,0,0,0.2)', transition: 'all 0.2s',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer',
+                                overflow: 'hidden',
+                                position: 'relative',
+                                bgcolor: 'rgba(0,0,0,0.2)',
+                                transition: 'all 0.2s',
                                 '&:hover': { bgcolor: 'rgba(255,255,255,0.05)' }
                             }}>
-                                {imagePreview ? <img src={imagePreview} alt="Preview" style={{ width: '100%', height: '100%', objectFit: 'contain' }} /> : 
+                                {imagePreview ? (
+                                    <img src={imagePreview} alt="Preview" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                                ) : (
                                     <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, p: 2 }}>
                                         <CloudUploadIcon sx={{ fontSize: 40, color: PALETTE.primary.main }} />
-                                        <Typography variant="body2" color="text.secondary">Bild wählen</Typography>
+                                        <Typography variant="body2" color="text.secondary">
+                                            Bild auswählen oder aufnehmen
+                                        </Typography>
                                     </Box>
-                                }
+                                )}
                             </Box>
                         </label>
-                        {imagePreview && <Button size="small" color="error" startIcon={<DeleteIcon />} onClick={handleRemoveImage} sx={{ mt: 1 }}>Entfernen</Button>}
+                        {imagePreview && (
+                            <Button 
+                                size="small" 
+                                color="error" 
+                                startIcon={<DeleteIcon />} 
+                                onClick={handleRemoveImage} 
+                                sx={{ mt: 1 }}
+                            >
+                                Bild entfernen
+                            </Button>
+                        )}
                     </Box>
 
                     <Divider sx={{ mb: 3, borderColor: 'rgba(255,255,255,0.1)' }} />
-                    <ItemInfoGrid isEditing={true} formData={newItem} setFormData={setNewItem} dropdowns={dropdowns} item={{}} />
+                    
+                    {/* REUSED ITEM GRID */}
+                    <ItemInfoGrid 
+                        isEditing={true}
+                        formData={newItem}
+                        setFormData={setNewItem}
+                        dropdowns={dropdowns}
+                        item={{}}
+                    />
                 </Container>
             </Box>
 
             <Box sx={{ p: 2, borderTop: '1px solid rgba(255,255,255,0.1)', bgcolor: 'rgba(0,0,0,0.4)' }}>
-                <Button variant="contained" fullWidth size="large" startIcon={isSaving ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />} onClick={handleSaveItem} disabled={isSaving} sx={{ ...DESIGN_TOKENS.buttonGradient, height: 56 }}>
-                    {isSaving ? "Speichere..." : "Hinzufügen"}
+                <Button 
+                    variant="contained" 
+                    fullWidth 
+                    size="large"
+                    startIcon={isSaving ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
+                    onClick={handleSaveItem}
+                    disabled={isSaving}
+                    sx={{ ...DESIGN_TOKENS.buttonGradient, height: 56 }}
+                >
+                    {isSaving ? "Lade hoch & Speichere..." : "Item Hinzufügen"}
                 </Button>
             </Box>
         </Box>
       </Drawer>
 
-      {/* FILTER DRAWER (Ebenfalls Bottom Sheet Style nutzen oder Sidebar lassen) */}
+      {/* --- FILTER DRAWER (VOLLSTÄNDIG) --- */}
       <Drawer anchor="right" open={filterOpen} onClose={() => setFilterOpen(false)} PaperProps={{ sx: { bgcolor: '#121212', borderLeft: '1px solid #333' } }}>
         <Box sx={{ width: 280, p: 3, pt: 8, height: '100%', overflowY: 'auto' }}>
-           {/* Inhalt gekürzt, bleibt funktional gleich */}
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}><Typography variant="h6">Filter</Typography><IconButton onClick={() => setFilterOpen(false)}><CloseIcon /></IconButton></Box>
-          <TextField select fullWidth size="small" margin="dense" value={sortBy} onChange={e => setSortBy(e.target.value)}><MenuItem value="dateDesc">Neueste</MenuItem><MenuItem value="priceDesc">Teuerste</MenuItem></TextField>
-          {/* ... Weitere Filter ... */}
-          <Button variant="outlined" fullWidth sx={{ mt: 4 }} onClick={() => { setFilterStatus('active'); setFilterCategory('All'); setFilterBrand('All'); }}>Reset</Button>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
+              <Typography variant="h6">Filtern & Sortieren</Typography>
+              <IconButton onClick={() => setFilterOpen(false)}><CloseIcon /></IconButton>
+          </Box>
+          
+          <TextField select fullWidth size="small" margin="dense" value={sortBy} onChange={e => setSortBy(e.target.value)}>
+            <MenuItem value="dateDesc">Neueste zuerst</MenuItem>
+            <MenuItem value="priceDesc">Preis (Hoch {'>'} Niedrig)</MenuItem>
+            <MenuItem value="conditionDesc">Zustand (Best)</MenuItem>
+            <MenuItem value="nameAsc">Name A-Z</MenuItem>
+          </TextField>
+
+          <Typography variant="subtitle2" color="primary" sx={{ mt: 3, mb: 1 }}>Filter</Typography>
+          
+          <TextField select fullWidth label="Status" margin="dense" size="small" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
+              <MenuItem value="active">Verfügbar</MenuItem>
+              <MenuItem value="All">Alle</MenuItem>
+              <MenuItem value="washing">In der Wäsche</MenuItem>
+              <MenuItem value="archived">Archiviert</MenuItem>
+          </TextField>
+
+          <TextField select fullWidth label="Kategorie" margin="dense" size="small" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
+              <MenuItem value="All">Alle</MenuItem>
+              {categories.map(c => <MenuItem key={c} value={c}>{c}</MenuItem>)}
+          </TextField>
+
+          <TextField select fullWidth label="Marke" margin="dense" size="small" value={filterBrand} onChange={e => setFilterBrand(e.target.value)}>
+              <MenuItem value="All">Alle Marken</MenuItem>
+              {dropdowns.brands.map(b => <MenuItem key={b} value={b}>{b}</MenuItem>)}
+          </TextField>
+
+          <TextField select fullWidth label="Material" margin="dense" size="small" value={filterMaterial} onChange={e => setFilterMaterial(e.target.value)}>
+              <MenuItem value="All">Alle Materialien</MenuItem>
+              {dropdowns.materials.map(m => <MenuItem key={m} value={m}>{m}</MenuItem>)}
+          </TextField>
+
+          <Button variant="outlined" fullWidth sx={{ mt: 4 }} onClick={() => { setFilterStatus('active'); setFilterCategory('All'); setFilterBrand('All'); setFilterMaterial('All'); setFilterMinRating(0); setSortBy('dateDesc'); setScannedLocation(null); }}>
+              Zurücksetzen
+          </Button>
         </Box>
       </Drawer>
 
-      <Fab color="primary" sx={{ position: 'fixed', bottom: 90, right: 20 }} onClick={() => setAddItemOpen(true)}><AddIcon /></Fab>
+      <Fab color="primary" sx={{ position: 'fixed', bottom: 90, right: 20 }} onClick={() => setAddItemOpen(true)}>
+        <AddIcon />
+      </Fab>
     </Container>
   );
 }
