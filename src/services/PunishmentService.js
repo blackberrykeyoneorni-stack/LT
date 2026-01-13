@@ -24,13 +24,13 @@ export const isPunishmentWindowOpen = () => {
     return (h >= PUNISHMENT_START_HOUR || h <= PUNISHMENT_END_HOUR);
 };
 
-// Lädt den aktuellen Straf-Status
-export const getPunishmentStatus = async (userId) => {
+// Lädt den aktuellen Straf-Status (umbenannt zu getActivePunishment für Kompatibilität)
+export const getActivePunishment = async (userId) => {
     const statusRef = doc(db, `users/${userId}/status/punishment`);
     const statusSnap = await getDoc(statusRef);
     
     if (!statusSnap.exists()) {
-        return { active: false, deferred: false, durationMinutes: 0 };
+        return null; // Keine Daten -> Keine Strafe
     }
 
     let data = statusSnap.data();
@@ -50,8 +50,17 @@ export const getPunishmentStatus = async (userId) => {
         }
     }
 
+    // WICHTIG: Wenn Strafe nicht aktiv ist, geben wir null zurück,
+    // damit das Dashboard den Dialog NICHT öffnet.
+    if (!data.active) {
+        return null;
+    }
+
     return data;
 };
+
+// Alias für Abwärtskompatibilität (falls woanders getPunishmentStatus importiert wird)
+export const getPunishmentStatus = getActivePunishment;
 
 /**
  * Registriert eine Strafe mit definierter Dauer.
