@@ -1,80 +1,71 @@
 import React from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Box, Paper, BottomNavigation, BottomNavigationAction, useTheme } from '@mui/material';
-// --- NEW SYSTEM IMPORTS ---
-import { Icons } from '../theme/appIcons';
-import { PALETTE } from '../theme/obsidianDesign';
+import { Box, Paper, BottomNavigation, BottomNavigationAction } from '@mui/material';
+import { DESIGN_TOKENS, PALETTE } from '../theme/obsidianDesign'; // NEU
 
-export default function Layout({ children }) {
+// Icons
+import DashboardIcon from '@mui/icons-material/Dashboard';
+import CheckroomIcon from '@mui/icons-material/Checkroom';
+import EqualizerIcon from '@mui/icons-material/Equalizer';
+import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
+import SettingsIcon from '@mui/icons-material/Settings';
+
+export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
-  const theme = useTheme();
 
-  // NAV-FIX: Robustes Mapping statt String-Vergleich
-  // UPDATE: Budget Route hinzugefügt (Mapped auf Statistik/Management)
-  const getValue = () => {
-    const p = location.pathname;
-    if (p === '/') return 0;
-    if (p.startsWith('/inventory') || p.startsWith('/item') || p.startsWith('/add') || p.startsWith('/wishlist')) return 1;
-    if (p.startsWith('/stats')) return 2;
-    if (p.startsWith('/budget')) return 2; // FIX: Budget gehört zum Bereich Statistik/Management
-    if (p.startsWith('/calendar')) return 3;
-    if (p.startsWith('/settings')) return 4;
-    return 0;
+  // Mapping Route -> Value
+  const getNavValue = (path) => {
+    if (path.startsWith('/inventory') || path.startsWith('/item')) return 1;
+    if (path.startsWith('/stats')) return 2;
+    if (path.startsWith('/calendar')) return 3;
+    if (path.startsWith('/settings')) return 4;
+    return 0; // Dashboard
   };
 
+  const navValue = getNavValue(location.pathname);
+
   return (
-    <Box sx={{ pb: 7, minHeight: '100vh', bgcolor: 'background.default' }}>
+    // ZENTRALISIERTER HINTERGRUND
+    <Box sx={DESIGN_TOKENS.bottomNavSpacer}>
       
       {/* CONTENT AREA */}
-      <Box component="main" sx={{ p: 2, pb: 10 }}>
-        {children}
+      <Box sx={{ p: 2, pb: 10 }}>
+         <Outlet />
       </Box>
 
-      {/* BOTTOM NAVIGATION (GLASS STYLE) */}
+      {/* BOTTOM NAVIGATION - FIXED */}
       <Paper 
         sx={{ 
           position: 'fixed', 
-          bottom: 0, 
-          left: 0, 
-          right: 0, 
-          zIndex: theme.zIndex.appBar,
-          background: 'rgba(10, 10, 10, 0.85)',
-          backdropFilter: 'blur(12px)',
-          borderTop: `1px solid ${PALETTE.background.glassBorder}`,
-          borderRadius: '20px 20px 0 0'
+          bottom: 0, left: 0, right: 0, 
+          zIndex: 1000,
+          background: 'rgba(10, 10, 10, 0.85)', // Fast blickdicht für Nav
+          backdropFilter: 'blur(20px)',
+          borderTop: `1px solid ${PALETTE.background.glassBorder}`
         }} 
         elevation={0}
       >
         <BottomNavigation
           showLabels
-          value={getValue()}
+          value={navValue}
           onChange={(event, newValue) => {
-            switch (newValue) {
+            switch(newValue) {
               case 0: navigate('/'); break;
               case 1: navigate('/inventory'); break;
               case 2: navigate('/stats'); break;
               case 3: navigate('/calendar'); break;
               case 4: navigate('/settings'); break;
-              default: navigate('/');
+              default: break;
             }
           }}
-          sx={{ 
-            bgcolor: 'transparent', 
-            height: 70,
-            '& .MuiBottomNavigationAction-root': {
-                color: 'text.secondary',
-                '&.Mui-selected': {
-                    color: PALETTE.primary.main,
-                }
-            }
-          }}
+          sx={{ bgcolor: 'transparent', height: 70 }}
         >
-          <BottomNavigationAction label="Dash" icon={<Icons.Home sx={{ mb: 0.5 }} />} />
-          <BottomNavigationAction label="Inventar" icon={<Icons.Inventory sx={{ mb: 0.5 }} />} />
-          <BottomNavigationAction label="Statistik" icon={<Icons.Speed sx={{ mb: 0.5 }} />} />
-          <BottomNavigationAction label="Kalender" icon={<Icons.Calendar sx={{ mb: 0.5 }} />} />
-          <BottomNavigationAction label="Setup" icon={<Icons.Settings sx={{ mb: 0.5 }} />} />
+          <BottomNavigationAction label="Home" icon={<DashboardIcon />} sx={{ '&.Mui-selected': { color: PALETTE.primary.main } }} />
+          <BottomNavigationAction label="Items" icon={<CheckroomIcon />} sx={{ '&.Mui-selected': { color: PALETTE.accents.purple } }} />
+          <BottomNavigationAction label="Stats" icon={<EqualizerIcon />} sx={{ '&.Mui-selected': { color: PALETTE.accents.green } }} />
+          <BottomNavigationAction label="Kalender" icon={<CalendarMonthIcon />} sx={{ '&.Mui-selected': { color: PALETTE.accents.gold } }} />
+          <BottomNavigationAction label="Optionen" icon={<SettingsIcon />} sx={{ '&.Mui-selected': { color: PALETTE.text.secondary } }} />
         </BottomNavigation>
       </Paper>
     </Box>

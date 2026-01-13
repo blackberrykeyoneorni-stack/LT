@@ -1,84 +1,128 @@
-import React, { useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { ThemeProvider, createTheme, CssBaseline, GlobalStyles } from '@mui/material';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { SecurityProvider } from './contexts/SecurityContext';
 import { ItemProvider } from './contexts/ItemContext';
-import { NFCProvider } from './contexts/NFCContext';
-import { ThemeProvider, CssBaseline, CircularProgress, Box } from '@mui/material';
-import { getObsidianTheme } from './theme/obsidianDesign';
+import { SecurityProvider, useSecurity } from './contexts/SecurityContext';
+import { NFCGlobalProvider } from './contexts/NFCContext';
+import { PALETTE } from './theme/obsidianDesign'; // ZENTRALE QUELLE
 
-// Pages
-import Dashboard from './pages/Dashboard';
+// COMPONENTS
+import Layout from './components/Layout';
 import Login from './pages/Login';
+import Dashboard from './pages/Dashboard';
 import Inventory from './pages/Inventory';
 import ItemDetail from './pages/ItemDetail';
+import Stats from './pages/Stats';
 import Settings from './pages/Settings';
-import Wishlist from './pages/Wishlist';
-import StatsPage from './pages/Stats';
 import CalendarPage from './pages/Calendar';
-import Budget from './pages/Budget'; // NEU: Budget Modul
-
-// Components
-import Layout from './components/Layout';
+import Wishlist from './pages/Wishlist';
+import Budget from './pages/Budget';
+import ErrorBoundary from './components/ErrorBoundary';
 import SecurityLock from './components/SecurityLock';
 
-function AppContent() {
+// --- THEME GENERIERUNG AUS OBSIDIAN DESIGN ---
+// Dies ermöglicht später den Wechsel auf M3, indem nur die Palette getauscht wird.
+const darkTheme = createTheme({
+  palette: {
+    mode: 'dark',
+    primary: PALETTE.primary,
+    secondary: PALETTE.secondary,
+    background: {
+      default: PALETTE.background.default,
+      paper: PALETTE.background.paper,
+    },
+    text: PALETTE.text,
+    error: { main: PALETTE.accents.red },
+    warning: { main: PALETTE.accents.gold },
+    info: { main: PALETTE.accents.blue },
+    success: { main: PALETTE.accents.green },
+  },
+  typography: {
+    fontFamily: '"Inter", "Roboto", "Helvetica", "Arial", sans-serif',
+    h4: { fontWeight: 800, letterSpacing: '-0.02em' },
+    h6: { fontWeight: 600, letterSpacing: '0.01em' },
+    button: { fontWeight: 600, textTransform: 'none' }, // Keine Großbuchstaben-Zwang
+  },
+  shape: {
+    borderRadius: 16, // Globaler Radius passend zu glassCard
+  },
+  components: {
+    MuiCssBaseline: {
+      styleOverrides: {
+        body: {
+          backgroundColor: PALETTE.background.default,
+          scrollbarWidth: 'none', // Firefox
+          '&::-webkit-scrollbar': { display: 'none' }, // Chrome/Safari
+        },
+      },
+    },
+    MuiPaper: {
+      styleOverrides: {
+        root: {
+          backgroundImage: 'none', // Material Default Gradient entfernen für cleanen Glass-Look
+        },
+      },
+    },
+    MuiButton: {
+      styleOverrides: {
+        root: {
+          borderRadius: 12, // Konsistent mit Tokens
+        }
+      }
+    }
+  },
+});
+
+// PRIVATE ROUTE WRAPPER
+function PrivateRoute({ children }) {
   const { currentUser, loading } = useAuth();
+  const { isLocked, isAuthenticated } = useSecurity();
 
-  if (loading) {
-    return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', bgcolor: 'background.default' }}>
-        <CircularProgress color="primary" />
-      </Box>
-    );
+  if (loading) return null; // Oder Loading Spinner
+  
+  if (!currentUser) return <Navigate to="/login" />;
+  
+  // Wenn App gesperrt ist (Biometrie/Time), zeige LockScreen
+  if (isLocked && !isAuthenticated) {
+     return <SecurityLock />;
   }
 
-  // 1. Wenn NICHT eingeloggt -> Zeige Login
-  if (!currentUser) {
-    return <Login />;
-  }
-
-  // 2. Wenn eingeloggt -> Starte die App mit Daten & Sicherheit
-  return (
-    <SecurityLock>
-      <ItemProvider> 
-        <Layout>
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/inventory" element={<Inventory />} />
-            {/* Route /add wurde entfernt, da AddItem jetzt ein BottomSheet im Inventory ist */}
-            <Route path="/item/:id" element={<ItemDetail />} />
-            <Route path="/settings" element={<Settings />} />
-            <Route path="/wishlist" element={<Wishlist />} />
-            <Route path="/stats" element={<StatsPage />} />
-            <Route path="/calendar" element={<CalendarPage />} />
-            
-            {/* NEUE ROUTE FÜR BUDGET */}
-            <Route path="/budget" element={<Budget />} />
-
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </Layout>
-      </ItemProvider>
-    </SecurityLock>
-  );
+  return children;
 }
 
 export default function App() {
-  const theme = useMemo(() => getObsidianTheme(), []);
-
   return (
-    <ThemeProvider theme={theme}>
-      <CssBaseline />
-      <AuthProvider>
+    <ErrorBoundary>
+      <ThemeProvider theme={darkTheme}>
+        <CssBaseline />
         <Router>
           <SecurityProvider>
-            <NFCProvider>
-               <AppContent />
-            </NFCProvider>
+            <AuthProvider>
+              <NFCGlobalProvider>
+                <ItemProvider>
+                  <Routes>
+                    <Route path="/login" element={<Login />} />
+                    
+                    <Route path="/" element={<PrivateRoute><Layout /></PrivateRoute>}>
+                      <Route index element={<Dashboard />} />
+                      <Route path="inventory" element={<Inventory />} />
+                      <Route path="item/:id" element={<ItemDetail />} />
+                      <Route path="stats" element={<Stats />} />
+                      <Route path="calendar" element={<CalendarPage />} />
+                      <Route path="wishlist" element={<Wishlist />} />
+                      <Route path="budget" element={<Budget />} />
+                      <Route path="settings" element={<Settings />} />
+                    </Route>
+
+                    <Route path="*" element={<Navigate to="/" />} />
+                  </Routes>
+                </ItemProvider>
+              </NFCGlobalProvider>
+            </AuthProvider>
           </SecurityProvider>
         </Router>
-      </AuthProvider>
-    </ThemeProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
   );
 }
