@@ -3,6 +3,7 @@ import { collection, query, getDocs, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Box, Typography, Grid, Paper, Card, CardContent, CircularProgress, Container, Dialog, DialogTitle, DialogContent, IconButton, Chip, Divider } from '@mui/material';
+// KORREKTUR: ResponsivePie aus dem Import entfernt, da es in recharts nicht existiert
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 import { ResponsivePie as NivoPie } from '@nivo/pie'; 
 import { motion } from 'framer-motion';
@@ -103,26 +104,22 @@ export default function Statistics() {
 
     // --- Trend Berechnung (30 TAGE) ---
     const calculateTrend = (metricId) => {
-        // Generiere Daten für die letzten 30 Tage
         const days = 30;
         const lastDays = [...Array(days)].map((_, i) => {
             const d = new Date();
             d.setDate(d.getDate() - ((days - 1) - i));
-            return d.toISOString().split('T')[0]; // YYYY-MM-DD
+            return d.toISOString().split('T')[0]; 
         });
 
         const data = lastDays.map(dateStr => {
-            // Filter Sessions für diesen Tag
             const daySessions = sessions.filter(s => {
                 if (!s.startTime) return false;
                 const sDate = s.startTime.toISOString().split('T')[0];
                 return sDate === dateStr;
             });
 
-            // Berechne Wert basierend auf Metrik
             let value = 0;
             if (metricId === 'enclosure' || metricId === 'exposure' || metricId === 'nocturnal') {
-                // Für diese Metriken zeigen wir "Trageminuten" als Proxy
                 value = daySessions.reduce((acc, s) => {
                     const end = s.endTime || new Date();
                     return acc + (end - s.startTime) / 60000;
@@ -134,7 +131,7 @@ export default function Statistics() {
             }
 
             return { 
-                name: dateStr.split('-').slice(2).join('.'), // Nur Tag (DD) für Chart
+                name: dateStr.split('-').slice(2).join('.'), 
                 fullDate: dateStr,
                 value: Math.round(value) 
             };
@@ -183,6 +180,12 @@ export default function Statistics() {
         { id: 'vibe', title: 'Vibe', val: kpi.vibe, sub: 'Dominanter Stil', icon: PsychologyIcon, color: PALETTE.accents.blue },
         { id: 'velocity', title: 'Latency', val: '24h', sub: 'Recovery Avg', icon: SpeedIcon, color: PALETTE.text.secondary },
     ];
+
+    const getUnit = (metricId) => {
+        if (metricId === 'exposure') return ' min';
+        if (metricId === 'enclosure' || metricId === 'nocturnal') return '%';
+        return '';
+    };
 
     return (
         <Box sx={DESIGN_TOKENS.bottomNavSpacer}>
@@ -241,6 +244,7 @@ export default function Statistics() {
                         <Paper sx={{ p: 2, height: 350, ...DESIGN_TOKENS.glassCard }}>
                             <Typography variant="subtitle2" gutterBottom align="center">Verlust-Ursachen</Typography>
                             {forensics.reasonsData.length > 0 ? (
+                                <Box sx={{height: 300}}>
                                 <NivoPie
                                     data={forensics.reasonsData}
                                     theme={{
@@ -260,6 +264,7 @@ export default function Statistics() {
                                     arcLabelsSkipAngle={10}
                                     arcLabelsTextColor={{ from: 'color', modifiers: [ [ 'darker', 2 ] ] }}
                                 />
+                                </Box>
                             ) : (
                                 <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                     <Typography color="text.secondary">Keine Daten verfügbar</Typography>
@@ -273,30 +278,42 @@ export default function Statistics() {
             {/* DETAIL DIALOG MIT CHART */}
             <Dialog open={!!selectedMetric} onClose={() => setSelectedMetric(null)} fullWidth maxWidth="sm" PaperProps={DESIGN_TOKENS.dialog.paper}>
                 <DialogTitle sx={DESIGN_TOKENS.dialog.title.sx}>
-                    <Box><Typography variant="h6">{selectedMetric?.title} (30 Tage Trend)</Typography></Box>
+                    <Box><Typography variant="h6">{selectedMetric?.title} Trend (30 Tage)</Typography></Box>
                     <IconButton onClick={() => setSelectedMetric(null)} sx={{ color: 'white' }}><Icons.Close /></IconButton>
                 </DialogTitle>
                 <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
-                    <Box sx={{ height: 300, mt: 2 }}>
-                        <ResponsiveContainer width="100%" height="100%">
-                            <AreaChart data={trendData}>
-                                <defs>
-                                    <linearGradient id="colorVal" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor={PALETTE.accents.pink} stopOpacity={0.8}/>
-                                        <stop offset="95%" stopColor={PALETTE.accents.pink} stopOpacity={0}/>
-                                    </linearGradient>
-                                </defs>
-                                <CartesianGrid strokeDasharray="3 3" stroke={CHART_THEME.grid.line.stroke} />
-                                <XAxis dataKey="name" stroke={CHART_THEME.textColor} tick={{fontSize: 10}} interval={2} />
-                                <YAxis stroke={CHART_THEME.textColor} tick={{fontSize: 10}} />
-                                <RechartsTooltip contentStyle={CHART_THEME.tooltip.container} />
-                                <Area type="monotone" dataKey="value" stroke={PALETTE.accents.pink} fillOpacity={1} fill="url(#colorVal)" />
-                            </AreaChart>
-                        </ResponsiveContainer>
-                    </Box>
-                    <Typography variant="caption" color="text.secondary" align="center" display="block" sx={{mt:2}}>
-                        Zeitachse: Letzte 30 Tage • Wert: Aktivitätsminuten / Anzahl
-                    </Typography>
+                    {['enclosure', 'nocturnal', 'exposure', 'resistance', 'cpnh', 'ladder'].includes(selectedMetric?.id) ? (
+                        <>
+                        <Box sx={{ height: 300, mt: 2 }}>
+                            <ResponsiveContainer width="100%" height="100%">
+                                <AreaChart data={trendData}>
+                                    <defs>
+                                        <linearGradient id="colorVal" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor={PALETTE.accents.pink} stopOpacity={0.8}/>
+                                            <stop offset="95%" stopColor={PALETTE.accents.pink} stopOpacity={0}/>
+                                        </linearGradient>
+                                    </defs>
+                                    <CartesianGrid strokeDasharray="3 3" stroke={CHART_THEME.grid.line.stroke} />
+                                    <XAxis dataKey="name" stroke={CHART_THEME.textColor} tick={{fontSize: 10}} interval={4} />
+                                    <YAxis stroke={CHART_THEME.textColor} tick={{fontSize: 10}} unit={getUnit(selectedMetric?.id)} width={35} />
+                                    <RechartsTooltip 
+                                        contentStyle={CHART_THEME.tooltip.container} 
+                                        formatter={(value) => [value + getUnit(selectedMetric?.id), "Wert"]}
+                                        labelFormatter={(label) => `Tag: ${label}`}
+                                    />
+                                    <Area type="monotone" dataKey="value" stroke={PALETTE.accents.pink} fillOpacity={1} fill="url(#colorVal)" animationDuration={1000} />
+                                </AreaChart>
+                            </ResponsiveContainer>
+                        </Box>
+                        <Typography variant="caption" color="text.secondary" align="center" display="block" sx={{mt:2}}>
+                            Gleitender Durchschnitt (5 Tage) • Letzte 30 Tage
+                        </Typography>
+                        </>
+                    ) : (
+                        <Box sx={{ py: 4, textAlign: 'center' }}>
+                            <Typography color="text.secondary">Für diese statische Metrik ist kein Zeitverlauf verfügbar.</Typography>
+                        </Box>
+                    )}
                 </DialogContent>
             </Dialog>
             </Container>
