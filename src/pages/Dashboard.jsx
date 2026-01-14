@@ -40,12 +40,11 @@ import PunishmentDialog from '../components/dialogs/PunishmentDialog';
 import LaundryDialog from '../components/dialogs/LaundryDialog';
 
 // UI & THEME
-// FIX: MOTION importiert
 import { DESIGN_TOKENS, PALETTE, MOTION } from '../theme/obsidianDesign';
 import { 
     Box, Typography, Dialog, DialogTitle, DialogContent, DialogActions, 
     Snackbar, Alert, FormGroup, FormControlLabel, Checkbox, TextField, 
-    Button, CircularProgress, Container, Paper, Chip, LinearProgress, Divider
+    Button, CircularProgress, Container, Paper, Chip, LinearProgress, Divider, IconButton
 } from '@mui/material';
 import AnalyticsIcon from '@mui/icons-material/Analytics';
 import NightlightRoundIcon from '@mui/icons-material/NightlightRound';
@@ -117,8 +116,6 @@ export default function Dashboard() {
   const { activeSessions, progress, loading: sessionsLoading, dailyTargetHours, startInstructionSession, stopSession, registerRelease: hookRegisterRelease, loadActiveSessions } = useSessionProgress(currentUser, items);
   
   const { femIndex, femIndexLoading, indexDetails } = useFemIndex(currentUser, items, activeSessions); 
-  
-  // FIX: useKPIs Parameter korrigiert (verhindert 'filter' Fehler)
   const { kpis } = useKPIs(items, activeSessions); 
 
   const [wishlistCount, setWishlistCount] = useState(0);
@@ -165,7 +162,6 @@ export default function Dashboard() {
   const [maxInstructionItems, setMaxInstructionItems] = useState(1);
   const [currentPeriod, setCurrentPeriod] = useState('');
   
-  // FIX: isNight definieren
   const isNight = currentPeriod ? currentPeriod.includes('night') : false;
 
   const [isFreeDay, setIsFreeDay] = useState(false);
@@ -253,6 +249,7 @@ export default function Dashboard() {
       } catch (e) { showToast("Fehler beim Release", "error"); } finally { setReleaseDialogOpen(false); if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current); }
   };
 
+  // FIX: Unabhängig von items.length machen, damit isNight korrekt initialisiert wird
   const getPeriodId = useCallback(() => {
     const d = new Date(); const mins = d.getHours() * 60 + d.getMinutes(); 
     let period = (mins >= 450 && mins < 1380) ? 'day' : 'night';
@@ -291,12 +288,11 @@ export default function Dashboard() {
       } catch (e) { console.error(e); setCurrentInstruction(null); } finally { setInstructionStatus('ready'); }
   };
 
+  // FIX: Time update Logik
   useEffect(() => {
-    if (items.length > 0 && !sessionsLoading) {
-        const newPeriod = getPeriodId();
-        if (newPeriod !== lastCheckedPeriod.current) { lastCheckedPeriod.current = newPeriod; setCurrentPeriod(newPeriod); }
-    }
-  }, [items.length, sessionsLoading, now, getPeriodId]);
+    const newPeriod = getPeriodId();
+    if (newPeriod !== lastCheckedPeriod.current) { lastCheckedPeriod.current = newPeriod; setCurrentPeriod(newPeriod); }
+  }, [now, getPeriodId]);
 
   useEffect(() => {
     if (items.length > 0 && !sessionsLoading && currentPeriod) {
@@ -407,15 +403,26 @@ export default function Dashboard() {
       <Container maxWidth="md" sx={{ pt: 2, pb: 4 }}>
         <motion.div variants={MOTION.page} initial="initial" animate="animate" exit="exit">
             
-            {/* Header */}
-            <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Typography variant="h4" sx={DESIGN_TOKENS.textGradient}>Dashboard</Typography>
-                <Chip label="Online" color="success" variant="outlined" size="small" icon={<Icons.CheckCircle />} />
+            {/* Header: Wiederhergestellt mit Begrüßung, Datum und Budget-Button */}
+            <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <Box>
+                    <Typography variant="h4" sx={DESIGN_TOKENS.textGradient}>
+                        {getGreeting()}, {currentUser?.displayName || 'Sub'}
+                    </Typography>
+                    <Typography variant="subtitle2" color="text.secondary">
+                        {new Date().toLocaleDateString('de-DE', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                    </Typography>
+                </Box>
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                     <IconButton onClick={() => navigate('/budget')} sx={{ bgcolor: 'rgba(255,255,255,0.05)', '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' } }}>
+                         <AccountBalanceWalletIcon color="primary" />
+                     </IconButton>
+                     <Chip label="Online" color="success" variant="outlined" size="small" icon={<Icons.CheckCircle />} sx={{ height: 40 }} />
+                </Box>
             </Box>
 
-            {/* KPI Tiles */}
-            <InfoTiles kpis={kpis} />
-
+            {/* Layout-Reihenfolge korrigiert: Erst Progress/Bars, dann InfoTiles */}
+            
             {/* Main Progress */}
             <ProgressBar 
                 currentMinutes={progress.currentContinuousMinutes} 
@@ -427,18 +434,30 @@ export default function Dashboard() {
             {/* Fem Index */}
             <FemIndexBar femIndex={femIndex || 0} loading={femIndexLoading} />
 
-            {/* Active Sessions */}
+            {/* KPI Tiles (Jetzt unterhalb der Balken) */}
+            <InfoTiles kpis={kpis} />
+
+            {/* Active Sessions (Props korrigiert: items und washingItemsCount übergeben) */}
             <ActiveSessionsList 
                 activeSessions={activeSessions} 
+                items={items}
+                punishmentStatus={punishmentStatus}
+                washingItemsCount={items.filter(i => i.status === 'washing').length}
+                onNavigateItem={(id) => navigate(`/item/${id}`)}
                 onStopSession={stopSession}
                 onOpenLaundry={() => setLaundryOpen(true)}
                 onOpenRelease={handleOpenRelease}
             />
 
-            {/* Actions */}
+            {/* Actions (Props für korrekte Button-Anzeige ergänzt) */}
             <ActionButtons 
                 punishmentStatus={punishmentStatus} 
-                auditDue={auditDue} 
+                auditDue={auditDue}
+                isFreeDay={isFreeDay}
+                freeDayReason={freeDayReason}
+                currentInstruction={currentInstruction}
+                currentPeriod={currentPeriod}
+                isHoldingOath={isHoldingOath}
                 onOpenInstruction={() => setInstructionOpen(true)}
                 onStartPunishment={() => {
                     if (punishmentItem?.nfcTagId) { setPunishmentScanMode('start'); setPunishmentScanOpen(true); } 
