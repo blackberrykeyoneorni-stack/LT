@@ -1,22 +1,22 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useSecurity } from '../contexts/SecurityContext';
 import { useAuth } from '../contexts/AuthContext';
 import LockScreen from './LockScreen';
 
 export default function SecurityLock({ children }) {
-  const { isLocked, isBiometricActive } = useSecurity();
+  const { isLocked, isBiometricActive, lockNow } = useSecurity();
   const { currentUser } = useAuth();
 
-  // Zeige den LockScreen nur, wenn:
-  // 1. Ein User eingeloggt ist
-  // 2. Biometrie in den Settings aktiviert ist
-  // 3. Der Status aktuell "gesperrt" ist
+  // Sicherheits-Check: Wenn die App in den Hintergrund geht (optional, für später)
+  // oder neu geladen wird, greift der Initial-State aus dem Context.
+
+  // Logik: Zeige LockScreen nur, wenn User eingeloggt UND Sicherheits-Feature aktiv UND Status gesperrt
   const showLock = currentUser && isBiometricActive && isLocked;
 
-  // SICHERHEITS-FIX: Rendere children NUR, wenn nicht gesperrt.
   if (showLock) {
     return <LockScreen />;
   }
 
+  // Wenn nicht gesperrt, zeige die App
   return <>{children}</>;
 }

@@ -1,20 +1,21 @@
 import React from 'react';
-import { Box, Typography, Button, Container } from '@mui/material'; // Paper entfernt, da nicht genutzt
+import { Box, Typography, Button, Container, Avatar } from '@mui/material';
 import { useSecurity } from '../contexts/SecurityContext';
 import { useAuth } from '../contexts/AuthContext';
 
-// --- NEW SYSTEM IMPORTS ---
+// Design Imports
 import { DESIGN_TOKENS, PALETTE } from '../theme/obsidianDesign';
 import { Icons } from '../theme/appIcons';
 
 export default function LockScreen() {
-  const { unlock, forceUnlock } = useSecurity();
+  const { unlock, forceUnlock, authError } = useSecurity();
   const { login } = useAuth(); 
 
+  // Fallback: Wenn Biometrie kaputt ist, kann man sich über Google neu einloggen
   const handleFallback = async () => {
     try {
       await login(); 
-      forceUnlock();
+      forceUnlock(); // Wenn Login erfolgreich, sperre auf
     } catch (e) {
       console.error("Fallback fehlgeschlagen", e);
     }
@@ -27,63 +28,79 @@ export default function LockScreen() {
       left: 0, 
       right: 0, 
       bottom: 0, 
-      // ZENTRALISIERTER HINTERGRUND
-      background: PALETTE.gradients.dark,
-      zIndex: 9999, 
+      bgcolor: PALETTE.background.default, // Deep Dark Background
+      zIndex: 99999, // Muss über allem liegen
       display: 'flex', 
       alignItems: 'center', 
       justifyContent: 'center',
-      touchAction: 'none'
+      touchAction: 'none' // Verhindert Scrollen
     }}>
-      <Container maxWidth="xs" sx={{ textAlign: 'center' }}>
+      <Container maxWidth="xs" sx={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+        
+        {/* Icon Circle mit Glow */}
         <Box sx={{ 
           position: 'relative', 
-          display: 'inline-flex', 
-          p: 4, 
-          borderRadius: '50%',
-          // ZENTRALISIERTE GLAS-OPTIK
-          ...DESIGN_TOKENS.glassCard,
-          border: `1px solid ${PALETTE.primary.main}33`,
           mb: 4,
-          boxShadow: `0 0 30px ${PALETTE.primary.main}20` // Zusätzlicher Glow passend zum Theme
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center'
         }}>
-           <Icons.Lock sx={{ fontSize: 60, color: PALETTE.primary.main }} />
+           <Avatar sx={{ 
+               width: 80, 
+               height: 80, 
+               bgcolor: 'rgba(76, 221, 174, 0.1)', // Primary Transparent
+               color: PALETTE.primary.main 
+           }}>
+               <Icons.Lock sx={{ fontSize: 40 }} />
+           </Avatar>
         </Box>
         
-        <Typography variant="h4" gutterBottom sx={DESIGN_TOKENS.textGradient}>
-          LACE TRACKER
+        <Typography variant="h4" gutterBottom sx={{ color: PALETTE.text.primary, fontWeight: 400, letterSpacing: 1 }}>
+          GESPERRT
         </Typography>
-        <Typography variant="body1" sx={{ mb: 8, color: PALETTE.text.secondary }}>
-          Sicherer Bereich
+        
+        <Typography variant="body1" sx={{ mb: 6, color: PALETTE.text.secondary }}>
+          Authentifizierung erforderlich
         </Typography>
 
+        {/* Fehlermeldung falls vorhanden */}
+        {authError && (
+            <Typography variant="caption" color="error" sx={{ mb: 2, display: 'block' }}>
+                {authError}
+            </Typography>
+        )}
+
+        {/* Haupt-Button: Startet Biometrie/PIN Dialog vom System */}
         <Button 
           variant="contained" 
           size="large" 
           startIcon={<Icons.Fingerprint />} 
           onClick={unlock}
           sx={{ 
-            ...DESIGN_TOKENS.buttonGradient,
-            py: 2, 
-            px: 6, 
-            borderRadius: 50, 
-            fontSize: '1.1rem',
-            mb: 2
+            ...DESIGN_TOKENS.buttonGradient, // Pill Shape
+            width: '100%',
+            py: 1.5,
+            mb: 3,
+            fontSize: '1rem'
           }}
         >
-          Entsperren
+          Gerät entsperren
         </Button>
         
-        <Box>
-          <Button 
-            variant="text" 
-            size="small" 
-            onClick={handleFallback}
-            sx={{ opacity: 0.5, fontSize: '0.75rem', color: PALETTE.text.muted }}
-          >
-            Biometrie defekt? Login nutzen
-          </Button>
-        </Box>
+        <Typography variant="caption" sx={{ color: PALETTE.text.muted, mb: 1 }}>
+            Nutzt Fingerabdruck, FaceID oder Geräte-PIN
+        </Typography>
+
+        {/* Notfall Login */}
+        <Button 
+          variant="text" 
+          size="small" 
+          onClick={handleFallback}
+          sx={{ color: PALETTE.text.secondary, mt: 4 }}
+        >
+          Probleme? Mit Google Account öffnen
+        </Button>
+
       </Container>
     </Box>
   );

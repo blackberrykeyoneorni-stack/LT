@@ -1,91 +1,98 @@
 import React from 'react';
-import { Box, Typography, Tooltip } from '@mui/material';
-import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
+import { Box, Typography, Tooltip, useTheme, Card } from '@mui/material';
 import { motion } from 'framer-motion';
 import NightlightRoundIcon from '@mui/icons-material/NightlightRound';
 import LockIcon from '@mui/icons-material/Lock';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 
 const formatTargetTime = (decimalHours) => {
     if (!decimalHours || isNaN(decimalHours)) return "0h 0m";
     const h = Math.floor(decimalHours);
     const m = Math.round((decimalHours - h) * 60);
-    if (m === 60) return `${h + 1}h 0m`;
     return `${h}h ${m}m`;
 };
 
 export default function ProgressBar({ currentMinutes, targetHours, isGoalMetToday, progressData }) {
+    const theme = useTheme();
+    const m3 = theme.palette.m3; // Zugriff auf unsere Android 16 Tokens
+
     const percentage = progressData?.percentage || (isGoalMetToday ? 100 : Math.min(100, (currentMinutes / (targetHours * 60)) * 100));
     const nightStatus = progressData?.nightStatus || 'unknown'; 
     const isLocked = progressData?.isNightLocked || false;
 
-    let barColor = isGoalMetToday ? PALETTE.accents.green : PALETTE.primary.main;
-    let borderColor = 'rgba(255, 255, 255, 0.1)'; 
+    // M3 STATE LOGIK
+    // 1. Locked: Error State (Rot/Gedämpft)
+    // 2. Goal Met: Primary Container (Abgeschlossen/Erledigt)
+    // 3. Active: Primary (Teal)
+    let barColor = m3.primary;
+    let trackColor = m3.surfaceContainerHighest;
+    let iconColor = m3.onSurfaceVariant;
     
     if (isLocked) {
-        barColor = PALETTE.accents.red; 
-        borderColor = `${PALETTE.accents.red}50`;
-    } else if (nightStatus === 'fulfilled') {
-        borderColor = `${PALETTE.accents.gold}40`; 
+        barColor = m3.error;
+        trackColor = m3.errorContainer; // Rötlicher Hintergrund
+        iconColor = m3.error;
+    } else if (isGoalMetToday) {
+        barColor = m3.primary; // Bleibt Primary für Konsistenz
     }
 
     return (
-        <Box 
-            component={motion.div}
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            sx={{ 
-                mb: 3, position: 'relative',
-                ...DESIGN_TOKENS.glassCard,
-                border: `1px solid ${borderColor}`,
-                p: 2.5
-            }}
-        >
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
-                <Typography variant="subtitle2" sx={{ fontWeight: 600, color: isLocked ? PALETTE.accents.red : 'text.primary' }}>
-                    {isLocked ? "TAGESZIEL GESPERRT" : "Tagesfortschritt"}
+        <Card sx={{ mb: 3, p: 2.5, position: 'relative', overflow: 'visible' }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Box>
+                    <Typography variant="subtitle2" sx={{ color: isLocked ? m3.error : theme.palette.text.primary }}>
+                        {isLocked ? "TAGESZIEL GESPERRT" : "Tagesfortschritt"}
+                    </Typography>
                     {!isLocked && (
-                        <Typography component="span" color="text.secondary" sx={{ fontWeight: 400, ml: 1 }}>
-                            ({formatTargetTime(targetHours)} Ziel)
+                        <Typography variant="body2" sx={{ color: theme.palette.text.secondary, fontSize: '0.75rem' }}>
+                            {formatTargetTime(targetHours)} Zielvorgabe
                         </Typography>
                     )}
-                </Typography>
+                </Box>
                 
-                <Tooltip title={isLocked ? "Gesperrt" : "Nachtstatus"}>
-                    <motion.div animate={{ scale: nightStatus === 'fulfilled' ? 1.1 : 1, opacity: 1 }}>
-                        <Box sx={{ 
-                            display: 'flex', alignItems: 'center', gap: 0.5, 
-                            color: nightStatus === 'fulfilled' ? PALETTE.accents.gold : 'text.disabled',
-                            filter: nightStatus === 'fulfilled' ? 'drop-shadow(0 0 5px rgba(255, 215, 0, 0.5))' : 'none'
-                        }}>
-                            {isLocked ? <LockIcon fontSize="small" color="error" /> : <NightlightRoundIcon fontSize="small" />}
-                        </Box>
-                    </motion.div>
+                <Tooltip title={isLocked ? "Gesperrt" : "Status"}>
+                    <Box sx={{ 
+                        display: 'flex', alignItems: 'center', gap: 1,
+                        color: iconColor,
+                        bgcolor: isLocked ? m3.errorContainer : m3.surfaceContainerHighest,
+                        px: 1.5, py: 0.5, borderRadius: '8px'
+                    }}>
+                        {isLocked ? <LockIcon fontSize="small" /> : (
+                            isGoalMetToday ? <CheckCircleIcon fontSize="small" sx={{color: m3.primary}}/> : <NightlightRoundIcon fontSize="small" />
+                        )}
+                        {nightStatus === 'fulfilled' && !isLocked && <Typography variant="caption" fontWeight="bold">Nacht OK</Typography>}
+                    </Box>
                 </Tooltip>
             </Box>
 
-            <Box sx={{ position: 'relative', height: 10, bgcolor: 'rgba(255,255,255,0.08)', borderRadius: 5, overflow: 'hidden' }}>
+            {/* M3 PROGRESS TRACK (Pill Shape) */}
+            <Box sx={{ 
+                position: 'relative', 
+                height: 16, // Höher für Touch/Visibility
+                bgcolor: trackColor, 
+                borderRadius: '9999px', // Pill
+                overflow: 'hidden' 
+            }}>
                 <motion.div
                     initial={{ width: 0 }}
                     animate={{ width: `${percentage}%` }}
-                    transition={{ duration: 1, type: 'spring' }}
+                    transition={{ duration: 1, type: 'spring', stiffness: 50 }}
                     style={{
                         height: '100%',
                         backgroundColor: barColor,
-                        backgroundImage: isLocked 
-                            ? `repeating-linear-gradient(45deg, ${PALETTE.accents.red}, ${PALETTE.accents.red} 10px, #330000 10px, #330000 20px)`
-                            : `linear-gradient(90deg, ${barColor}, ${isGoalMetToday ? '#00ff88' : PALETTE.primary.light})`,
+                        borderRadius: '9999px', // Inner Pill
                     }}
                 />
             </Box>
             
             <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1 }}>
-                <Typography variant="caption" color={isLocked ? "error" : "text.secondary"}>
-                    {isLocked ? "Nicht erfüllt" : `${Math.floor(currentMinutes / 60)}h ${currentMinutes % 60}m`}
+                <Typography variant="body2" sx={{ color: isLocked ? m3.error : theme.palette.text.secondary, fontWeight: 500 }}>
+                    {isLocked ? "Zugriff verweigert" : `${Math.floor(currentMinutes / 60)}h ${currentMinutes % 60}m`}
                 </Typography>
-                <Typography variant="caption" color="text.secondary" fontWeight="bold">
+                <Typography variant="body2" sx={{ color: theme.palette.text.primary, fontWeight: 'bold' }}>
                     {percentage.toFixed(0)}%
                 </Typography>
             </Box>
-        </Box>
+        </Card>
     );
 }

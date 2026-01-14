@@ -34,8 +34,9 @@ export default function Settings() {
   // STATE DEFINITIONS
   const [brands, setBrands] = useState([]); const [newBrand, setNewBrand] = useState('');
   const [materials, setMaterials] = useState([]); const [newMaterial, setNewMaterial] = useState('');
-  const [catStructure, setCatStructure] = useState({}); const [newMainCat, setNewMainCat] = useState(''); const [newSubCat, setNewSubCat] = useState(''); 
+  const [catStructure, setCatStructure] = useState({}); const [newMainCat, setNewMainCat] = useState(''); const [newSubCat, setNewSubCat] = useState(''); const [selectedMainForSub, setSelectedMainForSub] = useState('');
   const [locations, setLocations] = useState([]); const [newLocation, setNewLocation] = useState(''); const [locationIndex, setLocationIndex] = useState({}); const [pairingLocation, setPairingLocation] = useState(null);
+  const [archiveReasons, setArchiveReasons] = useState([]); const [newArchiveReason, setNewArchiveReason] = useState(''); const [runLocations, setRunLocations] = useState([]); const [newRunLocation, setNewRunLocation] = useState(''); const [runCauses, setRunCauses] = useState([]); const [newRunCause, setNewRunCause] = useState('');
   
   // Preferences
   const [dailyTargetHours, setDailyTargetHours] = useState(3); const [nylonRestingHours, setNylonRestingHours] = useState(24); const [maxInstructionItems, setMaxInstructionItems] = useState(1); const [previousTarget, setPreviousTarget] = useState(null);
@@ -46,7 +47,7 @@ export default function Settings() {
   const [categoryWeights, setCategoryWeights] = useState({}); const [weightTarget, setWeightTarget] = useState(''); const [weightValue, setWeightValue] = useState(2);
   
   // UI States
-  const [loading, setLoading] = useState(true); const [backupLoading, setBackupLoading] = useState(false); const [resetModalOpen, setResetModalOpen] = useState(false); const [toast, setToast] = useState({ open: false, message: '', severity: 'success' });
+  const [loading, setLoading] = useState(true); const [backupLoading, setBackupLoading] = useState(false); const [repairLoading, setRepairLoading] = useState(false); const [resetModalOpen, setResetModalOpen] = useState(false); const [toast, setToast] = useState({ open: false, message: '', severity: 'success' });
   
   const showToast = (message, severity = 'success') => setToast({ open: true, message, severity });
   const handleCloseToast = () => setToast({ ...toast, open: false });
@@ -62,13 +63,16 @@ export default function Settings() {
   const loadAll = async () => {
       try {
           const userId = currentUser.uid;
-          const [bSnap, mSnap, catSnap, locSnap, locIdxSnap, prefSnap] = await Promise.all([
+          const [bSnap, mSnap, catSnap, locSnap, locIdxSnap, prefSnap, arSnap, rlSnap, rcSnap] = await Promise.all([
               getDoc(doc(db, `users/${userId}/settings/brands`)),
               getDoc(doc(db, `users/${userId}/settings/materials`)),
               getDoc(doc(db, `users/${userId}/settings/categories`)),
               getDoc(doc(db, `users/${userId}/settings/locations`)),
               getDoc(doc(db, `users/${userId}/settings/locationIndex`)),
               getDoc(doc(db, `users/${userId}/settings/preferences`)),
+              getDoc(doc(db, `users/${userId}/settings/archiveReasons`)),
+              getDoc(doc(db, `users/${userId}/settings/runLocations`)),
+              getDoc(doc(db, `users/${userId}/settings/runCauses`))
           ]);
 
           if (bSnap.exists()) setBrands(bSnap.data().list || []);
@@ -88,6 +92,10 @@ export default function Settings() {
               setPreviousTarget(d.previousDailyTarget || null);
           }
 
+          setArchiveReasons(arSnap.exists() ? arSnap.data().list : [{label:'Laufmasche', value:'run'}, {label:'Verschlissen', value:'worn'}, {label:'Verloren', value:'lost'}]);
+          setRunLocations(rlSnap.exists() ? rlSnap.data().list : ['Zehe', 'Ferse', 'Oberschenkel', 'Zwickel']);
+          setRunCauses(rcSnap.exists() ? rcSnap.data().list : ['Schuhe', 'Nägel', 'Schmuck', 'Unbekannt']);
+
       } catch (e) {
           console.error("Load Settings Error:", e);
           showToast("Fehler beim Laden der Einstellungen", "error");
@@ -101,45 +109,7 @@ export default function Settings() {
       setBiometricAvailable(avail);
   };
 
-  // --- CATEGORY ACTIONS ---
-  const updateCategories = async (newStruct) => {
-      try {
-          await setDoc(doc(db, `users/${currentUser.uid}/settings/categories`), { structure: newStruct }, { merge: true });
-          setCatStructure(newStruct);
-          showToast("Kategorien aktualisiert", "success");
-      } catch (e) { showToast("Fehler beim Speichern", "error"); }
-  };
-
-  const addMainCategory = async () => {
-    if (!newMainCat.trim()) return;
-    if (catStructure[newMainCat.trim()]) return showToast("Kategorie existiert bereits", "error");
-    const newStruct = { ...catStructure, [newMainCat.trim()]: [] };
-    await updateCategories(newStruct);
-    setNewMainCat('');
-  };
-
-  const removeMainCategory = async (main) => {
-    if (!window.confirm(`Kategorie "${main}" und alle Subkategorien löschen?`)) return;
-    const newStruct = { ...catStructure };
-    delete newStruct[main];
-    await updateCategories(newStruct);
-  };
-
-  const addSubCategory = async (main) => {
-    if (!newSubCat.trim()) return;
-    const currentSubs = catStructure[main] || [];
-    if (currentSubs.includes(newSubCat.trim())) return showToast("Subkategorie existiert bereits", "error");
-    const newStruct = { ...catStructure, [main]: [...currentSubs, newSubCat.trim()] };
-    await updateCategories(newStruct);
-    setNewSubCat('');
-  };
-
-  const removeSubCategory = async (main, sub) => {
-      const newStruct = { ...catStructure, [main]: catStructure[main].filter(s => s !== sub) };
-      await updateCategories(newStruct);
-  };
-
-  // --- OTHER ACTIONS ---
+  // --- ACTIONS ---
 
   const handleStartPairing = (loc) => {
       setPairingLocation(loc);
@@ -192,6 +162,43 @@ export default function Settings() {
       } catch(e) { showToast("Fehler", "error"); }
   };
 
+  const updateCategories = async (newStruct) => {
+      try {
+          await setDoc(doc(db, `users/${currentUser.uid}/settings/categories`), { structure: newStruct }, { merge: true });
+          setCatStructure(newStruct);
+          showToast("Kategorien aktualisiert", "success");
+      } catch (e) { showToast("Fehler beim Speichern", "error"); }
+  };
+
+  const addMainCategory = async () => {
+    if (!newMainCat.trim()) return;
+    if (catStructure[newMainCat.trim()]) return showToast("Kategorie existiert bereits", "error");
+    const newStruct = { ...catStructure, [newMainCat.trim()]: [] };
+    await updateCategories(newStruct);
+    setNewMainCat('');
+  };
+
+  const removeMainCategory = async (main) => {
+    if (!window.confirm(`Kategorie "${main}" und alle Subkategorien löschen?`)) return;
+    const newStruct = { ...catStructure };
+    delete newStruct[main];
+    await updateCategories(newStruct);
+  };
+
+  const addSubCategory = async (main) => {
+    if (!newSubCat.trim()) return;
+    const currentSubs = catStructure[main] || [];
+    if (currentSubs.includes(newSubCat.trim())) return showToast("Subkategorie existiert bereits", "error");
+    const newStruct = { ...catStructure, [main]: [...currentSubs, newSubCat.trim()] };
+    await updateCategories(newStruct);
+    setNewSubCat('');
+  };
+
+  const removeSubCategory = async (main, sub) => {
+      const newStruct = { ...catStructure, [main]: catStructure[main].filter(s => s !== sub) };
+      await updateCategories(newStruct);
+  };
+
   const addWeight = () => {
       if (weightTarget) {
           setCategoryWeights(prev => ({ ...prev, [weightTarget]: weightValue }));
@@ -238,7 +245,7 @@ export default function Settings() {
 
   if (loading) return <Box sx={{ display: 'flex', justifyContent: 'center', mt: 10 }}><CircularProgress /></Box>;
 
-  // Flatten Categories for Dropdown in Algorithm
+  // Flatten Categories for Dropdown
   const allCategoryOptions = [];
   Object.keys(catStructure).forEach(main => {
       allCategoryOptions.push({ label: `HAUPT: ${main}`, value: main });
@@ -246,7 +253,8 @@ export default function Settings() {
   });
 
   return (
-    <Container maxWidth="md" disableGutters sx={{ pt: 1, pb: 10, px: 2 }}>
+    // KORREKTUR: Padding reduziert (px: 1 statt px: 2), damit Accordions breiter werden
+    <Container maxWidth="md" disableGutters sx={{ pt: 1, pb: 10, px: 1 }}>
       <Typography variant="h4" gutterBottom sx={DESIGN_TOKENS.textGradient}>Einstellungen</Typography>
 
       {/* --- PREFERENCES --- */}
@@ -351,7 +359,7 @@ export default function Settings() {
       <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, borderLeft: `4px solid ${PALETTE.accents.purple}` }}>
          <AccordionSummary expandIcon={<Icons.Expand />}><SectionHeader icon={Icons.Brain} title="Algorithmus" color={PALETTE.accents.purple} /></AccordionSummary>
          <AccordionDetails sx={DESIGN_TOKENS.accordion.details}>
-            <Alert severity="info" sx={{mb: 2, bgcolor: 'rgba(255,255,255,0.05)', color: '#fff'}}>Gewichtung für die zufällige Anweisung.</Alert>
+            <Alert severity="info" sx={{mb: 2, bgcolor: 'rgba(255,255,255,0.05)', color: '#fff'}}>Weighted Randomness Anpassung.</Alert>
             <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-end', mb: 3 }}>
                 <FormControl fullWidth size="small">
                     <InputLabel>Kategorie</InputLabel>
@@ -373,9 +381,9 @@ export default function Settings() {
          </AccordionDetails>
       </Accordion>
 
-      {/* --- LISTEN & RESSOURCEN --- */}
+      {/* --- LISTEN MANAGER --- */}
       <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, borderLeft: `4px solid ${PALETTE.accents.blue}` }}>
-         <AccordionSummary expandIcon={<Icons.Expand />}><SectionHeader icon={Icons.Inventory} title="Listen & Ressourcen" color={PALETTE.accents.blue} /></AccordionSummary>
+         <AccordionSummary expandIcon={<Icons.Expand />}><SectionHeader icon={Icons.Inventory} title="Listen & Orte" color={PALETTE.accents.blue} /></AccordionSummary>
          <AccordionDetails sx={DESIGN_TOKENS.accordion.details}>
              
              {/* Lagerorte */}
@@ -413,7 +421,7 @@ export default function Settings() {
 
              <Divider sx={{ my: 2 }} />
 
-             {/* Materialien (NEU HINZUGEFÜGT) */}
+             {/* Materialien (NEU) */}
              <Typography variant="subtitle2" sx={{ mt: 1, mb: 1 }}>Materialien</Typography>
              <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
                 <TextField size="small" fullWidth label="Neues Material" value={newMaterial} onChange={e => setNewMaterial(e.target.value)} />

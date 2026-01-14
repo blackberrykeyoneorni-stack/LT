@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useAuth } from './AuthContext';
-// Wir importieren die echten Services, um den Status zu prüfen und die Abfrage zu starten
 import { isBiometricEnabled, verifyBiometrics, isBiometricSupported } from '../services/BiometricService';
 
 const SecurityContext = createContext();
@@ -12,54 +11,58 @@ export function useSecurity() {
 export function SecurityProvider({ children }) {
   const { currentUser } = useAuth();
 
-  // 1. ECHTER STATUS: Wir lesen beim Start aus, ob Biometrie in den Settings aktiviert wurde
-  const [isBiometricActive, setIsBiometricActive] = useState(isBiometricEnabled());
+  // 1. INITIALISIERUNG: Prüfen, ob der User das Feature aktiviert hat
+  // WICHTIG: Wir holen den Wert direkt beim Start, damit kein "Flackern" entsteht
+  const [isBiometricActive, setIsBiometricActive] = useState(() => isBiometricEnabled());
   
-  // 2. SPERR-LOGIK: Wenn Biometrie aktiv ist, starten wir "gesperrt" (true), sonst offen (false)
-  const [isLocked, setIsLocked] = useState(isBiometricEnabled());
+  // 2. SPERR-ZUSTAND: Wenn aktiv, dann starten wir GESPERRT (true)
+  const [isLocked, setIsLocked] = useState(() => isBiometricEnabled());
 
   const [biometricsAvailable, setBiometricsAvailable] = useState(false);
   const [authError, setAuthError] = useState(null);
 
-  // Diese Funktion wird von der Settings-Seite aufgerufen, wenn du den Schalter umlegst
+  // Hardware-Check beim Start
+  useEffect(() => {
+    const checkSupport = async () => {
+        const supported = await isBiometricSupported();
+        setBiometricsAvailable(supported);
+    };
+    checkSupport();
+  }, []);
+
+  // Wird aus den Settings aufgerufen, wenn der Switch betätigt wird
   const updateStatus = () => {
       const enabled = isBiometricEnabled();
       setIsBiometricActive(enabled);
-      // Wenn wir es gerade ausschalten, entsperren wir auch sofort
-      if (!enabled) setIsLocked(false);
+      if (!enabled) setIsLocked(false); // Sofort entsperren, wenn deaktiviert
   };
 
-  // Prüfen, ob das Gerät überhaupt einen Scanner hat (Pixel 9 Pro hat einen)
-  useEffect(() => {
-    isBiometricSupported().then(available => {
-        setBiometricsAvailable(available);
-    });
-  }, []);
-
-  // Die Unlock-Funktion: Ruft den Fingerabdruck-Scanner des Browsers auf
+  // Die Hauptfunktion zum Entsperren
   const unlock = async () => {
     setAuthError(null);
     try {
-        // Das hier öffnet das System-Popup (Fingerabdruck / FaceID)
+        // Dies triggert den Android-System-Dialog (Face/Finger + PIN Backup)
         const success = await verifyBiometrics();
+        
         if (success) {
             setIsLocked(false);
         } else {
-            setAuthError("Verifizierung fehlgeschlagen");
+            // Fehlermeldung, aber wir bleiben im Lockscreen
+            setAuthError("Verifizierung fehlgeschlagen. Bitte erneut versuchen.");
         }
     } catch (e) {
         console.error("Unlock Error", e);
-        setAuthError("Fehler beim Entsperren");
+        setAuthError("Geräte-Sicherheit nicht verfügbar.");
     }
   };
 
-  // Notfall-Unlock (z.B. nach Google Login)
+  // Notfall-Unlock (z.B. nach erfolgreichem Firebase Re-Login)
   const forceUnlock = () => {
     setIsLocked(false);
     setAuthError(null);
   };
 
-  // Manuelles Sperren (z.B. Button im Menü)
+  // Manuelles Sperren (z.B. Timeout oder Button)
   const lockNow = () => {
     if (isBiometricActive) {
         setIsLocked(true);
