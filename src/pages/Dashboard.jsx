@@ -17,7 +17,7 @@ import { motion } from 'framer-motion';
 
 // HOOKS
 import useSessionProgress from '../hooks/dashboard/useSessionProgress';
-import useFemIndex from '../hooks/dashboard/useFemIndex'; // KORRIGIERT: Default Import
+import useFemIndex from '../hooks/dashboard/useFemIndex';
 import { useKPIs } from '../hooks/useKPIs'; 
 
 // SERVICES
@@ -40,7 +40,8 @@ import PunishmentDialog from '../components/dialogs/PunishmentDialog';
 import LaundryDialog from '../components/dialogs/LaundryDialog';
 
 // UI & THEME
-import { DESIGN_TOKENS, PALETTE } from '../theme/obsidianDesign';
+// FIX: MOTION importiert
+import { DESIGN_TOKENS, PALETTE, MOTION } from '../theme/obsidianDesign';
 import { 
     Box, Typography, Dialog, DialogTitle, DialogContent, DialogActions, 
     Snackbar, Alert, FormGroup, FormControlLabel, Checkbox, TextField, 
@@ -115,8 +116,10 @@ export default function Dashboard() {
   
   const { activeSessions, progress, loading: sessionsLoading, dailyTargetHours, startInstructionSession, stopSession, registerRelease: hookRegisterRelease, loadActiveSessions } = useSessionProgress(currentUser, items);
   
-  const { femIndex, femIndexLoading, indexDetails } = useFemIndex(currentUser, items, activeSessions); // KORREKT: Nutzt jetzt activeSessions für den Gap Score
-  const { kpis } = useKPIs(currentUser);
+  const { femIndex, femIndexLoading, indexDetails } = useFemIndex(currentUser, items, activeSessions); 
+  
+  // FIX: useKPIs Parameter korrigiert (verhindert 'filter' Fehler)
+  const { kpis } = useKPIs(items, activeSessions); 
 
   const [wishlistCount, setWishlistCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -161,6 +164,10 @@ export default function Dashboard() {
   
   const [maxInstructionItems, setMaxInstructionItems] = useState(1);
   const [currentPeriod, setCurrentPeriod] = useState('');
+  
+  // FIX: isNight definieren
+  const isNight = currentPeriod ? currentPeriod.includes('night') : false;
+
   const [isFreeDay, setIsFreeDay] = useState(false);
   const [freeDayReason, setFreeDayReason] = useState('');
 
