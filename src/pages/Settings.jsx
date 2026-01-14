@@ -253,8 +253,8 @@ export default function Settings() {
   });
 
   return (
-    // KORREKTUR: Padding reduziert (px: 1 statt px: 2), damit Accordions breiter werden
-    <Container maxWidth="md" disableGutters sx={{ pt: 1, pb: 10, px: 1 }}>
+    // KORREKTUR: Padding reduziert (px: 0 statt px: 2), damit Accordions breiter werden
+    <Container maxWidth="md" disableGutters sx={{ pt: 1, pb: 10, px: 0 }}>
       <Typography variant="h4" gutterBottom sx={DESIGN_TOKENS.textGradient}>Einstellungen</Typography>
 
       {/* --- PREFERENCES --- */}
