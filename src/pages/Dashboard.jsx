@@ -9,19 +9,22 @@ import { useAuth } from '../contexts/AuthContext';
 import { useItems } from '../contexts/ItemContext';
 import { useNFCGlobal } from '../contexts/NFCContext';
 
+// Services für Suspension Logic
+import { checkActiveSuspension } from '../services/SuspensionService';
+
 // FRAMER MOTION
 import { motion } from 'framer-motion';
 
 // HOOKS
 import useSessionProgress from '../hooks/dashboard/useSessionProgress';
+import useFemIndex from '../hooks/dashboard/useFemIndex'; // KORRIGIERT: Default Import
 import { useKPIs } from '../hooks/useKPIs'; 
 
 // SERVICES
 import { isAuditDue, initializeAudit, confirmAuditItem } from '../services/AuditService';
 import { getActivePunishment, clearPunishment, findPunishmentItem, registerOathRefusal } from '../services/PunishmentService';
 import { loadMonthlyBudget, calculatePurchasePriority } from '../services/BudgetService';
-import { generateAndSaveInstruction, getLastInstruction } from '../services/InstructionService'; // KORRIGIERT
-import { registerRelease } from '../services/ReleaseService';
+import { generateAndSaveInstruction, getLastInstruction } from '../services/InstructionService';
 import { checkForTZDTrigger, getTZDStatus } from '../services/TZDService';
 
 // COMPONENTS
@@ -41,7 +44,7 @@ import { DESIGN_TOKENS, PALETTE } from '../theme/obsidianDesign';
 import { 
     Box, Typography, Dialog, DialogTitle, DialogContent, DialogActions, 
     Snackbar, Alert, FormGroup, FormControlLabel, Checkbox, TextField, 
-    Button, CircularProgress, Container, Paper, Chip, LinearProgress 
+    Button, CircularProgress, Container, Paper, Chip, LinearProgress, Divider
 } from '@mui/material';
 import AnalyticsIcon from '@mui/icons-material/Analytics';
 import NightlightRoundIcon from '@mui/icons-material/NightlightRound';
@@ -51,7 +54,8 @@ import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import ArrowForwardIosIcon from '@mui/icons-material/ArrowForwardIos';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
-import { getGreeting } from '../utils/formatters'; // KORREKTER IMPORT
+import { Icons } from '../theme/appIcons';
+import { getGreeting } from '../utils/formatters';
 
 // --- MOTION VARIANTS ---
 const containerVariants = { hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: 0.1 } } };
@@ -110,12 +114,18 @@ export default function Dashboard() {
   const { startBindingScan, isScanning: isNfcScanning } = useNFCGlobal();
   
   const { activeSessions, progress, loading: sessionsLoading, dailyTargetHours, startInstructionSession, stopSession, registerRelease: hookRegisterRelease, loadActiveSessions } = useSessionProgress(currentUser, items);
-  const kpis = useKPIs(items, activeSessions);
+  
+  const { femIndex, femIndexLoading, indexDetails } = useFemIndex(currentUser, items, activeSessions); // KORREKT: Nutzt jetzt activeSessions für den Gap Score
+  const { kpis } = useKPIs(currentUser);
 
   const [wishlistCount, setWishlistCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(Date.now());
   const [tzdActive, setTzdActive] = useState(false);
+
+  // SUSPENSION STATE
+  const [activeSuspension, setActiveSuspension] = useState(null);
+  const [loadingSuspension, setLoadingSuspension] = useState(true);
 
   const [instructionOpen, setInstructionOpen] = useState(false);
   const [currentInstruction, setCurrentInstruction] = useState(null);
@@ -187,6 +197,17 @@ export default function Dashboard() {
       if(bSnap.exists()) { setMonthlyBudget(bSnap.data().monthlyLimit || 0); setCurrentSpent(bSnap.data().currentSpent || 0); }
   };
 
+  // CHECK SUSPENSION
+  useEffect(() => {
+      const checkSuspension = async () => {
+          if (!currentUser) return;
+          const susp = await checkActiveSuspension(currentUser.uid);
+          setActiveSuspension(susp);
+          setLoadingSuspension(false);
+      };
+      checkSuspension();
+  }, [currentUser]);
+
   useEffect(() => {
     let interval;
     const checkTZD = async () => {
@@ -244,7 +265,7 @@ export default function Dashboard() {
 
       if (effectivelyFree) {
           try {
-              const instrData = await getLastInstruction(currentUser.uid); // KORREKTUR: Nutze getLastInstruction
+              const instrData = await getLastInstruction(currentUser.uid);
               if (instrData && instrData.periodId === periodId && instrData.isAccepted) setCurrentInstruction(instrData);
               else setCurrentInstruction(null); 
           } catch(e) {}
@@ -257,7 +278,6 @@ export default function Dashboard() {
           if (instrData && instrData.periodId === periodId) {
               setCurrentInstruction(instrData);
           } else {
-              // FIX: Hier fehlten activeSessions und periodId!
               const newInstruction = await generateAndSaveInstruction(currentUser.uid, items, activeSessions, periodId);
               setCurrentInstruction(newInstruction || null);
           }
@@ -324,7 +344,7 @@ export default function Dashboard() {
         setLoading(true);
         try {
             await loadSettings(); 
-            const statusData = await getActivePunishment(currentUser.uid); // KORREKTUR: getActivePunishment
+            const statusData = await getActivePunishment(currentUser.uid);
             const [, wishlistData] = await Promise.all([ Promise.resolve(), loadWishlist() ]);
             
             setPunishmentItem(findPunishmentItem(items)); 
@@ -340,41 +360,126 @@ export default function Dashboard() {
     return () => clearInterval(timer);
   }, [currentUser, items, itemsLoading]);
 
-  const isGlobalLoading = loading || itemsLoading || sessionsLoading;
-  if (isGlobalLoading && !activeSessions.length) return <Box sx={{display:'flex', justifyContent:'center', mt:10}}><CircularProgress /></Box>;
-  
-  const isNight = currentPeriod && currentPeriod.includes('night');
+  // SUSPENSION CHECK
+  if (loadingSuspension) return <Box sx={{ p: 4, textAlign: 'center' }}>System Check...</Box>;
 
+  // --- SPECIAL MODE: SUSPENSION ACTIVE ---
+  if (activeSuspension) {
+      return (
+        <Box sx={DESIGN_TOKENS.bottomNavSpacer}>
+            <Container maxWidth="sm" sx={{ pt: 10, textAlign: 'center' }}>
+                <Box sx={{ mb: 4, color: PALETTE.accents.gold }}>
+                    <Icons.Shield sx={{ fontSize: 80 }} />
+                </Box>
+                <Typography variant="h4" gutterBottom sx={{ fontWeight: 'bold', letterSpacing: 2 }}>
+                    PROTOKOLL AUSGESETZT
+                </Typography>
+                <Paper sx={{ p: 4, ...DESIGN_TOKENS.glassCard, border: `1px solid ${PALETTE.accents.gold}` }}>
+                    <Chip label={activeSuspension.type.toUpperCase()} sx={{ bgcolor: PALETTE.accents.gold, color: '#000', fontWeight: 'bold', mb: 2 }} />
+                    <Typography variant="h6" sx={{ mb: 1 }}>{activeSuspension.reason}</Typography>
+                    <Typography variant="body2" color="text.secondary">
+                        Geplant bis: {activeSuspension.endDate.toLocaleDateString()}
+                    </Typography>
+                    <Divider sx={{ my: 3 }} />
+                    <Typography variant="caption" sx={{ display: 'block', mb: 2 }}>
+                        Status: Autorisierte Abwesenheit. Keine Aufgaben.
+                    </Typography>
+                </Paper>
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 4, display: 'block' }}>
+                    Um den Dienst wieder aufzunehmen, gehe zu Einstellungen.
+                </Typography>
+            </Container>
+        </Box>
+      );
+  }
+
+  // --- NORMAL MODE ---
   return (
     <Box sx={DESIGN_TOKENS.bottomNavSpacer}>
-      <Container maxWidth="md">
-        <TzdOverlay active={tzdActive} onRefresh={loadActiveSessions} />
-        <motion.div variants={containerVariants} initial="hidden" animate="visible">
-            <motion.div variants={itemVariants}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-                    <Box>
-                       <Typography variant="body2" color="text.secondary" sx={{ textTransform: 'uppercase', letterSpacing: 1, fontSize: '0.75rem' }}>{new Date().toLocaleDateString('de-DE', { weekday: 'long', day: '2-digit', month: 'long' })}</Typography>
-                       <Typography variant="h4" sx={DESIGN_TOKENS.textGradient}>{getGreeting()}</Typography>
-                    </Box>
-                </Box>
-            </motion.div>
-            <motion.div variants={itemVariants}><ProgressBar currentMinutes={progress.currentContinuousMinutes} targetHours={dailyTargetHours} isGoalMetToday={progress.isDailyGoalMet} progressData={progress} /></motion.div>
-            <motion.div variants={itemVariants}><Box onClick={() => setIndexDialogOpen(true)} sx={{ cursor: 'pointer', transition: 'transform 0.2s', '&:hover': { transform: 'scale(1.02)' } }}><FemIndexBar femIndex={kpis?.femIndex?.score || 0} loading={itemsLoading} /></Box></motion.div>
-            <motion.div variants={itemVariants}><ActionButtons punishmentStatus={punishmentStatus} auditDue={auditDue} isFreeDay={isFreeDay} freeDayReason={freeDayReason} currentInstruction={currentInstruction} currentPeriod={currentPeriod} isHoldingOath={isHoldingOath} onStartPunishment={() => { if (punishmentItem?.nfcTagId) { setPunishmentScanMode('start'); setPunishmentScanOpen(true); } else executeStartPunishment(); }} onStartAudit={handleStartAudit} onOpenInstruction={() => setInstructionOpen(true)} /></motion.div>
-            <motion.div variants={itemVariants}><ActiveSessionsList activeSessions={activeSessions} items={items} punishmentStatus={punishmentStatus} washingItemsCount={kpis?.basics?.washing || 0} onNavigateItem={(id) => navigate(`/item/${id}`)} onOpenRelease={handleOpenRelease} onStopSession={handleRequestStopSession} onOpenLaundry={() => setLaundryOpen(true)} isLocked={tzdActive} /></motion.div>
-            <motion.div variants={itemVariants}><InfoTiles kpis={kpis} wishlistCount={wishlistCount} highestPriorityItem={purchasePriority?.[0]} onOpenBudget={() => navigate('/budget')} onNavigateWishlist={() => navigate('/wishlist')} /></motion.div>
-            <motion.div variants={itemVariants}><Paper sx={{ p: 2, mt: 2, ...DESIGN_TOKENS.glassCard, display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', transition: 'background 0.2s', '&:hover': { bgcolor: 'rgba(255,255,255,0.08)' } }} onClick={() => navigate('/budget')}><Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}><Box sx={{ bgcolor: 'rgba(255,255,255,0.05)', p: 1, borderRadius: '50%', display:'flex' }}><AccountBalanceWalletIcon color="action" fontSize="small" /></Box><Box><Typography variant="subtitle2" sx={{ fontWeight: 600 }}>Budget</Typography><Typography variant="body2" color="text.secondary">{Math.max(0, monthlyBudget - currentSpent).toFixed(2)} € verfügbar</Typography></Box></Box><Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>{kpis?.health?.wornOutCount > 0 && (<Chip label={`${kpis.health.wornOutCount} Ersetzen`} size="small" color="warning" variant="outlined" icon={<WarningAmberIcon />} sx={{ height: 24, '.MuiChip-label': { px: 1 } }} />)}<ArrowForwardIosIcon sx={{ fontSize: 14, color: 'text.disabled' }} /></Box></Paper></motion.div>
-        </motion.div>
+      <TzdOverlay active={false} /> {/* Platzhalter Logic */}
+      <Container maxWidth="md" sx={{ pt: 2, pb: 4 }}>
+        <motion.div variants={MOTION.page} initial="initial" animate="animate" exit="exit">
+            
+            {/* Header */}
+            <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Typography variant="h4" sx={DESIGN_TOKENS.textGradient}>Dashboard</Typography>
+                <Chip label="Online" color="success" variant="outlined" size="small" icon={<Icons.CheckCircle />} />
+            </Box>
 
-        <ReleaseProtocolDialog open={releaseDialogOpen} onClose={() => setReleaseDialogOpen(false)} step={releaseStep} timer={releaseTimer} intensity={releaseIntensity} setIntensity={setReleaseIntensity} onStartTimer={handleStartReleaseTimer} onSkipTimer={handleSkipTimer} onDecision={handleReleaseDecision} />
-        <LaundryDialog open={laundryOpen} onClose={() => setLaundryOpen(false)} washingItems={items.filter(i => i.status === 'washing')} onWashItem={async (id) => { try { await updateDoc(doc(db, `users/${currentUser.uid}/items`, id), { status: 'active', cleanDate: serverTimestamp(), historyLog: arrayUnion({ type: 'wash', date: new Date().toISOString() }) }); if(kpis?.basics?.washing <= 1) setLaundryOpen(false); } catch(e){}} } onWashAll={async () => { try { const timestamp = new Date().toISOString(); const promises = items.filter(i=>i.status==='washing').map(i => updateDoc(doc(db, `users/${currentUser.uid}/items`, i.id), { status: 'active', cleanDate: serverTimestamp(), historyLog: arrayUnion({ type: 'wash', date: timestamp }) })); await Promise.all(promises); setLaundryOpen(false); } catch (e) {} }} />
-        <InstructionDialog open={instructionOpen} onClose={() => setInstructionOpen(false)} instruction={currentInstruction} items={items} isHoldingOath={isHoldingOath} oathProgress={oathProgress} onStartOath={startOathPress} onCancelOath={cancelOathPress} onDeclineOath={handleDeclineOath} onStartRequest={handleStartRequest} onNavigateItem={(id) => { setInstructionOpen(false); navigate(`/item/${id}`); }} isFreeDay={isFreeDay} freeDayReason={freeDayReason} loadingStatus={instructionStatus === 'idle' ? 'loading' : instructionStatus} isNight={isNight} showToast={showToast} />
-        <PunishmentDialog open={punishmentScanOpen} onClose={() => setPunishmentScanOpen(false)} mode={punishmentScanMode} punishmentItem={punishmentItem} isScanning={isNfcScanning} onScan={handlePunishmentScanTrigger} />
-        <Dialog open={auditOpen} onClose={() => setAuditOpen(false)} fullWidth PaperProps={DESIGN_TOKENS.dialog.paper}><DialogTitle sx={DESIGN_TOKENS.dialog.title.sx}>Audit: {pendingAuditItems[currentAuditIndex]?.name}</DialogTitle><DialogContent sx={DESIGN_TOKENS.dialog.content.sx}><TextField type="number" label="Zustand (1-5)" value={currentCondition} onChange={e => setCurrentCondition(parseInt(e.target.value))} fullWidth sx={{mt:2}} /></DialogContent><DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}><Button onClick={() => setAuditOpen(false)} color="inherit">Abbrechen</Button><Button onClick={handleConfirmAuditItem} variant="contained" color="warning">Bestätigen</Button></DialogActions></Dialog>
-        <Dialog open={reflectionOpen} onClose={() => setReflectionOpen(false)} fullWidth maxWidth="sm" PaperProps={DESIGN_TOKENS.dialog.paper}><DialogTitle sx={DESIGN_TOKENS.dialog.title.sx}>Reflektion</DialogTitle><DialogContent sx={DESIGN_TOKENS.dialog.content.sx}><FormGroup>{REFLECTION_TAGS.map(t => (<FormControlLabel key={t} control={<Checkbox onChange={() => setSelectedFeelings(prev => prev.includes(t) ? prev.filter(f => f !== t) : [...prev, t])}/>} label={t}/>))}</FormGroup></DialogContent><DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}><Button onClick={() => setReflectionOpen(false)} color="inherit">Abbrechen</Button><Button onClick={handleConfirmStopSession} variant="contained">Bestätigen</Button></DialogActions></Dialog>
-        <IndexDetailDialog open={indexDialogOpen} onClose={() => setIndexDialogOpen(false)} details={kpis?.femIndex?.details} />
-        <Snackbar open={toast.open} autoHideDuration={3000} onClose={handleCloseToast}><Alert severity={toast.severity}>{toast.message}</Alert></Snackbar>
+            {/* KPI Tiles */}
+            <InfoTiles kpis={kpis} />
+
+            {/* Main Progress */}
+            <ProgressBar 
+                currentMinutes={progress.currentContinuousMinutes} 
+                targetHours={dailyTargetHours} 
+                isGoalMetToday={progress.isDailyGoalMet} 
+                progressData={progress}
+            />
+
+            {/* Fem Index */}
+            <FemIndexBar femIndex={femIndex || 0} loading={femIndexLoading} />
+
+            {/* Active Sessions */}
+            <ActiveSessionsList 
+                activeSessions={activeSessions} 
+                onStopSession={stopSession}
+                onOpenLaundry={() => setLaundryOpen(true)}
+                onOpenRelease={handleOpenRelease}
+            />
+
+            {/* Actions */}
+            <ActionButtons 
+                punishmentStatus={punishmentStatus} 
+                auditDue={auditDue} 
+                onOpenInstruction={() => setInstructionOpen(true)}
+                onStartPunishment={() => {
+                    if (punishmentItem?.nfcTagId) { setPunishmentScanMode('start'); setPunishmentScanOpen(true); } 
+                    else executeStartPunishment(); 
+                }}
+                onStartAudit={handleStartAudit}
+            />
+
+        </motion.div>
       </Container>
+
+      {/* Dialogs */}
+      <InstructionDialog open={instructionOpen} onClose={() => setInstructionOpen(false)} instruction={currentInstruction} items={items} isHoldingOath={isHoldingOath} oathProgress={oathProgress} onStartOath={startOathPress} onCancelOath={cancelOathPress} onDeclineOath={handleDeclineOath} onStartRequest={handleStartRequest} onNavigateItem={(id) => { setInstructionOpen(false); navigate(`/item/${id}`); }} isFreeDay={isFreeDay} freeDayReason={freeDayReason} loadingStatus={instructionStatus === 'idle' ? 'loading' : instructionStatus} isNight={isNight} showToast={showToast} />
+      <PunishmentDialog open={punishmentScanOpen} onClose={() => setPunishmentScanOpen(false)} mode={punishmentScanMode} punishmentItem={punishmentItem} isScanning={isNfcScanning} onScan={handlePunishmentScanTrigger} />
+      <LaundryDialog open={laundryOpen} onClose={() => setLaundryOpen(false)} washingItems={items.filter(i => i.status === 'washing')} onWashItem={async (id) => { try { await updateDoc(doc(db, `users/${currentUser.uid}/items`, id), { status: 'active', cleanDate: serverTimestamp(), historyLog: arrayUnion({ type: 'wash', date: new Date().toISOString() }) }); if(kpis?.basics?.washing <= 1) setLaundryOpen(false); } catch(e){}} } onWashAll={async () => { try { const timestamp = new Date().toISOString(); const promises = items.filter(i=>i.status==='washing').map(i => updateDoc(doc(db, `users/${currentUser.uid}/items`, i.id), { status: 'active', cleanDate: serverTimestamp(), historyLog: arrayUnion({ type: 'wash', date: timestamp }) })); await Promise.all(promises); setLaundryOpen(false); } catch (e) {} }} />
+      <ReleaseProtocolDialog open={releaseDialogOpen} onClose={() => setReleaseDialogOpen(false)} step={releaseStep} timer={releaseTimer} intensity={releaseIntensity} setIntensity={setReleaseIntensity} onStartTimer={handleStartReleaseTimer} onSkipTimer={handleSkipTimer} onDecision={handleReleaseDecision} />
+      
+      <Dialog open={auditOpen} onClose={() => setAuditOpen(false)} fullWidth PaperProps={DESIGN_TOKENS.dialog.paper}>
+          <DialogTitle sx={DESIGN_TOKENS.dialog.title.sx}>Audit: {pendingAuditItems[currentAuditIndex]?.name}</DialogTitle>
+          <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
+              <TextField type="number" label="Zustand (1-5)" value={currentCondition} onChange={e => setCurrentCondition(parseInt(e.target.value))} fullWidth sx={{mt:2}} />
+          </DialogContent>
+          <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}>
+              <Button onClick={() => setAuditOpen(false)} color="inherit">Abbrechen</Button>
+              <Button onClick={handleConfirmAuditItem} variant="contained" color="warning">Bestätigen</Button>
+          </DialogActions>
+      </Dialog>
+
+      <Dialog open={reflectionOpen} onClose={() => setReflectionOpen(false)} fullWidth maxWidth="sm" PaperProps={DESIGN_TOKENS.dialog.paper}>
+          <DialogTitle sx={DESIGN_TOKENS.dialog.title.sx}>Reflektion</DialogTitle>
+          <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
+              <FormGroup>
+                  {REFLECTION_TAGS.map(t => (
+                      <FormControlLabel key={t} control={<Checkbox onChange={() => setSelectedFeelings(prev => prev.includes(t) ? prev.filter(f => f !== t) : [...prev, t])}/>} label={t}/>
+                  ))}
+              </FormGroup>
+          </DialogContent>
+          <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}>
+              <Button onClick={() => setReflectionOpen(false)} color="inherit">Abbrechen</Button>
+              <Button onClick={handleConfirmStopSession} variant="contained">Bestätigen</Button>
+          </DialogActions>
+      </Dialog>
+
+      <IndexDetailDialog open={indexDialogOpen} onClose={() => setIndexDialogOpen(false)} details={indexDetails} />
+      
+      <Snackbar open={toast.open} autoHideDuration={3000} onClose={handleCloseToast}>
+          <Alert severity={toast.severity}>{toast.message}</Alert>
+      </Snackbar>
     </Box>
   );
 }
