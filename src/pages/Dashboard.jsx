@@ -192,6 +192,10 @@ export default function Dashboard() {
   const showToast = (message, severity = 'success') => setToast({ open: true, message, severity });
   const handleCloseToast = () => setToast({ ...toast, open: false });
 
+  // Status für ActionButtons
+  const isInstructionActive = activeSessions.some(s => s.type === 'instruction');
+  const isDailyGoalMet = progress.isDailyGoalMet;
+
   const loadSettings = async () => { 
       const pSnap = await getDoc(doc(db, `users/${currentUser.uid}/settings/preferences`));
       let prefs = {};
@@ -438,6 +442,8 @@ export default function Dashboard() {
                 currentInstruction={currentInstruction}
                 currentPeriod={currentPeriod}
                 isHoldingOath={isHoldingOath}
+                isInstructionActive={isInstructionActive}
+                isDailyGoalMet={isDailyGoalMet}
                 onOpenInstruction={() => setInstructionOpen(true)}
                 onStartPunishment={() => {
                     if (punishmentItem?.nfcTagId) { setPunishmentScanMode('start'); setPunishmentScanOpen(true); } 
@@ -450,6 +456,7 @@ export default function Dashboard() {
             <ActiveSessionsList 
                 activeSessions={activeSessions} 
                 items={items}
+                punishmentStatus={punishmentStatus} // KORREKTUR: Fehlendes Prop hinzugefügt
                 onNavigateItem={(id) => navigate(`/item/${id}`)}
                 onStopSession={stopSession}
                 onOpenRelease={handleOpenRelease}

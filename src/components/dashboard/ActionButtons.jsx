@@ -6,19 +6,31 @@ import CelebrationIcon from '@mui/icons-material/Celebration';
 import WeekendIcon from '@mui/icons-material/Weekend';
 import DarkModeIcon from '@mui/icons-material/DarkMode';
 import LightModeIcon from '@mui/icons-material/LightMode';
+import LockIcon from '@mui/icons-material/Lock';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
 import { isPunishmentWindowOpen } from '../../services/PunishmentService';
 
 export default function ActionButtons({ 
   punishmentStatus, auditDue, isFreeDay, freeDayReason, 
   currentInstruction, currentPeriod, isHoldingOath, 
+  // NEUE PROPS
+  isInstructionActive, isDailyGoalMet,
   onStartPunishment, onStartAudit, onOpenInstruction 
 }) {
 
   const punishmentWindowOpen = isPunishmentWindowOpen();
   const isNight = currentPeriod && currentPeriod.includes('night');
   const instructionAlreadyStarted = currentInstruction && currentInstruction.isAccepted;
+  
+  // Freier Tag gilt nur, wenn es nicht Nacht ist und noch keine Instruktion läuft
   const showFreeMode = isFreeDay && !isNight && !instructionAlreadyStarted;
+
+  // SPERR-LOGIK
+  // 1. Session läuft bereits -> Sperren
+  const blockSessionRunning = isInstructionActive;
+  // 2. Tagesziel erreicht -> Sperren (gilt nur für Tagesanweisungen, Nachts darf man immer)
+  const blockGoalReached = isDailyGoalMet && !isNight;
 
   // 1. STRAFE (Priorität)
   if (punishmentStatus.active && punishmentWindowOpen) {
@@ -68,31 +80,59 @@ export default function ActionButtons({
     );
   }
 
-  // 4. ANWEISUNG / FREI
+  // 4. ANWEISUNG / FREI / GESPERRT
+  
+  let label = isNight ? "NACHTANWEISUNG ÖFFNEN" : "TAGESANWEISUNG ÖFFNEN";
+  let icon = isNight ? <DarkModeIcon /> : <LightModeIcon />;
+  let isDisabled = false;
+
+  if (showFreeMode) {
+      label = freeDayReason === 'Holiday' ? "FEIERTAG (FREI)" : "WOCHENENDE (FREI)";
+      icon = freeDayReason === 'Holiday' ? <CelebrationIcon /> : <WeekendIcon />;
+      // Free Mode bleibt klickbar (zeigt Info), ist aber visuell "inaktiv" (siehe Styling unten)
+  } else {
+      if (blockSessionRunning) {
+          label = "SESSION LÄUFT";
+          icon = <LockIcon />;
+          isDisabled = true;
+      } else if (blockGoalReached) {
+          label = "TAGESZIEL ERREICHT";
+          icon = <CheckCircleIcon />;
+          isDisabled = true;
+      }
+  }
+
   return (
     <Box sx={{ mb: 3 }}>
         <Button 
             variant="contained" fullWidth size="large" 
+            disabled={isDisabled}
             aria-disabled={showFreeMode}
             sx={{ 
                 py: 2, fontWeight: 'bold', fontSize: '1.1rem',
-                // Bedingtes Styling
-                ...(!showFreeMode && (isNight || !currentInstruction) ? DESIGN_TOKENS.buttonGradient : {}),
+                
+                // Normales Styling (Gradient wenn aktiv)
+                ...(!showFreeMode && !isDisabled && (isNight || !currentInstruction) ? DESIGN_TOKENS.buttonGradient : {}),
+                
+                // Free Mode Styling (Transparent)
                 ...(showFreeMode ? { 
                     background: 'transparent', 
                     border: `1px solid ${PALETTE.text.muted}`,
                     color: PALETTE.text.muted 
                 } : {}),
+
+                // Disabled Styling (Expliziter Override für bessere Lesbarkeit im Dark Mode falls nötig)
+                '&.Mui-disabled': {
+                    bgcolor: 'rgba(255, 255, 255, 0.12)',
+                    color: 'rgba(255, 255, 255, 0.3)'
+                },
                 
                 transition: isHoldingOath ? 'background-color 5s linear' : 'all 0.2s'
             }} 
             onClick={onOpenInstruction} 
-            startIcon={showFreeMode ? (freeDayReason === 'Holiday' ? <CelebrationIcon /> : <WeekendIcon />) : (isNight ? <DarkModeIcon /> : <LightModeIcon />)}
+            startIcon={icon}
         >
-            {showFreeMode
-                ? (freeDayReason === 'Holiday' ? "FEIERTAG (FREI)" : "WOCHENENDE (FREI)") 
-                : (isNight ? "NACHTANWEISUNG ÖFFNEN" : "TAGESANWEISUNG ÖFFNEN")
-            }
+            {label}
         </Button>
     </Box>
   );
