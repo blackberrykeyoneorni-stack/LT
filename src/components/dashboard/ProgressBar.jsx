@@ -14,26 +14,29 @@ const formatTargetTime = (decimalHours) => {
 
 export default function ProgressBar({ currentMinutes, targetHours, isGoalMetToday, progressData }) {
     const theme = useTheme();
-    const m3 = theme.palette.m3; // Zugriff auf unsere Android 16 Tokens
+    const m3 = theme.palette.m3;
 
-    const percentage = progressData?.percentage || (isGoalMetToday ? 100 : Math.min(100, (currentMinutes / (targetHours * 60)) * 100));
+    // Berechnung des echten Prozentsatzes (kann > 100 sein)
+    const rawPercentage = progressData?.percentage || (isGoalMetToday ? 100 : ((currentMinutes / (targetHours * 60)) * 100));
+    
+    // Für die visuelle Breite max 100%
+    const visualWidth = Math.min(100, rawPercentage);
+
     const nightStatus = progressData?.nightStatus || 'unknown'; 
     const isLocked = progressData?.isNightLocked || false;
 
-    // M3 STATE LOGIK
-    // 1. Locked: Error State (Rot/Gedämpft)
-    // 2. Goal Met: Primary Container (Abgeschlossen/Erledigt)
-    // 3. Active: Primary (Teal)
+    // Farben bestimmen
     let barColor = m3.primary;
     let trackColor = m3.surfaceContainerHighest;
     let iconColor = m3.onSurfaceVariant;
     
     if (isLocked) {
         barColor = m3.error;
-        trackColor = m3.errorContainer; // Rötlicher Hintergrund
+        trackColor = m3.errorContainer;
         iconColor = m3.error;
-    } else if (isGoalMetToday) {
-        barColor = m3.primary; // Bleibt Primary für Konsistenz
+    } else if (isGoalMetToday || rawPercentage >= 100) {
+        barColor = '#4caf50'; // Explizites Grün (Success)
+        iconColor = '#4caf50';
     }
 
     return (
@@ -58,29 +61,29 @@ export default function ProgressBar({ currentMinutes, targetHours, isGoalMetToda
                         px: 1.5, py: 0.5, borderRadius: '8px'
                     }}>
                         {isLocked ? <LockIcon fontSize="small" /> : (
-                            isGoalMetToday ? <CheckCircleIcon fontSize="small" sx={{color: m3.primary}}/> : <NightlightRoundIcon fontSize="small" />
+                            (isGoalMetToday || rawPercentage >= 100) ? <CheckCircleIcon fontSize="small" sx={{color: '#4caf50'}}/> : <NightlightRoundIcon fontSize="small" />
                         )}
                         {nightStatus === 'fulfilled' && !isLocked && <Typography variant="caption" fontWeight="bold">Nacht OK</Typography>}
                     </Box>
                 </Tooltip>
             </Box>
 
-            {/* M3 PROGRESS TRACK (Pill Shape) */}
+            {/* M3 PROGRESS TRACK */}
             <Box sx={{ 
                 position: 'relative', 
-                height: 16, // Höher für Touch/Visibility
+                height: 16, 
                 bgcolor: trackColor, 
-                borderRadius: '9999px', // Pill
+                borderRadius: '9999px',
                 overflow: 'hidden' 
             }}>
                 <motion.div
                     initial={{ width: 0 }}
-                    animate={{ width: `${percentage}%` }}
+                    animate={{ width: `${visualWidth}%` }}
                     transition={{ duration: 1, type: 'spring', stiffness: 50 }}
                     style={{
                         height: '100%',
                         backgroundColor: barColor,
-                        borderRadius: '9999px', // Inner Pill
+                        borderRadius: '9999px',
                     }}
                 />
             </Box>
@@ -89,8 +92,8 @@ export default function ProgressBar({ currentMinutes, targetHours, isGoalMetToda
                 <Typography variant="body2" sx={{ color: isLocked ? m3.error : theme.palette.text.secondary, fontWeight: 500 }}>
                     {isLocked ? "Zugriff verweigert" : `${Math.floor(currentMinutes / 60)}h ${currentMinutes % 60}m`}
                 </Typography>
-                <Typography variant="body2" sx={{ color: theme.palette.text.primary, fontWeight: 'bold' }}>
-                    {percentage.toFixed(0)}%
+                <Typography variant="body2" sx={{ color: (rawPercentage >= 100 && !isLocked) ? '#4caf50' : theme.palette.text.primary, fontWeight: 'bold' }}>
+                    {rawPercentage.toFixed(0)}%
                 </Typography>
             </Box>
         </Card>

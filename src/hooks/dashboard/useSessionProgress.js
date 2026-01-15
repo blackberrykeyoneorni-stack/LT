@@ -79,13 +79,11 @@ export default function useSessionProgress(currentUser, items) {
                 const pastSnap = await getDocs(qPast);
                 
                 // FIX: Berechnung der effektiven Zeit mittels Intervall-Merging
-                // Verhindert doppelte Zählung bei gleichzeitigen Items
                 let timeIntervals = [];
 
                 pastSnap.forEach(d => {
                     const data = d.data();
                     
-                    // Nacht-Sessions ignorieren!
                     if (data.period && typeof data.period === 'string' && data.period.includes('night')) {
                         return; 
                     }
@@ -101,20 +99,16 @@ export default function useSessionProgress(currentUser, items) {
                     }
                 });
 
-                // Intervalle sortieren
                 timeIntervals.sort((a, b) => a.start - b.start);
 
-                // Intervalle verschmelzen (Merging overlapping intervals)
                 let mergedIntervals = [];
                 if (timeIntervals.length > 0) {
                     let current = timeIntervals[0];
                     for (let i = 1; i < timeIntervals.length; i++) {
                         const next = timeIntervals[i];
                         if (next.start < current.end) {
-                            // Überlappung: Ende erweitern
                             current.end = Math.max(current.end, next.end);
                         } else {
-                            // Keine Überlappung: speichern und weiter
                             mergedIntervals.push(current);
                             current = next;
                         }
@@ -122,7 +116,6 @@ export default function useSessionProgress(currentUser, items) {
                     mergedIntervals.push(current);
                 }
 
-                // Summe der bereinigten Intervalle berechnen
                 const totalMinutes = mergedIntervals.reduce((sum, interval) => {
                     return sum + (interval.end - interval.start) / 60000;
                 }, 0);
@@ -130,10 +123,8 @@ export default function useSessionProgress(currentUser, items) {
                 const averageMinutes = totalMinutes / 5;
                 const averageHours = averageMinutes / 60;
                 
-                // Runden auf 1 Nachkommastelle
                 const newTarget = Math.round(averageHours * 10) / 10;
 
-                // Nur erhöhen, wenn der Durchschnitt das aktuelle Ziel signifikant übersteigt
                 if (newTarget > currentTarget) {
                     await updateDoc(prefsRef, {
                         dailyTargetHours: newTarget,
@@ -141,9 +132,7 @@ export default function useSessionProgress(currentUser, items) {
                         lastWeeklyUpdate: serverTimestamp()
                     });
                     setDailyTargetHours(newTarget);
-                    console.log(`Target updated: ${currentTarget}h -> ${newTarget}h`);
                 } else {
-                    // Update Timestamp, auch wenn Ziel gleich bleibt
                     await updateDoc(prefsRef, {
                         lastWeeklyUpdate: serverTimestamp()
                     });
@@ -229,7 +218,6 @@ export default function useSessionProgress(currentUser, items) {
             );
             const todaySnap = await getDocs(qToday);
             
-            // Filterung: Nur reine Tages-Sessions (keine Nacht-Sessions)
             const todaySessions = todaySnap.docs
                 .map(d => ({
                     id: d.id,
@@ -281,8 +269,8 @@ export default function useSessionProgress(currentUser, items) {
                 if (duration > maxValidProgress) maxValidProgress = duration;
             });
 
+            // ÄNDERUNG: Kein Cap mehr bei targetMinutes. Zeit läuft weiter.
             if (maxValidProgress >= targetMinutes) {
-                maxValidProgress = targetMinutes;
                 isMet = true;
             }
 
@@ -290,7 +278,8 @@ export default function useSessionProgress(currentUser, items) {
             let isLocked = false;
 
             if (nightFulfilled) {
-                finalPercentage = Math.min(100, Math.round((maxValidProgress / targetMinutes) * 100));
+                // Erlaubt Werte > 100%
+                finalPercentage = Math.round((maxValidProgress / targetMinutes) * 100);
             } else {
                 isLocked = true;
                 finalPercentage = 0;

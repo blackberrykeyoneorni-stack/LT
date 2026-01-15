@@ -44,7 +44,7 @@ import { DESIGN_TOKENS, PALETTE, MOTION } from '../theme/obsidianDesign';
 import { 
     Box, Typography, Dialog, DialogTitle, DialogContent, DialogActions, 
     Snackbar, Alert, FormGroup, FormControlLabel, Checkbox, TextField, 
-    Button, CircularProgress, Container, Paper, Chip, LinearProgress, Divider, IconButton
+    Button, CircularProgress, Container, Paper, Chip, LinearProgress, Divider
 } from '@mui/material';
 import AnalyticsIcon from '@mui/icons-material/Analytics';
 import NightlightRoundIcon from '@mui/icons-material/NightlightRound';
@@ -129,8 +129,6 @@ export default function Dashboard() {
   const { activeSessions, progress, loading: sessionsLoading, dailyTargetHours, startInstructionSession, stopSession, registerRelease: hookRegisterRelease, loadActiveSessions } = useSessionProgress(currentUser, items);
   
   const { femIndex, femIndexLoading, indexDetails } = useFemIndex(currentUser, items, activeSessions); 
-  
-  // KORREKTUR: Destructuring entfernt, da useKPIs das Objekt direkt zurückgibt
   const kpis = useKPIs(items, activeSessions); 
 
   const [wishlistCount, setWishlistCount] = useState(0);
@@ -176,7 +174,6 @@ export default function Dashboard() {
   
   const [maxInstructionItems, setMaxInstructionItems] = useState(1);
   
-  // INIT: PeriodId sofort berechnen
   const [currentPeriod, setCurrentPeriod] = useState(calculatePeriodId());
   
   const isNight = currentPeriod ? currentPeriod.includes('night') : false;
@@ -296,7 +293,6 @@ export default function Dashboard() {
       } catch (e) { console.error(e); setCurrentInstruction(null); } finally { setInstructionStatus('ready'); }
   };
 
-  // UPDATE TIME & PERIOD
   useEffect(() => {
     const newPeriod = calculatePeriodId();
     if (newPeriod !== lastCheckedPeriod.current) { 
@@ -414,22 +410,9 @@ export default function Dashboard() {
       <Container maxWidth="md" sx={{ pt: 2, pb: 4 }}>
         <motion.div variants={MOTION.page} initial="initial" animate="animate" exit="exit">
             
-            {/* 1. Header: Greeting & Date */}
-            <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <Box>
-                    <Typography variant="h4" sx={DESIGN_TOKENS.textGradient}>
-                        {getGreeting()}, {currentUser?.displayName || 'Sub'}
-                    </Typography>
-                    <Typography variant="subtitle2" color="text.secondary">
-                        {new Date().toLocaleDateString('de-DE', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-                    </Typography>
-                </Box>
-                <Box sx={{ display: 'flex', gap: 1 }}>
-                     <IconButton onClick={() => navigate('/budget')} sx={{ bgcolor: 'rgba(255,255,255,0.05)', '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' } }}>
-                         <AccountBalanceWalletIcon color="primary" />
-                     </IconButton>
-                     <Chip label="Online" color="success" variant="outlined" size="small" icon={<Icons.CheckCircle />} sx={{ height: 40 }} />
-                </Box>
+            {/* 1. Header: CLEAN (Nur Titel) */}
+            <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Typography variant="h4" sx={DESIGN_TOKENS.textGradient}>Dashboard</Typography>
             </Box>
 
             {/* 2. ProgressBar */}
@@ -443,7 +426,7 @@ export default function Dashboard() {
             {/* 3. FemIndex */}
             <FemIndexBar femIndex={femIndex || 0} loading={femIndexLoading} />
 
-            {/* 4. KPI Tiles (KORREKT positioniert) */}
+            {/* 4. KPI Tiles */}
             <InfoTiles kpis={kpis} />
 
             {/* 5. ActionButtons (Instruction / Punishment) */}
@@ -467,59 +450,65 @@ export default function Dashboard() {
             <ActiveSessionsList 
                 activeSessions={activeSessions} 
                 items={items}
-                washingItemsCount={items.filter(i => i.status === 'washing').length}
                 onNavigateItem={(id) => navigate(`/item/${id}`)}
                 onStopSession={stopSession}
-                onOpenLaundry={() => setLaundryOpen(true)}
                 onOpenRelease={handleOpenRelease}
             />
 
-            {/* 7. Laundry Button (Standalone) */}
+            {/* 7. Laundry Button (Styling: Form wie oben, Farbe zurückhaltend, Chip integriert) */}
             <Button
-              variant="outlined"
+              variant="contained"
               fullWidth
-              startIcon={<LocalLaundryServiceIcon />}
+              size="large"
               onClick={() => setLaundryOpen(true)}
               sx={{ 
-                  mt: 3, 
-                  mb: 1, 
-                  py: 1.5,
-                  color: PALETTE.text.secondary, 
-                  borderColor: PALETTE.text.muted,
-                  justifyContent: 'flex-start',
-                  px: 2,
-                  '&:hover': {
-                      borderColor: PALETTE.primary.main,
-                      color: PALETTE.primary.main,
-                      bgcolor: 'rgba(255,255,255,0.02)'
-                  }
+                  mb: 2, 
+                  py: 2,
+                  bgcolor: 'rgba(255,255,255,0.05)', 
+                  color: 'text.primary',
+                  boxShadow: 'none',
+                  justifyContent: 'space-between',
+                  px: 3,
+                  '&:hover': { bgcolor: 'rgba(255,255,255,0.1)', boxShadow: 'none' }
               }}
             >
-              Wäschekorb ({items.filter(i => i.status === 'washing').length})
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                <LocalLaundryServiceIcon />
+                <Typography variant="button" sx={{ fontWeight: 'bold' }}>Wäschekorb</Typography>
+              </Box>
+              <Chip 
+                label={`${items.filter(i => i.status === 'washing').length} Stk.`} 
+                size="small" 
+                sx={{ 
+                    bgcolor: 'rgba(255,255,255,0.1)', 
+                    color: 'text.primary',
+                    fontWeight: 'bold',
+                    borderRadius: '4px'
+                }} 
+              />
             </Button>
 
-            {/* 8. Budget Button (Standalone) */}
+            {/* 8. Budget Button (Gleiches Styling) */}
             <Button
-              variant="outlined"
+              variant="contained"
               fullWidth
-              startIcon={<AccountBalanceWalletIcon />}
+              size="large"
               onClick={() => navigate('/budget')}
               sx={{ 
-                  mt: 1, 
-                  mb: 3, 
-                  py: 1.5,
-                  color: PALETTE.text.secondary, 
-                  borderColor: PALETTE.text.muted,
+                  mb: 4, 
+                  py: 2,
+                  bgcolor: 'rgba(255,255,255,0.05)', 
+                  color: 'text.primary',
+                  boxShadow: 'none',
                   justifyContent: 'flex-start',
-                  px: 2,
-                  '&:hover': {
-                      borderColor: PALETTE.primary.main,
-                      color: PALETTE.primary.main,
-                      bgcolor: 'rgba(255,255,255,0.02)'
-                  }
+                  px: 3,
+                  '&:hover': { bgcolor: 'rgba(255,255,255,0.1)', boxShadow: 'none' }
               }}
             >
-              Budget & Finanzen ({currentSpent.toFixed(2)}€ / {monthlyBudget}€)
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                <AccountBalanceWalletIcon />
+                <Typography variant="button" sx={{ fontWeight: 'bold' }}>Budget & Finanzen</Typography>
+              </Box>
             </Button>
 
         </motion.div>

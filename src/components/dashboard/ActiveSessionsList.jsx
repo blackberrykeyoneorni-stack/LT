@@ -4,13 +4,12 @@ import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import WaterDropIcon from '@mui/icons-material/WaterDrop';
 import LockClockIcon from '@mui/icons-material/LockClock';
 import StopCircleIcon from '@mui/icons-material/StopCircle';
-import LocalLaundryServiceIcon from '@mui/icons-material/LocalLaundryService';
 import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
 import { safeDate } from '../../utils/dateUtils';
 
 export default function ActiveSessionsList({ 
-  activeSessions, items, punishmentStatus, washingItemsCount, 
-  onNavigateItem, onOpenRelease, onStopSession, onOpenLaundry 
+  activeSessions, items, punishmentStatus, 
+  onNavigateItem, onOpenRelease, onStopSession 
 }) {
 
   const formatMinutes = (min) => {
@@ -94,27 +93,6 @@ export default function ActiveSessionsList({
                       </Button>
                   )}
               </Stack>
-          </Paper>
-      )}
-
-      {washingItemsCount > 0 && (
-          <Paper 
-            sx={{ 
-                p: 2, mb: 3, 
-                ...DESIGN_TOKENS.glassCard,
-                bgcolor: `${PALETTE.accents.blue}10`, 
-                borderColor: PALETTE.accents.blue, 
-                cursor: 'pointer', 
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                transition: 'transform 0.2s', '&:hover': { transform: 'scale(1.02)' }
-            }}
-            onClick={onOpenLaundry}
-          >
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                  <LocalLaundryServiceIcon sx={{ color: PALETTE.accents.blue }} />
-                  <Typography variant="subtitle1" fontWeight="bold">Wäschekorb</Typography>
-              </Box>
-              <Chip label={`${washingItemsCount} Stk.`} size="small" sx={{ bgcolor: PALETTE.accents.blue, color: '#000', fontWeight: 'bold' }} />
           </Paper>
       )}
     </>
