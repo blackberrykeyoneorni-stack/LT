@@ -278,7 +278,7 @@ export default function Settings() {
   );
 
   const ListManager = ({ title, items, newItem, setNewItem, listName, setList }) => (
-      <Box sx={{ mb: 3 }}>
+      <Box sx={{ mb: 2 }}>
           <Typography variant="subtitle2" sx={{ mb: 1, color: 'text.secondary' }}>{title}</Typography>
           <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
               <TextField size="small" fullWidth value={newItem} onChange={e => setNewItem(e.target.value)} placeholder="Neuer Eintrag..." />
@@ -302,17 +302,17 @@ export default function Settings() {
   });
 
   return (
-    <Container maxWidth="md" disableGutters sx={{ pt: 1, pb: 10, px: 1 }}>
-      <Typography variant="h4" gutterBottom sx={DESIGN_TOKENS.textGradient}>Einstellungen</Typography>
+    <Container maxWidth="md" disableGutters sx={{ pt: 1, pb: 10, px: 0.5 }}>
+      <Typography variant="h4" gutterBottom sx={{ ...DESIGN_TOKENS.textGradient, ml: 1 }}>Einstellungen</Typography>
 
       {/* 1. PROTOKOLL-VERWALTUNG */}
-      <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, borderLeft: `4px solid ${PALETTE.accents.gold}` }}>
+      <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.accents.gold}` }}>
         <AccordionSummary expandIcon={<Icons.Expand />}>
             <SectionHeader icon={MedicalServicesIcon} title="Protokoll-Verwaltung" color={PALETTE.accents.gold} />
         </AccordionSummary>
-        <AccordionDetails sx={DESIGN_TOKENS.accordion.details}>
+        <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="body2" color="text.secondary">Geplante Ausfallzeiten (Krankenhaus, Reisen)</Typography>
+                <Typography variant="body2" color="text.secondary">Geplante Ausfallzeiten</Typography>
                 <Button variant="contained" size="small" sx={{ bgcolor: PALETTE.accents.gold, color:'#000' }} onClick={() => setSuspensionDialog(true)} startIcon={<Icons.Add />}>
                     Beantragen
                 </Button>
@@ -340,12 +340,12 @@ export default function Settings() {
       </Accordion>
 
       {/* 2. ZIELE & LIMITS */}
-      <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, borderLeft: `4px solid ${PALETTE.primary.main}` }}>
+      <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.primary.main}` }}>
         <AccordionSummary expandIcon={<Icons.Expand />}>
             <SectionHeader icon={Icons.Track} title="Ziele & Limits" color={PALETTE.primary.main} />
         </AccordionSummary>
-        <AccordionDetails sx={DESIGN_TOKENS.accordion.details}>
-            <Box sx={{ mb: 4, mt: 1 }}>
+        <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
+            <Box sx={{ mb: 2, mt: 1 }}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
                     <Typography variant="body2" color="text.secondary">Tagesziel (Stunden)</Typography>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -357,7 +357,7 @@ export default function Settings() {
                 </Box>
                 <Slider value={dailyTargetHours} min={1} max={12} step={0.5} onChange={(e, v) => setDailyTargetHours(v)} sx={{ color: PALETTE.primary.main }} />
             </Box>
-            <Box sx={{ mb: 4 }}>
+            <Box sx={{ mb: 2 }}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
                     <Typography variant="body2" color="text.secondary">Ruhezeit für Nylons</Typography>
                     <Typography fontWeight="bold" color="secondary">{nylonRestingHours} Std</Typography>
@@ -381,12 +381,12 @@ export default function Settings() {
       </Accordion>
 
       {/* 3. KATEGORIEN STRUKTUR */}
-      <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, borderLeft: `4px solid ${PALETTE.accents.green}` }}>
+      <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.accents.green}` }}>
         <AccordionSummary expandIcon={<Icons.Expand />}>
             <SectionHeader icon={Icons.Category} title="Kategorie Struktur" color={PALETTE.accents.green} />
         </AccordionSummary>
-        <AccordionDetails sx={DESIGN_TOKENS.accordion.details}>
-            <Box sx={{ display: 'flex', gap: 1, mb: 3 }}>
+        <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
+            <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
                 <TextField size="small" fullWidth label="Neue Hauptkategorie" value={newMainCat} onChange={e => setNewMainCat(e.target.value)} />
                 <Button variant="contained" sx={{ bgcolor: PALETTE.accents.green }} onClick={addMainCategory}><Icons.Add /></Button>
             </Box>
@@ -405,12 +405,12 @@ export default function Settings() {
         </AccordionDetails>
       </Accordion>
 
-      {/* 4. ALGORITHMUS (WIEDERHERGESTELLT) */}
-      <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, borderLeft: `4px solid ${PALETTE.accents.purple}` }}>
+      {/* 4. ALGORITHMUS */}
+      <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.accents.purple}` }}>
          <AccordionSummary expandIcon={<Icons.Expand />}><SectionHeader icon={Icons.Brain} title="Algorithmus" color={PALETTE.accents.purple} /></AccordionSummary>
-         <AccordionDetails sx={DESIGN_TOKENS.accordion.details}>
+         <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
             <Alert severity="info" sx={{mb: 2, bgcolor: 'rgba(255,255,255,0.05)', color: '#fff'}}>Wahrscheinlichkeiten für die Zufallsauswahl.</Alert>
-            <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-end', mb: 3 }}>
+            <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-end', mb: 2 }}>
                 <FormControl fullWidth size="small">
                     <InputLabel>Kategorie</InputLabel>
                     <Select value={weightTarget} label="Kategorie" onChange={e => setWeightTarget(e.target.value)}>
@@ -432,39 +432,39 @@ export default function Settings() {
       </Accordion>
 
       {/* 5. FORENSIK & ATTRIBUTE */}
-      <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, borderLeft: `4px solid ${PALETTE.accents.red}` }}>
+      <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.accents.red}` }}>
          <AccordionSummary expandIcon={<Icons.Expand />}><SectionHeader icon={ScienceIcon} title="Forensik & Attribute" color={PALETTE.accents.red} /></AccordionSummary>
-         <AccordionDetails sx={DESIGN_TOKENS.accordion.details}>
+         <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
              <ListManager title="Verlust-Ursachen (Archiv)" items={archiveReasons} newItem={newArchiveReason} setNewItem={setNewArchiveReason} listName="archiveReasons" setList={setArchiveReasons} />
-             <Divider sx={{ my: 2 }} />
+             <Divider sx={{ my: 1 }} />
              <ListManager title="Laufmaschen-Orte" items={runLocations} newItem={newRunLocation} setNewItem={setNewRunLocation} listName="runLocations" setList={setRunLocations} />
-             <Divider sx={{ my: 2 }} />
+             <Divider sx={{ my: 1 }} />
              <ListManager title="Laufmaschen-Gründe" items={runCauses} newItem={newRunCause} setNewItem={setNewRunCause} listName="runCauses" setList={setRunCauses} />
-             <Divider sx={{ my: 2 }} />
+             <Divider sx={{ my: 1 }} />
              <ListManager title="Vibe Tags" items={vibeTags} newItem={newVibeTag} setNewItem={setNewVibeTag} listName="vibeTags" setList={setVibeTags} />
          </AccordionDetails>
       </Accordion>
 
       {/* 6. LISTEN & ORTE */}
-      <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, borderLeft: `4px solid ${PALETTE.accents.blue}` }}>
+      <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.accents.blue}` }}>
          <AccordionSummary expandIcon={<Icons.Expand />}><SectionHeader icon={Icons.Inventory} title="Listen & Orte" color={PALETTE.accents.blue} /></AccordionSummary>
-         <AccordionDetails sx={DESIGN_TOKENS.accordion.details}>
+         <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
              <Typography variant="subtitle2" sx={{mb:1}}>Lagerorte</Typography>
              <Box sx={{ display: 'flex', gap: 1, mb: 2 }}><TextField size="small" fullWidth value={newLocation} onChange={e => setNewLocation(e.target.value)} /><Button onClick={() => addItemToList('locations', newLocation, setLocations, locations)}><Icons.Add /></Button></Box>
              <Stack spacing={1} sx={{mb:2}}>{locations.map(loc => <Paper key={loc} sx={{p:1, display:'flex', justifyContent:'space-between'}}><Typography>{loc}</Typography><IconButton size="small" onClick={()=>handleStartPairing(loc)}><Icons.Nfc fontSize="small"/></IconButton></Paper>)}</Stack>
              
-             <Divider sx={{ my: 2 }} />
+             <Divider sx={{ my: 1 }} />
              <ListManager title="Marken" items={brands} newItem={newBrand} setNewItem={setNewBrand} listName="brands" setList={setBrands} />
              
-             <Divider sx={{ my: 2 }} />
+             <Divider sx={{ my: 1 }} />
              <ListManager title="Materialien" items={materials} newItem={newMaterial} setNewItem={setNewMaterial} listName="materials" setList={setMaterials} />
          </AccordionDetails>
       </Accordion>
 
       {/* 7. SYSTEM */}
-      <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, borderLeft: `4px solid ${PALETTE.primary.main}` }}>
+      <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.primary.main}` }}>
          <AccordionSummary expandIcon={<Icons.Expand />}><SectionHeader icon={Icons.Settings} title="System" color={PALETTE.primary.main} /></AccordionSummary>
-         <AccordionDetails sx={DESIGN_TOKENS.accordion.details}>
+         <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
             <Stack direction="row" justifyContent="space-between" alignItems="center">
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}><Icons.Fingerprint /><Typography>Biometrie</Typography></Box>
                 <Switch checked={isBiometricActive} onChange={handleToggleBiometrics} disabled={!biometricAvailable} />
