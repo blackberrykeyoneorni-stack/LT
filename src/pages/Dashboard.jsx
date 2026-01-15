@@ -17,7 +17,7 @@ import { motion } from 'framer-motion';
 
 // HOOKS
 import useSessionProgress from '../hooks/dashboard/useSessionProgress';
-import useFemIndex from '../hooks/dashboard/useFemIndex';
+import useFemIndex from '../hooks/dashboard/useFemIndex'; 
 import { useKPIs } from '../hooks/useKPIs'; 
 
 // SERVICES
@@ -52,19 +52,32 @@ import TimerIcon from '@mui/icons-material/Timer';
 import LinkOffIcon from '@mui/icons-material/LinkOff';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
+import LocalLaundryServiceIcon from '@mui/icons-material/LocalLaundryService';
 import ArrowForwardIosIcon from '@mui/icons-material/ArrowForwardIos';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { Icons } from '../theme/appIcons';
 import { getGreeting } from '../utils/formatters';
 
-// --- MOTION VARIANTS ---
-const containerVariants = { hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: 0.1 } } };
-const itemVariants = { hidden: { y: 20, opacity: 0 }, visible: { y: 0, opacity: 1, transition: { type: 'spring', stiffness: 100 } } };
-
 // --- HILFSFUNKTIONEN ---
 const getLocalISODate = (date) => { 
     const offset = date.getTimezoneOffset() * 60000;
     return new Date(date.getTime() - offset).toISOString().split('T')[0];
+};
+
+const calculatePeriodId = () => {
+    const d = new Date(); 
+    const mins = d.getHours() * 60 + d.getMinutes(); 
+    // Tag: 07:30 (450m) bis 23:00 (1380m)
+    const isDay = mins >= 450 && mins < 1380;
+    let dateStr = getLocalISODate(d);
+    
+    // Wenn vor 07:30 Uhr, gehört es zur Nacht des Vortages
+    if (mins < 450) { 
+        const y = new Date(d); 
+        y.setDate(y.getDate() - 1); 
+        dateStr = getLocalISODate(y); 
+    }
+    return `${dateStr}-${isDay ? 'day' : 'night'}`;
 };
 
 const checkIsHoliday = (date) => {
@@ -116,7 +129,9 @@ export default function Dashboard() {
   const { activeSessions, progress, loading: sessionsLoading, dailyTargetHours, startInstructionSession, stopSession, registerRelease: hookRegisterRelease, loadActiveSessions } = useSessionProgress(currentUser, items);
   
   const { femIndex, femIndexLoading, indexDetails } = useFemIndex(currentUser, items, activeSessions); 
-  const { kpis } = useKPIs(items, activeSessions); 
+  
+  // KORREKTUR: Destructuring entfernt, da useKPIs das Objekt direkt zurückgibt
+  const kpis = useKPIs(items, activeSessions); 
 
   const [wishlistCount, setWishlistCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -160,7 +175,9 @@ export default function Dashboard() {
   const [purchasePriority, setPurchasePriority] = useState([]);
   
   const [maxInstructionItems, setMaxInstructionItems] = useState(1);
-  const [currentPeriod, setCurrentPeriod] = useState('');
+  
+  // INIT: PeriodId sofort berechnen
+  const [currentPeriod, setCurrentPeriod] = useState(calculatePeriodId());
   
   const isNight = currentPeriod ? currentPeriod.includes('night') : false;
 
@@ -249,15 +266,6 @@ export default function Dashboard() {
       } catch (e) { showToast("Fehler beim Release", "error"); } finally { setReleaseDialogOpen(false); if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current); }
   };
 
-  // FIX: Unabhängig von items.length machen, damit isNight korrekt initialisiert wird
-  const getPeriodId = useCallback(() => {
-    const d = new Date(); const mins = d.getHours() * 60 + d.getMinutes(); 
-    let period = (mins >= 450 && mins < 1380) ? 'day' : 'night';
-    let dateStr = getLocalISODate(d);
-    if (mins < 450) { const y = new Date(d); y.setDate(y.getDate() - 1); dateStr = getLocalISODate(y); }
-    return `${dateStr}-${period}`;
-  }, []);
-
   const checkAndGenerateInstruction = async (periodId) => {
       if (!currentUser) return;
       const d = new Date();
@@ -288,11 +296,14 @@ export default function Dashboard() {
       } catch (e) { console.error(e); setCurrentInstruction(null); } finally { setInstructionStatus('ready'); }
   };
 
-  // FIX: Time update Logik
+  // UPDATE TIME & PERIOD
   useEffect(() => {
-    const newPeriod = getPeriodId();
-    if (newPeriod !== lastCheckedPeriod.current) { lastCheckedPeriod.current = newPeriod; setCurrentPeriod(newPeriod); }
-  }, [now, getPeriodId]);
+    const newPeriod = calculatePeriodId();
+    if (newPeriod !== lastCheckedPeriod.current) { 
+        lastCheckedPeriod.current = newPeriod; 
+        setCurrentPeriod(newPeriod); 
+    }
+  }, [now]);
 
   useEffect(() => {
     if (items.length > 0 && !sessionsLoading && currentPeriod) {
@@ -399,11 +410,11 @@ export default function Dashboard() {
   // --- NORMAL MODE ---
   return (
     <Box sx={DESIGN_TOKENS.bottomNavSpacer}>
-      <TzdOverlay active={false} /> {/* Platzhalter Logic */}
+      <TzdOverlay active={false} />
       <Container maxWidth="md" sx={{ pt: 2, pb: 4 }}>
         <motion.div variants={MOTION.page} initial="initial" animate="animate" exit="exit">
             
-            {/* Header: Wiederhergestellt mit Begrüßung, Datum und Budget-Button */}
+            {/* 1. Header: Greeting & Date */}
             <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <Box>
                     <Typography variant="h4" sx={DESIGN_TOKENS.textGradient}>
@@ -421,9 +432,7 @@ export default function Dashboard() {
                 </Box>
             </Box>
 
-            {/* Layout-Reihenfolge korrigiert: Erst Progress/Bars, dann InfoTiles */}
-            
-            {/* Main Progress */}
+            {/* 2. ProgressBar */}
             <ProgressBar 
                 currentMinutes={progress.currentContinuousMinutes} 
                 targetHours={dailyTargetHours} 
@@ -431,25 +440,13 @@ export default function Dashboard() {
                 progressData={progress}
             />
 
-            {/* Fem Index */}
+            {/* 3. FemIndex */}
             <FemIndexBar femIndex={femIndex || 0} loading={femIndexLoading} />
 
-            {/* KPI Tiles (Jetzt unterhalb der Balken) */}
+            {/* 4. KPI Tiles (KORREKT positioniert) */}
             <InfoTiles kpis={kpis} />
 
-            {/* Active Sessions (Props korrigiert: items und washingItemsCount übergeben) */}
-            <ActiveSessionsList 
-                activeSessions={activeSessions} 
-                items={items}
-                punishmentStatus={punishmentStatus}
-                washingItemsCount={items.filter(i => i.status === 'washing').length}
-                onNavigateItem={(id) => navigate(`/item/${id}`)}
-                onStopSession={stopSession}
-                onOpenLaundry={() => setLaundryOpen(true)}
-                onOpenRelease={handleOpenRelease}
-            />
-
-            {/* Actions (Props für korrekte Button-Anzeige ergänzt) */}
+            {/* 5. ActionButtons (Instruction / Punishment) */}
             <ActionButtons 
                 punishmentStatus={punishmentStatus} 
                 auditDue={auditDue}
@@ -465,6 +462,65 @@ export default function Dashboard() {
                 }}
                 onStartAudit={handleStartAudit}
             />
+
+            {/* 6. Active Sessions (Items) */}
+            <ActiveSessionsList 
+                activeSessions={activeSessions} 
+                items={items}
+                washingItemsCount={items.filter(i => i.status === 'washing').length}
+                onNavigateItem={(id) => navigate(`/item/${id}`)}
+                onStopSession={stopSession}
+                onOpenLaundry={() => setLaundryOpen(true)}
+                onOpenRelease={handleOpenRelease}
+            />
+
+            {/* 7. Laundry Button (Standalone) */}
+            <Button
+              variant="outlined"
+              fullWidth
+              startIcon={<LocalLaundryServiceIcon />}
+              onClick={() => setLaundryOpen(true)}
+              sx={{ 
+                  mt: 3, 
+                  mb: 1, 
+                  py: 1.5,
+                  color: PALETTE.text.secondary, 
+                  borderColor: PALETTE.text.muted,
+                  justifyContent: 'flex-start',
+                  px: 2,
+                  '&:hover': {
+                      borderColor: PALETTE.primary.main,
+                      color: PALETTE.primary.main,
+                      bgcolor: 'rgba(255,255,255,0.02)'
+                  }
+              }}
+            >
+              Wäschekorb ({items.filter(i => i.status === 'washing').length})
+            </Button>
+
+            {/* 8. Budget Button (Standalone) */}
+            <Button
+              variant="outlined"
+              fullWidth
+              startIcon={<AccountBalanceWalletIcon />}
+              onClick={() => navigate('/budget')}
+              sx={{ 
+                  mt: 1, 
+                  mb: 3, 
+                  py: 1.5,
+                  color: PALETTE.text.secondary, 
+                  borderColor: PALETTE.text.muted,
+                  justifyContent: 'flex-start',
+                  px: 2,
+                  '&:hover': {
+                      borderColor: PALETTE.primary.main,
+                      color: PALETTE.primary.main,
+                      bgcolor: 'rgba(255,255,255,0.02)'
+                  }
+              }}
+            >
+              Budget & Finanzen ({currentSpent.toFixed(2)}€ / {monthlyBudget}€)
+            </Button>
 
         </motion.div>
       </Container>

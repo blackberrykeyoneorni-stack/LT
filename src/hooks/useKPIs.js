@@ -53,31 +53,22 @@ export const useKPIs = (items = [], activeSessions = []) => {
     }, []);
 
     return useMemo(() => {
-        // --- 1. SPERMA SCORE CALC ---
+        // Sicherstellen, dass items ein Array ist
+        const safeItems = Array.isArray(items) ? items : [];
+
+        // --- 1. SPERMA SCORE CALC (Unabhängig von Items) ---
         const totalReleases = releaseStats.totalReleases || 0;
         const keptReleases = releaseStats.keptOn || 0;
         const spermaScoreRate = totalReleases > 0 
             ? Math.round((keptReleases / totalReleases) * 100) 
             : 0;
 
-        if (!items || items.length === 0) {
-            return {
-                basics: { total: 0, active: 0, washing: 0, archived: 0 },
-                financials: { totalValue: 0, avgCPW: 0, amortizationRate: 0 },
-                usage: { nylonIndex: 0, totalWearTime: 0 },
-                health: { rotationScore: 0, orphanCount: 0, freshRate: 0, wornOutCount: 0, orphans: [] },
-                meta: { wardrobeScore: 0 },
-                spermaScore: { rate: 0, total: 0, kept: 0 },
-                femIndex: { score: 0, details: null }
-            };
-        }
-
         // --- 2. STANDARD KPIs ---
-        const activeItems = items.filter(i => i.status === 'active');
-        const washingItems = items.filter(i => i.status === 'washing');
-        const archivedItems = items.filter(i => i.status === 'archived');
+        const activeItems = safeItems.filter(i => i.status === 'active');
+        const washingItems = safeItems.filter(i => i.status === 'washing');
+        const archivedItems = safeItems.filter(i => i.status === 'archived');
         const wornOutItems = activeItems.filter(i => i.condition <= 2);
-        const itemsWithWears = items.filter(i => (i.wearCount || 0) > 0);
+        const itemsWithWears = safeItems.filter(i => (i.wearCount || 0) > 0);
         
         // Financials
         const totalValue = activeItems.reduce((acc, i) => acc + (parseFloat(i.cost) || 0), 0);
@@ -88,7 +79,7 @@ export const useKPIs = (items = [], activeSessions = []) => {
         const amortizationRate = itemsWithWears.length > 0 ? (amortizedItems.length / itemsWithWears.length) * 100 : 0;
 
         // Usage
-        const nylonItems = items.filter(i => (i.mainCategory || '').toLowerCase().includes('nylon'));
+        const nylonItems = safeItems.filter(i => (i.mainCategory || '').toLowerCase().includes('nylon'));
         const nylonIndex = nylonItems.length > 0 
             ? (nylonItems.reduce((acc, i) => acc + (i.totalMinutes || 0), 0) / nylonItems.length) / 60 
             : 0;
@@ -109,7 +100,9 @@ export const useKPIs = (items = [], activeSessions = []) => {
             const d = i.lastWorn.toDate ? i.lastWorn.toDate() : new Date(i.lastWorn);
             return d < sixtyDaysAgo;
         });
-        const freshRate = (activeItems.length / (activeItems.length + washingItems.length)) * 100 || 0;
+        
+        const totalActiveAndWashing = activeItems.length + washingItems.length;
+        const freshRate = totalActiveAndWashing > 0 ? (activeItems.length / totalActiveAndWashing) * 100 : 0;
 
         // Wardrobe Score
         const conditionScore = activeItems.length > 0
@@ -117,29 +110,24 @@ export const useKPIs = (items = [], activeSessions = []) => {
             : 0;
         const wardrobeScore = (rotationScore * 0.4) + (conditionScore * 0.3) + (freshRate * 0.3);
 
-        // --- 3. FEM-INDEX BERECHNUNG (Stabilisiert) ---
+        // --- 3. FEM-INDEX BERECHNUNG ---
         
         // A. Enclosure (Besitz-Quote)
-        const fetishItems = items.filter(i => {
+        const fetishItems = safeItems.filter(i => {
             const cat = (i.mainCategory || '').toLowerCase();
             const sub = (i.subCategory || '').toLowerCase();
             return cat.includes('nylon') || cat.includes('late') || cat.includes('pvc') || 
                    sub.includes('strumpfhose') || sub.includes('corsage') || sub.includes('body');
         });
-        const enclosureScore = items.length > 0 ? (fetishItems.length / items.length) * 100 : 0;
+        const enclosureScore = safeItems.length > 0 ? (fetishItems.length / safeItems.length) * 100 : 0;
 
         // B. Gap (Live Disziplin)
-        // Bleibt dynamisch, aber dank 'lastWorn' Fix fällt er nicht mehr sofort auf 0
-        const gapScore = calculateGapScore(items, activeSessions);
+        const gapScore = calculateGapScore(safeItems, activeSessions);
 
-        // C. Nocturnal (Nacht-Quote -> Ersetzt durch Nutzungs-Intensität)
-        // Statt "Active Session Bonus", nehmen wir den NylonIndex (Durchschnittliche Tragezeit)
-        // 10h Durchschnitt = 100% Score. Das ist viel stabiler.
+        // C. Nocturnal (Nacht-Quote -> Nutzungs-Intensität)
         const nocturnalScore = Math.min(nylonIndex * 10, 100);
 
-        // D. Compliance (Agilität -> Ersetzt durch Disziplin & Pflege)
-        // Statt "Session An Bonus", nehmen wir eine Mischung aus SpermaScore (Gehorsam) und Freshness (Pflege)
-        // Beides sind stabile Langzeitwerte.
+        // D. Compliance
         const complianceScore = (spermaScoreRate + freshRate) / 2;
 
         const femIndexTotal = Math.round(
@@ -150,9 +138,9 @@ export const useKPIs = (items = [], activeSessions = []) => {
         );
 
         return {
-            basics: { total: items.length, active: activeItems.length, washing: washingItems.length, archived: archivedItems.length },
+            basics: { total: safeItems.length, active: activeItems.length, washing: washingItems.length, archived: archivedItems.length },
             financials: { totalValue, avgCPW, amortizationRate },
-            usage: { nylonIndex, totalMinutes: items.reduce((acc, i) => acc + (i.totalMinutes || 0), 0) },
+            usage: { nylonIndex, totalMinutes: safeItems.reduce((acc, i) => acc + (i.totalMinutes || 0), 0) },
             health: { rotationScore, orphanCount: orphans.length, freshRate, wornOutCount: wornOutItems.length, orphans },
             meta: { wardrobeScore },
             spermaScore: { rate: spermaScoreRate, total: totalReleases, kept: keptReleases },

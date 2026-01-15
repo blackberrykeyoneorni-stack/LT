@@ -9,10 +9,10 @@ import { createTheme } from '@mui/material/styles';
 const m3Tokens = {
   // PRIMARY: Prominenteste Aktionen (FAB, Filled Buttons)
   // M3 nutzt in Dark Mode Pastelltöne (Tone 80), keine Neonfarben.
-  primary: '#4CDDAE',          // Ein technisches, modernes Mint/Cyan
-  onPrimary: '#003828',        // Dunkler Text auf Primary
-  primaryContainer: '#00513B', // Container Hintergrund
-  onPrimaryContainer: '#6FF6C9', // Text/Icon im Container
+  primary: '#FFB683',          // Ein technisches, modernes Mint/Cyan
+  onPrimary: '#522302',        // Dunkler Text auf Primary
+  primaryContainer: '#321200', // Container Hintergrund
+  onPrimaryContainer: '#FFF8F4', // Text/Icon im Container
 
   // SECONDARY: Weniger dominante Elemente (Filter Chips, Toggles)
   secondary: '#B3CCBE',
