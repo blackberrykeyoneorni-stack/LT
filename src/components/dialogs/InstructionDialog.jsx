@@ -4,12 +4,11 @@ import {
   Typography, Box, Button, CircularProgress, Avatar,
   List, ListItem, ListItemButton, ListItemAvatar, ListItemText, IconButton
 } from '@mui/material';
-import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign'; // NEU
+import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
 import LockIcon from '@mui/icons-material/Lock';
 import NightlightRoundIcon from '@mui/icons-material/NightlightRound';
 import WbSunnyIcon from '@mui/icons-material/WbSunny';
 import LaunchIcon from '@mui/icons-material/Launch';
-import LabelIcon from '@mui/icons-material/Label';
 import WeekendIcon from '@mui/icons-material/Weekend';
 import CelebrationIcon from '@mui/icons-material/Celebration';
 import NfcIcon from '@mui/icons-material/Nfc';
@@ -34,10 +33,11 @@ export default function InstructionDialog({
   const { currentUser } = useAuth();
   const [verifiedItems, setVerifiedItems] = useState([]);
   
-  // Hardcore Logic
+  // Hardcore Logic States
   const [hardcoreDialogOpen, setHardcoreDialogOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState(null);
   const [hcPrefs, setHcPrefs] = useState({ enabled: false, probability: 15 });
+  const [releaseMethod, setReleaseMethod] = useState(null); // NEU: Speichert die Methode
 
   useEffect(() => {
     const loadPrefs = async () => {
@@ -57,13 +57,29 @@ export default function InstructionDialog({
   }, [currentUser, open]);
 
   const triggerHardcoreCheck = (actionToExecute) => {
+      // 1. Grund-Check (Nacht & Enabled)
       if (!isNight || !hcPrefs.enabled) { actionToExecute(); return; }
+      
       const roll = Math.random();
       const threshold = hcPrefs.probability / 100;
+      
       if (roll < threshold) {
+          // 2. Methode würfeln (NEUE LOGIK)
+          const methodRoll = Math.random();
+          let method = "per Hand"; // Default (0.00 - 0.34) = 34%
+          
+          if (methodRoll >= 0.34 && methodRoll < 0.67) {
+              method = "per Masturbator vaginal"; // 33%
+          } else if (methodRoll >= 0.67) {
+              method = "per Masturbator anal"; // 33%
+          }
+
+          setReleaseMethod(method);
           setPendingAction(() => actionToExecute);
           setHardcoreDialogOpen(true);
-      } else { actionToExecute(); }
+      } else { 
+          actionToExecute(); 
+      }
   };
 
   const handleHardcoreRefuse = async () => {
@@ -204,7 +220,7 @@ export default function InstructionDialog({
           open={open} 
           onClose={!instruction?.isAccepted ? onClose : undefined} 
           maxWidth="xs" fullWidth 
-          PaperProps={DESIGN_TOKENS.dialog.paper} // ZENTRALISIERT
+          PaperProps={DESIGN_TOKENS.dialog.paper}
       >
         <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
           {renderContent()}
@@ -221,15 +237,37 @@ export default function InstructionDialog({
         )}
       </Dialog>
 
-      {/* HARDCORE DIALOG - Ebenfalls zentralisiert */}
-      <Dialog open={hardcoreDialogOpen} disableEscapeKeyDown PaperProps={{ ...DESIGN_TOKENS.dialog.paper, sx: { ...DESIGN_TOKENS.dialog.paper.sx, border: `1px solid ${PALETTE.accents.red}` } }}>
+      {/* HARDCORE DIALOG */}
+      <Dialog 
+        open={hardcoreDialogOpen} 
+        disableEscapeKeyDown 
+        PaperProps={{ ...DESIGN_TOKENS.dialog.paper, sx: { ...DESIGN_TOKENS.dialog.paper.sx, border: `1px solid ${PALETTE.accents.red}` } }}
+      >
           <DialogTitle sx={{ ...DESIGN_TOKENS.dialog.title.sx, color: PALETTE.accents.red }}>
               <ReportProblemIcon /> Hardcore Protokoll
           </DialogTitle>
           <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
-              <DialogContentText sx={{ color: 'text.primary' }}>
-                  <strong>Eine sofortige Entladung wird gefordert.</strong>
-              </DialogContentText>
+              <Box sx={{ textAlign: 'center', py: 2 }}>
+                  <DialogContentText sx={{ color: 'text.primary', mb: 2 }}>
+                      <strong>Eine sofortige Entladung wird gefordert.</strong>
+                  </DialogContentText>
+                  
+                  {releaseMethod && (
+                    <Box sx={{ 
+                        p: 2, 
+                        bgcolor: 'rgba(255, 0, 0, 0.1)', 
+                        border: `1px solid ${PALETTE.accents.red}`,
+                        borderRadius: '8px'
+                    }}>
+                        <Typography variant="caption" color="error" sx={{ textTransform: 'uppercase', letterSpacing: 1 }}>
+                            Vorgeschriebene Methode
+                        </Typography>
+                        <Typography variant="h6" sx={{ color: '#fff', fontWeight: 'bold', mt: 1 }}>
+                            {releaseMethod}
+                        </Typography>
+                    </Box>
+                  )}
+              </Box>
           </DialogContent>
           <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}>
               <Button fullWidth variant="contained" color="error" onClick={handleHardcoreAccept}>Akzeptieren</Button>
