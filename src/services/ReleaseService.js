@@ -36,5 +36,8 @@ export const registerRelease = async (userId, outcome, intensity) => {
     }
 };
 
-// ALIAS: Für Abwärtskompatibilität (falls andere Dateien den alten Namen nutzen)
+// ALIAS: Für Abwärtskompatibilität
 export const registerReleaseSuccess = registerRelease;
+
+// ALIAS: Für useSessionProgress Hook (Fix für Build Error)
+export const checkReleaseOutcome = registerRelease;

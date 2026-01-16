@@ -1,5 +1,5 @@
 import { db } from '../firebase';
-import { collection, doc, writeBatch, serverTimestamp } from 'firebase/firestore';
+import { collection, doc, writeBatch, serverTimestamp, getDoc } from 'firebase/firestore';
 
 /**
  * Zentraler Service zum Starten von Sessions.
@@ -72,6 +72,49 @@ export const startSession = async (userId, params) => {
         // Update Item Status auf 'wearing'
         batch.update(doc(db, `users/${userId}/items`, item.id), { status: 'wearing' });
     });
+
+    await batch.commit();
+};
+
+/**
+ * Beendet eine Session und setzt den Item-Status zurück.
+ * Wird vom Dashboard und anderen Komponenten verwendet.
+ */
+export const stopSession = async (userId, sessionId, feedback = {}) => {
+    if (!userId || !sessionId) throw new Error("Parameter fehlen.");
+
+    // Wir müssen zuerst die Session lesen, um die Item-IDs zu bekommen
+    const sessionRef = doc(db, `users/${userId}/sessions`, sessionId);
+    const sessionSnap = await getDoc(sessionRef);
+
+    if (!sessionSnap.exists()) {
+        console.error("Session nicht gefunden:", sessionId);
+        return;
+    }
+
+    const sessionData = sessionSnap.data();
+    const batch = writeBatch(db);
+
+    // 1. Session beenden
+    batch.update(sessionRef, {
+        endTime: serverTimestamp(),
+        feelings: feedback.feelings || [],
+        finalNote: feedback.note || ''
+    });
+
+    // 2. Item Status zurücksetzen (auf 'active')
+    // Prüfen ob es eine Gruppen-Session war (z.B. Instruction)
+    if (sessionData.itemIds && Array.isArray(sessionData.itemIds) && sessionData.itemIds.length > 0) {
+        sessionData.itemIds.forEach(id => {
+            const itemRef = doc(db, `users/${userId}/items`, id);
+            // Status zurück auf 'active' setzen
+            batch.update(itemRef, { status: 'active' });
+        });
+    } else if (sessionData.itemId) {
+        // Einzel-Session
+        const itemRef = doc(db, `users/${userId}/items`, sessionData.itemId);
+        batch.update(itemRef, { status: 'active' });
+    }
 
     await batch.commit();
 };

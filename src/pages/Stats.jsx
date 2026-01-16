@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { collection, query, getDocs, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
+import { useKPIs } from '../hooks/useKPIs'; // Single Source of Truth
 import { 
     Box, Typography, Grid, Paper, Card, CardContent, CircularProgress, 
     Container, Dialog, DialogTitle, DialogContent, IconButton, Chip, Divider 
@@ -12,16 +13,15 @@ import {
 } from 'recharts';
 import { motion } from 'framer-motion';
 
-// --- DESIGN ---
 import { DESIGN_TOKENS, PALETTE, MOTION, CHART_THEME } from '../theme/obsidianDesign';
 import { Icons } from '../theme/appIcons';
 
-// Icons für Kacheln
+// Icons
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import SpeedIcon from '@mui/icons-material/Speed';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import PsychologyIcon from '@mui/icons-material/Psychology';
-import BrokenImageIcon from '@mui/icons-material/BrokenImage';
+import TimerIcon from '@mui/icons-material/Timer';
 import SecurityIcon from '@mui/icons-material/Security';
 
 export default function Statistics() {
@@ -32,25 +32,24 @@ export default function Statistics() {
     const [selectedMetric, setSelectedMetric] = useState(null); 
     const [trendData, setTrendData] = useState([]); 
 
+    // --- 1. DATA LOADING ---
     useEffect(() => {
         if (!currentUser) return;
         const loadData = async () => {
             setLoading(true);
             try {
-                // 1. Items laden
+                // Items laden
                 const iSnap = await getDocs(collection(db, `users/${currentUser.uid}/items`));
                 const loadedItems = iSnap.docs.map(d => ({ 
-                    id: d.id, 
-                    ...d.data(), 
+                    id: d.id, ...d.data(), 
                     purchaseDate: d.data().purchaseDate?.toDate ? d.data().purchaseDate.toDate() : new Date(d.data().purchaseDate || Date.now()) 
                 }));
                 setItems(loadedItems);
 
-                // 2. Sessions (Historie) laden
+                // History laden (für Stats zwingend notwendig)
                 const sSnap = await getDocs(query(collection(db, `users/${currentUser.uid}/sessions`), orderBy('startTime', 'asc')));
                 const loadedSessions = sSnap.docs.map(d => ({ 
-                    id: d.id, 
-                    ...d.data(), 
+                    id: d.id, ...d.data(), 
                     startTime: d.data().startTime?.toDate ? d.data().startTime.toDate() : new Date(d.data().startTime),
                     endTime: d.data().endTime?.toDate ? d.data().endTime.toDate() : (d.data().endTime ? new Date(d.data().endTime) : null)
                 }));
@@ -61,70 +60,16 @@ export default function Statistics() {
         loadData();
     }, [currentUser]);
 
-    // --- KPI BERECHNUNG (Orientiert an useKPIs.js) ---
-    const kpi = useMemo(() => {
-        if (!items.length) return { enclosure: 0, nocturnal: 0, cpnh: 0, ladderVelocity: 0, exposure: 0, resistance: 0, vibe: 'N/A' };
-        
-        // Helper
-        const activeItems = items.filter(i => i.status === 'active' || i.status === 'washing');
-        
-        // 1. ENCLOSURE (Nylons vs Gesamt)
-        const nylons = activeItems.filter(i => i.mainCategory === 'Nylons');
-        const enclosure = activeItems.length > 0 ? Math.round((nylons.length / activeItems.length) * 100) : 0;
+    // --- 2. KPI CALCULATION (Via Hook) ---
+    // Wir übergeben 'sessions' als drittes Argument (history)
+    const { coreMetrics, basics } = useKPIs(items, [], sessions);
 
-        // 2. NOCTURNAL (Nacht-Quote aus Sessions)
-        // Nur Instruction-Sessions zählen
-        const instructionSessions = sessions.filter(s => s.type === 'instruction');
-        const nightSessions = instructionSessions.filter(s => s.period && s.period.includes('night'));
-        const nocturnal = instructionSessions.length > 0 ? Math.round((nightSessions.length / instructionSessions.length) * 100) : 0;
-
-        // 3. CPNH (Cost Per Nylon Hour)
-        const totalCost = items.reduce((acc, i) => acc + (parseFloat(i.cost) || 0), 0);
-        // Wir nehmen die totalMinutes direkt aus den Items, da diese beim Session-Stop aktualisiert werden
-        const totalMinutes = items.reduce((acc, i) => acc + (i.totalMinutes || 0), 0);
-        const totalHours = totalMinutes / 60;
-        const cpnh = totalHours > 0 ? (totalCost / totalHours).toFixed(2) : "0.00";
-
-        // 4. LADDER VELOCITY (Archivierte Items pro Monat - vereinfacht Total)
-        const archivedCount = items.filter(i => i.status === 'archived').length;
-        const ladderVelocity = archivedCount; 
-
-        // 5. EXPOSURE (Verhältnis Tragezeit zu Gesamtzeit seit erstem Tag)
-        let firstSessionDate = new Date();
-        let totalSessionDuration = 0;
-        if (sessions.length > 0) {
-            firstSessionDate = sessions[0].startTime;
-            sessions.forEach(s => {
-                if(s.endTime) {
-                    totalSessionDuration += (s.endTime - s.startTime);
-                }
-            });
-        }
-        const totalTimeSinceStart = Date.now() - firstSessionDate.getTime();
-        const exposure = totalTimeSinceStart > 0 ? Math.round((totalSessionDuration / totalTimeSinceStart) * 100) : 0;
-
-        // 6. RESISTANCE (Anteil Bestrafungen an Gesamtsessions)
-        const punishmentCount = sessions.filter(s => s.type === 'punishment').length;
-        const totalSessionsCount = sessions.length;
-        const resistance = totalSessionsCount > 0 ? Math.round((punishmentCount / totalSessionsCount) * 100) : 0;
-
-        // 7. VIBE (Häufigster Tag)
-        const tags = {};
-        items.forEach(i => {
-            if(Array.isArray(i.vibeTags)) i.vibeTags.forEach(t => tags[t] = (tags[t] || 0) + 1);
-        });
-        const topVibe = Object.keys(tags).sort((a,b) => tags[b] - tags[a])[0] || "Neutral";
-
-        return { enclosure, nocturnal, cpnh, ladderVelocity, exposure, resistance, vibe: topVibe };
-    }, [items, sessions]);
-
-    // --- CHART LOGIK: 5-TAGE GLEITENDER DURCHSCHNITT ---
+    // --- 3. CHART LOGIK (Bleibt hier, da UI-spezifisch) ---
     const calculateTrend = (metricId) => {
-        const displayDays = 30; // Wir wollen 30 Punkte im Chart
-        const windowSize = 5;   // Glättung über 5 Tage
-        const totalDaysNeeded = displayDays + windowSize - 1; // Puffer für den Anfang
+        const displayDays = 30;
+        const windowSize = 5;
+        const totalDaysNeeded = displayDays + windowSize - 1;
 
-        // 1. Rohdaten generieren (Täglich)
         const rawData = [];
         const today = new Date();
         
@@ -133,7 +78,6 @@ export default function Statistics() {
             d.setDate(today.getDate() - (totalDaysNeeded - 1 - i));
             const dateStr = d.toISOString().split('T')[0];
 
-            // Sessions dieses Tages filtern
             const daySessions = sessions.filter(s => {
                 if (!s.startTime) return false;
                 const sDate = s.startTime.toISOString().split('T')[0];
@@ -143,7 +87,6 @@ export default function Statistics() {
             let val = 0;
             
             if (metricId === 'exposure') {
-                // Tragezeit in Stunden für diesen Tag
                 const mins = daySessions.reduce((acc, s) => {
                     const end = s.endTime || new Date();
                     return acc + (end - s.startTime) / 60000;
@@ -151,103 +94,93 @@ export default function Statistics() {
                 val = mins / 60; 
             } 
             else if (metricId === 'nocturnal') {
-                // Quote Nacht-Sessions (%)
                 const total = daySessions.length;
-                if (total === 0) val = 0; // Kein Wert
-                else {
+                if (total > 0) {
                     const night = daySessions.filter(s => s.period && s.period.includes('night')).length;
                     val = (night / total) * 100;
                 }
             }
             else if (metricId === 'resistance') {
-                // Anzahl Strafen (oder Quote, hier Anzahl für bessere Lesbarkeit)
                 val = daySessions.filter(s => s.type === 'punishment').length;
             }
+            else if (metricId === 'compliance') {
+                const relevant = daySessions.filter(s => typeof s.complianceLagMinutes === 'number');
+                if (relevant.length > 0) {
+                    const sum = relevant.reduce((acc, s) => acc + s.complianceLagMinutes, 0);
+                    val = sum / relevant.length;
+                }
+            }
             else {
-                // Default: Anzahl Sessions
                 val = daySessions.length;
             }
             
             rawData.push({ date: dateStr, val });
         }
 
-        // 2. Gleitenden Durchschnitt berechnen
         const smoothedData = [];
         for (let i = windowSize - 1; i < rawData.length; i++) {
-            // Fenster ausschneiden (z.B. Index 0 bis 4)
             const windowSlice = rawData.slice(i - windowSize + 1, i + 1);
-            
-            // Durchschnitt berechnen
             const sum = windowSlice.reduce((acc, curr) => acc + curr.val, 0);
             const avg = sum / windowSize;
-            
             const currentDay = rawData[i];
             
             smoothedData.push({
-                name: currentDay.date.split('-').slice(2).join('.'), // Nur Tag (DD)
+                name: currentDay.date.split('-').slice(2).join('.'),
                 fullDate: currentDay.date,
-                value: parseFloat(avg.toFixed(2)) // 2 Nachkommastellen
+                value: parseFloat(avg.toFixed(2))
             });
         }
-
         setTrendData(smoothedData);
     };
 
     const handleCardClick = (metricId, title) => { 
-        if (['exposure', 'nocturnal', 'resistance', 'enclosure'].includes(metricId)) {
+        if (['exposure', 'nocturnal', 'resistance', 'enclosure', 'compliance'].includes(metricId)) {
             calculateTrend(metricId);
             setSelectedMetric({id: metricId, title}); 
         } else {
-            // Keine Charts für statische Werte wie CPNH
             setSelectedMetric(null);
         }
     };
 
-    // --- Forensik Daten (Pie Chart) ---
-    const forensics = useMemo(() => {
+    // Forensik Helper
+    const forensics = {
+        archivedCount: basics?.archived || 0,
+        realizedCPW: 0, // Könnte man auch in useKPIs schieben, aber hier ok
+        reasonsData: []
+    };
+    
+    // Einfache Berechnung für Pie Chart (bleibt hier für Performance/Rendering Logic)
+    if (items.length > 0) {
         const archived = items.filter(i => i.status === 'archived');
-        let totalCost = 0;
-        let totalWears = 0;
-        items.forEach(i => {
-            totalCost += (parseFloat(i.cost) || 0);
-            totalWears += (i.wearCount || 0);
-        });
-        const realizedCPW = totalWears > 0 ? (totalCost / totalWears) : 0;
-
-        const reasonCounts = {};
-        archived.forEach(i => {
-            const r = i.archiveReason || 'Unbekannt';
-            reasonCounts[r] = (reasonCounts[r] || 0) + 1;
-        });
+        let totalCost = 0; let totalWears = 0;
+        items.forEach(i => { totalCost += (parseFloat(i.cost)||0); totalWears += (i.wearCount||0); });
+        forensics.realizedCPW = totalWears > 0 ? (totalCost / totalWears) : 0;
         
-        // Format für Recharts Pie
-        const reasonsData = Object.keys(reasonCounts).map((key, idx) => ({
-            name: key, 
-            value: reasonCounts[key], 
-            color: CHART_THEME.colors[idx % CHART_THEME.colors.length]
+        const reasonCounts = {};
+        archived.forEach(i => { const r = i.archiveReason || 'Unbekannt'; reasonCounts[r] = (reasonCounts[r]||0) + 1; });
+        forensics.reasonsData = Object.keys(reasonCounts).map((key, idx) => ({
+            name: key, value: reasonCounts[key], color: CHART_THEME.colors[idx % CHART_THEME.colors.length]
         }));
+    }
 
-        return { archivedCount: archived.length, realizedCPW, reasonsData };
-    }, [items]);
-
-    // Helper für Einheiten im Chart
     const getUnit = (metricId) => {
         if (metricId === 'exposure') return ' h';
         if (metricId === 'nocturnal') return ' %';
+        if (metricId === 'compliance') return ' m';
         return '';
     };
 
     if (loading) return <Box sx={{display:'flex', justifyContent:'center', mt:10}}><CircularProgress/></Box>;
 
     const metrics = [
-        { id: 'enclosure', title: 'Enclosure', val: `${kpi.enclosure}%`, sub: 'Nylon-Quote', icon: Icons.Layers, color: PALETTE.accents.pink },
-        { id: 'nocturnal', title: 'Nocturnal', val: `${kpi.nocturnal}%`, sub: 'Nacht-Quote', icon: Icons.Night, color: PALETTE.accents.purple },
-        { id: 'cpnh', title: 'CPNH', val: `${kpi.cpnh}€`, sub: 'Cost/Hour', icon: TrendingUpIcon, color: PALETTE.accents.green },
-        { id: 'ladder', title: 'Attrition', val: kpi.ladderVelocity, sub: 'Verlust Total', icon: BrokenImageIcon, color: PALETTE.accents.red },
-        { id: 'exposure', title: 'Exposure', val: `${kpi.exposure}%`, sub: 'Tragezeit-Ratio', icon: AccessTimeIcon, color: PALETTE.primary.main },
-        { id: 'resistance', title: 'Resistance', val: `${kpi.resistance}%`, sub: 'Straf-Quote', icon: SecurityIcon, color: PALETTE.accents.gold },
-        { id: 'vibe', title: 'Vibe', val: kpi.vibe, sub: 'Dominanz', icon: PsychologyIcon, color: PALETTE.accents.blue },
-        { id: 'velocity', title: 'Sessions', val: sessions.length, sub: 'Total', icon: SpeedIcon, color: PALETTE.text.secondary },
+        { id: 'enclosure', title: 'Enclosure', val: `${coreMetrics.enclosure}%`, sub: 'Nylon-Quote', icon: Icons.Layers, color: PALETTE.accents.pink },
+        { id: 'nocturnal', title: 'Nocturnal', val: `${coreMetrics.nocturnal}%`, sub: 'Nacht-Quote', icon: Icons.Night, color: PALETTE.accents.purple },
+        { id: 'cpnh', title: 'CPNH', val: `${coreMetrics.cpnh}€`, sub: 'Cost/Hour', icon: TrendingUpIcon, color: PALETTE.accents.green },
+        { id: 'compliance', title: 'Compliance Lag', val: `${coreMetrics.complianceLag}m`, sub: 'Ø Verzögerung', icon: TimerIcon, color: PALETTE.accents.red },
+        { id: 'exposure', title: 'Exposure', val: `${coreMetrics.exposure}%`, sub: 'Tragezeit-Ratio', icon: AccessTimeIcon, color: PALETTE.primary.main },
+        { id: 'resistance', title: 'Resistance', val: `${coreMetrics.resistance}%`, sub: 'Straf-Quote', icon: SecurityIcon, color: PALETTE.accents.gold },
+        { id: 'vibe', title: 'Vibe', val: coreMetrics.vibe, sub: 'Dominanz', icon: PsychologyIcon, color: PALETTE.accents.blue },
+        { id: 'velocity', title: 'Sessions', val: coreMetrics.sessionCount, sub: 'Total', icon: SpeedIcon, color: PALETTE.text.secondary },
     ];
 
     return (
@@ -269,8 +202,7 @@ export default function Statistics() {
                                     height: '100%', 
                                     ...DESIGN_TOKENS.glassCard,
                                     borderColor: `1px solid ${m.color}40`,
-                                    // background: `linear-gradient(135deg, rgba(18,18,18,0.4) 0%, ${m.color}10 100%)`, // Entfernt für M3 Look
-                                    cursor: ['exposure', 'nocturnal', 'resistance'].includes(m.id) ? 'pointer' : 'default',
+                                    cursor: ['exposure', 'nocturnal', 'resistance', 'compliance', 'enclosure'].includes(m.id) ? 'pointer' : 'default',
                                     transition: 'transform 0.2s',
                                     '&:hover': { transform: 'translateY(-2px)', borderColor: m.color }
                                 }}
