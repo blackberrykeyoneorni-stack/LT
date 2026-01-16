@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  collection, query, getDocs
+  collection, query, getDocs, addDoc, Timestamp 
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
@@ -9,8 +9,11 @@ import { useItems } from '../contexts/ItemContext';
 // UI & THEME
 import { 
     Box, Container, Typography, IconButton, Paper, 
-    ToggleButton, ToggleButtonGroup,
-    Stack
+    ToggleButton, ToggleButtonGroup, Chip,
+    Stack, Dialog, DialogTitle, DialogContent, DialogActions,
+    Button, List, ListItem, ListItemText, Divider,
+    TextField, FormControl, InputLabel, Select, MenuItem,
+    useTheme
 } from '@mui/material';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DESIGN_TOKENS, PALETTE } from '../theme/obsidianDesign';
@@ -21,6 +24,9 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import CalendarViewMonthIcon from '@mui/icons-material/CalendarViewMonth';
 import ViewListIcon from '@mui/icons-material/ViewList';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
+import EventIcon from '@mui/icons-material/Event';
+import InfoIcon from '@mui/icons-material/Info';
 
 // --- HILFSFUNKTIONEN ---
 
@@ -49,43 +55,40 @@ const formatDuration = (totalMinutes) => {
     return `${h}h ${m < 10 ? '0'+m : m}m`;
 };
 
-// --- LOGIK: ZEITEN VERSCHMELZEN (Merge Overlaps) ---
+const formatTimeRange = (date, durationMinutes) => {
+    if (!date) return "Unbekannt";
+    const start = new Date(date);
+    const end = new Date(start.getTime() + durationMinutes * 60000);
+    
+    const formatTime = (d) => d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+    return `${formatTime(start)} - ${formatTime(end)}`;
+};
+
+// --- LOGIK: ZEITEN VERSCHMELZEN ---
 const calculateEffectiveMinutes = (sessions) => {
     if (!sessions || sessions.length === 0) return 0;
-
-    // 1. In Intervalle umwandeln [Start, Ende]
     const intervals = sessions.map(s => {
         const start = s.date.getTime();
-        // Fallback: Wenn Session noch läuft (duration=0), nehmen wir "jetzt" an oder ignorieren sie für die Historie
-        // Hier: Wir nutzen die gespeicherte Duration.
         const durationMs = (s.duration || 0) * 60000;
         return { start, end: start + durationMs };
-    }).filter(i => i.end > i.start); // Nur valide Intervalle > 0
+    }).filter(i => i.end > i.start);
 
     if (intervals.length === 0) return 0;
-
-    // 2. Sortieren nach Startzeit
     intervals.sort((a, b) => a.start - b.start);
 
-    // 3. Überlappungen verschmelzen
     const merged = [];
     let current = intervals[0];
 
     for (let i = 1; i < intervals.length; i++) {
         const next = intervals[i];
-        
         if (next.start < current.end) {
-            // Überlappung oder Anschluss: Ende erweitern
             current.end = Math.max(current.end, next.end);
         } else {
-            // Lücke: Aktuelles Intervall speichern, neues beginnen
             merged.push(current);
             current = next;
         }
     }
     merged.push(current);
-
-    // 4. Summe der verschmolzenen Intervalle berechnen
     const totalMs = merged.reduce((sum, interval) => sum + (interval.end - interval.start), 0);
     return Math.floor(totalMs / 60000);
 };
@@ -95,60 +98,215 @@ const useCalendarData = (currentUser, items) => {
     const [sessions, setSessions] = useState([]);
     const [loading, setLoading] = useState(true);
 
-    useEffect(() => {
-        if (!currentUser) return;
-
-        const fetchSessions = async () => {
-            setLoading(true);
-            try {
-                const q = query(collection(db, `users/${currentUser.uid}/sessions`));
-                const snap = await getDocs(q);
+    const fetchSessions = async () => {
+        setLoading(true);
+        try {
+            const q = query(collection(db, `users/${currentUser.uid}/sessions`));
+            const snap = await getDocs(q);
+            
+            const loadedSessions = snap.docs.map(doc => {
+                const data = doc.data();
+                const sessionItems = (data.itemIds || [data.itemId]).map(id => items.find(i => i.id === id)).filter(Boolean);
                 
-                const loadedSessions = snap.docs.map(doc => {
-                    const data = doc.data();
-                    const sessionItems = (data.itemIds || [data.itemId]).map(id => items.find(i => i.id === id)).filter(Boolean);
-                    
-                    let hasNylon = false;
-                    let hasLingerie = false;
-                    
-                    sessionItems.forEach(item => {
-                        const cat = (item.mainCategory || '').toLowerCase();
-                        const sub = (item.subCategory || '').toLowerCase();
-                        if (cat.includes('nylon') || sub.includes('strumpfhose') || sub.includes('stockings')) hasNylon = true;
-                        else if (cat.includes('wäsche') || cat.includes('dessous') || sub.includes('body') || sub.includes('corsage')) hasLingerie = true;
-                    });
-
-                    return {
-                        id: doc.id,
-                        date: data.startTime ? data.startTime.toDate() : new Date(),
-                        duration: data.durationMinutes || 0,
-                        type: data.type,
-                        hasNylon,
-                        hasLingerie
-                    };
+                let hasNylon = false;
+                let hasLingerie = false;
+                
+                sessionItems.forEach(item => {
+                    const cat = (item.mainCategory || '').toLowerCase();
+                    const sub = (item.subCategory || '').toLowerCase();
+                    if (cat.includes('nylon') || sub.includes('strumpfhose') || sub.includes('stockings')) hasNylon = true;
+                    else if (cat.includes('wäsche') || cat.includes('dessous') || sub.includes('body') || sub.includes('corsage')) hasLingerie = true;
                 });
-                
-                setSessions(loadedSessions);
-            } catch (e) {
-                console.error("Calendar Fetch Error", e);
-            } finally {
-                setLoading(false);
-            }
-        };
 
-        if (items.length > 0) fetchSessions();
+                return {
+                    id: doc.id,
+                    date: data.startTime ? data.startTime.toDate() : new Date(),
+                    duration: data.durationMinutes || 0,
+                    type: data.type,
+                    hasNylon,
+                    hasLingerie,
+                    items: sessionItems // Wichtig für Detailansicht
+                };
+            });
+            
+            // Sortieren nach Datum
+            loadedSessions.sort((a, b) => a.date - b.date);
+            setSessions(loadedSessions);
+        } catch (e) {
+            console.error("Calendar Fetch Error", e);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        if (currentUser && items.length > 0) fetchSessions();
     }, [currentUser, items]);
 
-    return { sessions, loading };
+    return { sessions, loading, refreshSessions: fetchSessions };
 };
 
-// --- COMPONENTS ---
+// --- SUB-KOMPONENTEN ---
 
-// 1. NEUE WOCHEN-ZEILE (Transponiert & Korrigiert)
-const WeekDayRow = ({ date, sessions, isToday }) => {
+// 1. Planungs-Dialog
+const PlanSessionDialog = ({ open, onClose, date, items, onSave }) => {
+    const [selectedItemId, setSelectedItemId] = useState('');
+    const [time, setTime] = useState('20:00');
+    const [duration, setDuration] = useState(60);
+
+    const handleSave = () => {
+        if (!selectedItemId) return;
+        const [hours, minutes] = time.split(':');
+        const startDateTime = new Date(date);
+        startDateTime.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+        
+        onSave({
+            itemId: selectedItemId,
+            startTime: startDateTime,
+            durationMinutes: parseInt(duration),
+            type: 'planned'
+        });
+        onClose();
+    };
+
+    return (
+        <Dialog open={open} onClose={onClose} fullWidth maxWidth="xs" PaperProps={DESIGN_TOKENS.dialog.paper}>
+            <DialogTitle sx={DESIGN_TOKENS.dialog.title.sx}>Planung: {date?.toLocaleDateString()}</DialogTitle>
+            <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
+                <Stack spacing={3} sx={{ mt: 1 }}>
+                    <FormControl fullWidth>
+                        <InputLabel sx={{ color: 'text.secondary' }}>Item auswählen</InputLabel>
+                        <Select 
+                            value={selectedItemId} 
+                            label="Item auswählen" 
+                            onChange={(e) => setSelectedItemId(e.target.value)}
+                            sx={{ 
+                                color: 'text.primary',
+                                '.MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.2)' }
+                            }}
+                            MenuProps={{ PaperProps: { sx: { bgcolor: '#1a1a1a' } } }}
+                        >
+                            {items.filter(i => i.status === 'active').map(item => (
+                                <MenuItem key={item.id} value={item.id}>
+                                    {item.name || item.brand} <Typography component="span" variant="caption" color="text.secondary" sx={{ml: 1}}>(ID: {item.id})</Typography>
+                                </MenuItem>
+                            ))}
+                        </Select>
+                    </FormControl>
+
+                    <TextField
+                        label="Startzeit"
+                        type="time"
+                        value={time}
+                        onChange={(e) => setTime(e.target.value)}
+                        fullWidth
+                        InputLabelProps={{ shrink: true, sx: { color: 'text.secondary' } }}
+                        sx={DESIGN_TOKENS.inputField}
+                    />
+
+                    <TextField
+                        label="Geplante Dauer (Minuten)"
+                        type="number"
+                        value={duration}
+                        onChange={(e) => setDuration(e.target.value)}
+                        fullWidth
+                        sx={DESIGN_TOKENS.inputField}
+                    />
+                </Stack>
+            </DialogContent>
+            <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}>
+                <Button onClick={onClose} color="inherit">Abbrechen</Button>
+                <Button onClick={handleSave} variant="contained" sx={DESIGN_TOKENS.buttonGradient}>Speichern</Button>
+            </DialogActions>
+        </Dialog>
+    );
+};
+
+// 2. Detail-Dialog
+const DayDetailDialog = ({ open, onClose, date, sessions, onOpenPlan }) => {
+    if (!date) return null;
+
+    // Sessions für diesen Tag filtern
     const daySessions = sessions.filter(s => isSameDay(s.date, date));
-    
-    // KORREKTUR: Effektive Zeitberechnung statt einfacher Summe
+    daySessions.sort((a, b) => a.date - b.date);
+
+    return (
+        <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm" PaperProps={DESIGN_TOKENS.dialog.paper}>
+            <DialogTitle sx={{ ...DESIGN_TOKENS.dialog.title.sx, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Box>
+                    <Typography variant="h6">{date.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' })}</Typography>
+                    <Typography variant="caption" color="text.secondary">Tagesprotokoll</Typography>
+                </Box>
+                <IconButton onClick={onOpenPlan} sx={{ color: PALETTE.primary.main }}>
+                    <AddCircleOutlineIcon />
+                </IconButton>
+            </DialogTitle>
+            
+            <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
+                {daySessions.length === 0 ? (
+                    <Box sx={{ py: 4, textAlign: 'center', opacity: 0.5 }}>
+                        <EventIcon sx={{ fontSize: 40, mb: 1 }} />
+                        <Typography>Keine Einträge für diesen Tag.</Typography>
+                    </Box>
+                ) : (
+                    <List>
+                        {daySessions.map((session, index) => (
+                            <React.Fragment key={session.id}>
+                                {index > 0 && <Divider sx={{ borderColor: 'rgba(255,255,255,0.1)' }} />}
+                                <ListItem alignItems="flex-start" sx={{ px: 0, py: 2 }}>
+                                    <Box sx={{ mr: 2, mt: 0.5, display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 60 }}>
+                                        <Typography variant="caption" color="text.secondary">
+                                            {session.date.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
+                                        </Typography>
+                                        <Box sx={{ height: 20, width: 2, bgcolor: 'rgba(255,255,255,0.1)', my: 0.5 }} />
+                                        <Typography variant="caption" color="text.secondary">
+                                            {new Date(session.date.getTime() + session.duration * 60000).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
+                                        </Typography>
+                                    </Box>
+                                    
+                                    <ListItemText
+                                        primary={
+                                            <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                                                <Typography variant="body1" fontWeight="bold" color="text.primary">
+                                                    {formatDuration(session.duration)}
+                                                </Typography>
+                                                {session.type === 'planned' && <Chip label="Geplant" size="small" variant="outlined" color="info" />}
+                                            </Box>
+                                        }
+                                        secondary={
+                                            <Stack spacing={1} sx={{ mt: 1 }}>
+                                                {session.items.map(item => (
+                                                    <Box key={item.id} sx={{ bgcolor: 'rgba(255,255,255,0.05)', p: 1, borderRadius: 1 }}>
+                                                        <Typography variant="body2" color="text.primary">{item.name || item.brand}</Typography>
+                                                        <Box sx={{ display: 'flex', gap: 2, mt: 0.5 }}>
+                                                            <Typography variant="caption" color="text.secondary">
+                                                                ID: {item.id}
+                                                            </Typography>
+                                                            <Typography variant="caption" color="text.secondary">
+                                                                Sub: {item.subCategory || '-'}
+                                                            </Typography>
+                                                        </Box>
+                                                    </Box>
+                                                ))}
+                                            </Stack>
+                                        }
+                                    />
+                                </ListItem>
+                            </React.Fragment>
+                        ))}
+                    </List>
+                )}
+            </DialogContent>
+            <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}>
+                <Button onClick={onClose} fullWidth color="inherit">Schließen</Button>
+            </DialogActions>
+        </Dialog>
+    );
+};
+
+// 3. Wochen-Zeile
+const WeekDayRow = ({ date, sessions, isToday, onClick }) => {
+    const daySessions = sessions.filter(s => isSameDay(s.date, date));
     const nylonMinutes = calculateEffectiveMinutes(daySessions.filter(s => s.hasNylon));
     const lingerieMinutes = calculateEffectiveMinutes(daySessions.filter(s => s.hasLingerie));
     
@@ -157,14 +315,19 @@ const WeekDayRow = ({ date, sessions, isToday }) => {
     const isFuture = date > new Date();
 
     return (
-        <Paper sx={{ 
-            mb: 1, p: 1.5, 
-            display: 'flex', alignItems: 'center', gap: 2,
-            ...DESIGN_TOKENS.glassCard,
-            borderLeft: isToday ? `4px solid ${PALETTE.primary.main}` : '1px solid rgba(255,255,255,0.1)',
-            opacity: isFuture ? 0.5 : 1
-        }}>
-            {/* Datums-Block */}
+        <Paper 
+            onClick={() => onClick(date)}
+            sx={{ 
+                mb: 1, p: 1.5, 
+                display: 'flex', alignItems: 'center', gap: 2,
+                ...DESIGN_TOKENS.glassCard,
+                borderLeft: isToday ? `4px solid ${PALETTE.primary.main}` : '1px solid rgba(255,255,255,0.1)',
+                opacity: isFuture ? 0.6 : 1,
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+                '&:hover': { bgcolor: 'rgba(255,255,255,0.08)' }
+            }}
+        >
             <Box sx={{ 
                 display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
                 minWidth: 50, borderRight: '1px solid rgba(255,255,255,0.1)', pr: 2
@@ -173,15 +336,16 @@ const WeekDayRow = ({ date, sessions, isToday }) => {
                 <Typography variant="h5" sx={{ fontWeight: 600, color: isToday ? PALETTE.primary.main : 'text.primary' }}>{dayNumber}</Typography>
             </Box>
 
-            {/* Statistik-Balken */}
             <Box sx={{ flex: 1 }}>
                 {(nylonMinutes === 0 && lingerieMinutes === 0) ? (
-                    <Typography variant="body2" color="text.disabled" sx={{ fontStyle: 'italic' }}>
-                        Keine Aktivität
-                    </Typography>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Typography variant="body2" color="text.disabled" sx={{ fontStyle: 'italic' }}>
+                            {isFuture ? "Planen..." : "Keine Aktivität"}
+                        </Typography>
+                        {isFuture && <AddCircleOutlineIcon sx={{ color: 'text.disabled', fontSize: 20 }} />}
+                    </Box>
                 ) : (
                     <Stack spacing={1}>
-                        {/* NYLON BAR */}
                         {nylonMinutes > 0 && (
                             <Box sx={{ 
                                 display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -198,8 +362,6 @@ const WeekDayRow = ({ date, sessions, isToday }) => {
                                 </Box>
                             </Box>
                         )}
-
-                        {/* DESSUS BAR */}
                         {lingerieMinutes > 0 && (
                             <Box sx={{ 
                                 display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -223,21 +385,23 @@ const WeekDayRow = ({ date, sessions, isToday }) => {
     );
 };
 
-// 2. Monats-Zelle (Bleibt kompakt für Übersicht)
-const MonthDayCell = ({ date, sessions, isToday }) => {
+// 4. Monats-Zelle
+const MonthDayCell = ({ date, sessions, isToday, onClick }) => {
     const daySessions = sessions.filter(s => isSameDay(s.date, date));
-    // Hier reicht uns die Info "ob" getragen wurde
     const hasNylon = daySessions.some(s => s.hasNylon);
     const hasLingerie = daySessions.some(s => s.hasLingerie);
 
     return (
         <Paper 
+            onClick={() => onClick(date)}
             sx={{ 
                 height: 80, p: 0.5, 
                 display: 'flex', flexDirection: 'column', justifyContent: 'flex-start',
                 bgcolor: isToday ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.02)',
                 border: isToday ? `1px solid ${PALETTE.primary.main}` : '1px solid rgba(255,255,255,0.05)',
-                borderRadius: 1
+                borderRadius: 1,
+                cursor: 'pointer',
+                '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' }
             }}
         >
             <Typography variant="caption" sx={{ color: isToday ? PALETTE.primary.main : 'text.secondary', fontWeight: 'bold', alignSelf: 'center' }}>
@@ -246,12 +410,8 @@ const MonthDayCell = ({ date, sessions, isToday }) => {
 
             {(hasNylon || hasLingerie) && (
                 <Stack spacing={0.5} mt={1} sx={{ width: '100%', alignItems: 'center' }}>
-                    {hasNylon && (
-                        <Box sx={{ width: '80%', height: 4, borderRadius: 2, bgcolor: PALETTE.accents.purple }} />
-                    )}
-                    {hasLingerie && (
-                        <Box sx={{ width: '80%', height: 4, borderRadius: 2, bgcolor: PALETTE.accents.red }} />
-                    )}
+                    {hasNylon && <Box sx={{ width: '80%', height: 4, borderRadius: 2, bgcolor: PALETTE.accents.purple }} />}
+                    {hasLingerie && <Box sx={{ width: '80%', height: 4, borderRadius: 2, bgcolor: PALETTE.accents.red }} />}
                 </Stack>
             )}
         </Paper>
@@ -265,8 +425,31 @@ export default function Calendar() {
   const [view, setView] = useState('week'); 
   const [currentDate, setCurrentDate] = useState(new Date());
   const [direction, setDirection] = useState(0);
+  
+  // Dialog States
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [planOpen, setPlanOpen] = useState(false);
+  const [selectedDay, setSelectedDay] = useState(null);
 
-  const { sessions } = useCalendarData(currentUser, items);
+  const { sessions, refreshSessions } = useCalendarData(currentUser, items);
+
+  const handleDayClick = (date) => {
+      setSelectedDay(date);
+      setDetailOpen(true);
+  };
+
+  const handlePlanSession = async (sessionData) => {
+      try {
+          await addDoc(collection(db, `users/${currentUser.uid}/sessions`), {
+              ...sessionData,
+              startTime: Timestamp.fromDate(sessionData.startTime),
+              createdAt: serverTimestamp() // Importiere serverTimestamp falls nötig oder new Date()
+          });
+          refreshSessions();
+      } catch (e) {
+          console.error("Fehler beim Planen:", e);
+      }
+  };
 
   const handleNext = () => {
       setDirection(1);
@@ -287,7 +470,6 @@ export default function Calendar() {
 
   const today = new Date();
   
-  // Berechne Tage für die Ansicht
   const daysToRender = useMemo(() => {
       const days = [];
       if (view === 'week') {
@@ -327,7 +509,7 @@ export default function Calendar() {
                         Kalender
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
-                        Zeit-Tracking Übersicht
+                        Zeit-Tracking & Planung
                     </Typography>
                 </Box>
                 
@@ -373,7 +555,6 @@ export default function Calendar() {
                         style={{ width: '100%' }}
                     >
                         {view === 'week' ? (
-                            // NEUE WOCHEN ANSICHT (Transponiert)
                             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
                                 {daysToRender.map((date, idx) => (
                                     <WeekDayRow 
@@ -381,11 +562,11 @@ export default function Calendar() {
                                         date={date} 
                                         sessions={sessions} 
                                         isToday={isSameDay(date, today)} 
+                                        onClick={handleDayClick}
                                     />
                                 ))}
                             </Box>
                         ) : (
-                            // MONATS ANSICHT (Grid)
                             <Box sx={{ 
                                 display: 'grid', 
                                 gridTemplateColumns: 'repeat(7, 1fr)', 
@@ -404,6 +585,7 @@ export default function Calendar() {
                                             date={date} 
                                             sessions={sessions} 
                                             isToday={isSameDay(date, today)} 
+                                            onClick={handleDayClick}
                                         />
                                     ) : <Box key={idx} />
                                 ))}
@@ -412,6 +594,23 @@ export default function Calendar() {
                     </motion.div>
                 </AnimatePresence>
             </Box>
+
+            {/* DIALOGS */}
+            <DayDetailDialog 
+                open={detailOpen} 
+                onClose={() => setDetailOpen(false)} 
+                date={selectedDay} 
+                sessions={sessions}
+                onOpenPlan={() => { setDetailOpen(false); setPlanOpen(true); }}
+            />
+
+            <PlanSessionDialog 
+                open={planOpen} 
+                onClose={() => setPlanOpen(false)} 
+                date={selectedDay} 
+                items={items}
+                onSave={handlePlanSession}
+            />
 
         </Container>
     </Box>

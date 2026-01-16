@@ -348,8 +348,7 @@ export default function Dashboard() {
           // Zeit-Sperre bleibt aktiv (Strafe muss abgesessen werden)
           if (elapsed < (punishmentStatus.durationMinutes || 30)) return; 
           
-          // KORREKTUR: Kein NFC-Zwang mehr beim Beenden!
-          // if (punishmentItem?.nfcTagId) { ... } -> ENTFERNT
+          // FIX: Kein NFC-Scan Zwang mehr beim Beenden
       } 
       setSessionToStop(session); 
       setSelectedFeelings([]); 
@@ -357,7 +356,25 @@ export default function Dashboard() {
       setReflectionOpen(true); 
   };
   
-  const handleConfirmStopSession = async () => { if (!sessionToStop) return; setLoading(true); try { await stopSession(sessionToStop, { feelings: selectedFeelings, note: reflectionNote }); if(sessionToStop.type === 'punishment') { await clearPunishment(currentUser.uid); const status = await getActivePunishment(currentUser.uid); setPunishmentStatus(status || { active: false }); } } catch(e){ showToast("Fehler", "error"); } finally { setReflectionOpen(false); setSessionToStop(null); setLoading(false); } };
+  const handleConfirmStopSession = async () => { 
+      if (!sessionToStop) return; 
+      setLoading(true); 
+      try { 
+          await stopSession(sessionToStop, { feelings: selectedFeelings, note: reflectionNote }); 
+          
+          if(sessionToStop.type === 'punishment') { 
+              await clearPunishment(currentUser.uid); 
+              // FIX: Status manuell auf inaktiv setzen, statt Datenbank zu fragen (verhindert Race Condition)
+              setPunishmentStatus({ active: false, deferred: false, reason: null, durationMinutes: 0 });
+          } 
+      } catch(e){ 
+          showToast("Fehler", "error"); 
+      } finally { 
+          setReflectionOpen(false); 
+          setSessionToStop(null); 
+          setLoading(false); 
+      } 
+  };
 
   const handleStartAudit = async () => { const auditItems = await initializeAudit(currentUser.uid, items); setPendingAuditItems(auditItems); setCurrentAuditIndex(0); setAuditOpen(true); };
   const handleConfirmAuditItem = async () => { await confirmAuditItem(currentUser.uid, pendingAuditItems[currentAuditIndex].id, currentCondition, currentLocationCorrect); showToast(`${pendingAuditItems[currentAuditIndex].name} geprüft`, "success"); if(currentAuditIndex<pendingAuditItems.length-1) setCurrentAuditIndex(prev=>prev+1); else { setAuditOpen(false); setAuditDue(false); showToast("Audit abgeschlossen", "success"); } };
@@ -466,7 +483,7 @@ export default function Dashboard() {
             <ActiveSessionsList 
                 activeSessions={activeSessions} 
                 items={items}
-                punishmentStatus={punishmentStatus} // KORREKTUR: Fehlendes Prop hinzugefügt
+                punishmentStatus={punishmentStatus} 
                 onNavigateItem={(id) => navigate(`/item/${id}`)}
                 onStopSession={stopSession}
                 onOpenRelease={handleOpenRelease}
