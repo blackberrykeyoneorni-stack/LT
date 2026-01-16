@@ -9,8 +9,8 @@ import { useItems } from '../contexts/ItemContext';
 // UI & THEME
 import { 
     Box, Container, Typography, IconButton, Paper, 
-    ToggleButton, ToggleButtonGroup, Chip,
-    Stack, useTheme
+    ToggleButton, ToggleButtonGroup,
+    Stack
 } from '@mui/material';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DESIGN_TOKENS, PALETTE } from '../theme/obsidianDesign';
@@ -19,7 +19,7 @@ import { DESIGN_TOKENS, PALETTE } from '../theme/obsidianDesign';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import CalendarViewMonthIcon from '@mui/icons-material/CalendarViewMonth';
-import ViewListIcon from '@mui/icons-material/ViewList'; // Besser passend für die neue Ansicht
+import ViewListIcon from '@mui/icons-material/ViewList';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 
 // --- HILFSFUNKTIONEN ---
@@ -47,6 +47,47 @@ const formatDuration = (totalMinutes) => {
     const h = Math.floor(totalMinutes / 60);
     const m = Math.round(totalMinutes % 60);
     return `${h}h ${m < 10 ? '0'+m : m}m`;
+};
+
+// --- LOGIK: ZEITEN VERSCHMELZEN (Merge Overlaps) ---
+const calculateEffectiveMinutes = (sessions) => {
+    if (!sessions || sessions.length === 0) return 0;
+
+    // 1. In Intervalle umwandeln [Start, Ende]
+    const intervals = sessions.map(s => {
+        const start = s.date.getTime();
+        // Fallback: Wenn Session noch läuft (duration=0), nehmen wir "jetzt" an oder ignorieren sie für die Historie
+        // Hier: Wir nutzen die gespeicherte Duration.
+        const durationMs = (s.duration || 0) * 60000;
+        return { start, end: start + durationMs };
+    }).filter(i => i.end > i.start); // Nur valide Intervalle > 0
+
+    if (intervals.length === 0) return 0;
+
+    // 2. Sortieren nach Startzeit
+    intervals.sort((a, b) => a.start - b.start);
+
+    // 3. Überlappungen verschmelzen
+    const merged = [];
+    let current = intervals[0];
+
+    for (let i = 1; i < intervals.length; i++) {
+        const next = intervals[i];
+        
+        if (next.start < current.end) {
+            // Überlappung oder Anschluss: Ende erweitern
+            current.end = Math.max(current.end, next.end);
+        } else {
+            // Lücke: Aktuelles Intervall speichern, neues beginnen
+            merged.push(current);
+            current = next;
+        }
+    }
+    merged.push(current);
+
+    // 4. Summe der verschmolzenen Intervalle berechnen
+    const totalMs = merged.reduce((sum, interval) => sum + (interval.end - interval.start), 0);
+    return Math.floor(totalMs / 60000);
 };
 
 // --- DATA HOOK ---
@@ -103,14 +144,13 @@ const useCalendarData = (currentUser, items) => {
 
 // --- COMPONENTS ---
 
-// 1. NEUE WOCHEN-ZEILE (Transponiert)
+// 1. NEUE WOCHEN-ZEILE (Transponiert & Korrigiert)
 const WeekDayRow = ({ date, sessions, isToday }) => {
     const daySessions = sessions.filter(s => isSameDay(s.date, date));
     
-    // Aggregation der Zeiten
-    // Hinweis: Wenn eine Session beides hat, zählt sie für beides.
-    const nylonMinutes = daySessions.filter(s => s.hasNylon).reduce((acc, s) => acc + s.duration, 0);
-    const lingerieMinutes = daySessions.filter(s => s.hasLingerie).reduce((acc, s) => acc + s.duration, 0);
+    // KORREKTUR: Effektive Zeitberechnung statt einfacher Summe
+    const nylonMinutes = calculateEffectiveMinutes(daySessions.filter(s => s.hasNylon));
+    const lingerieMinutes = calculateEffectiveMinutes(daySessions.filter(s => s.hasLingerie));
     
     const dayName = date.toLocaleDateString('de-DE', { weekday: 'short' }).toUpperCase();
     const dayNumber = date.getDate();
@@ -186,10 +226,9 @@ const WeekDayRow = ({ date, sessions, isToday }) => {
 // 2. Monats-Zelle (Bleibt kompakt für Übersicht)
 const MonthDayCell = ({ date, sessions, isToday }) => {
     const daySessions = sessions.filter(s => isSameDay(s.date, date));
-    const nylonMinutes = daySessions.filter(s => s.hasNylon).reduce((acc, s) => acc + s.duration, 0);
-    const lingerieMinutes = daySessions.filter(s => s.hasLingerie).reduce((acc, s) => acc + s.duration, 0);
-    
-    const hasActivity = nylonMinutes > 0 || lingerieMinutes > 0;
+    // Hier reicht uns die Info "ob" getragen wurde
+    const hasNylon = daySessions.some(s => s.hasNylon);
+    const hasLingerie = daySessions.some(s => s.hasLingerie);
 
     return (
         <Paper 
@@ -205,12 +244,12 @@ const MonthDayCell = ({ date, sessions, isToday }) => {
                 {date.getDate()}
             </Typography>
 
-            {hasActivity && (
+            {(hasNylon || hasLingerie) && (
                 <Stack spacing={0.5} mt={1} sx={{ width: '100%', alignItems: 'center' }}>
-                    {nylonMinutes > 0 && (
+                    {hasNylon && (
                         <Box sx={{ width: '80%', height: 4, borderRadius: 2, bgcolor: PALETTE.accents.purple }} />
                     )}
-                    {lingerieMinutes > 0 && (
+                    {hasLingerie && (
                         <Box sx={{ width: '80%', height: 4, borderRadius: 2, bgcolor: PALETTE.accents.red }} />
                     )}
                 </Stack>

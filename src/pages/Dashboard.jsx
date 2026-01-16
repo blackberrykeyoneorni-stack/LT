@@ -343,8 +343,18 @@ export default function Dashboard() {
 
   const handleRequestStopSession = (session) => { 
       if (tzdActive) { showToast("STOPPEN VERWEIGERT.", "error"); return; }
-      if (session.type === 'punishment') { const elapsed = Math.floor((Date.now() - session.startTime.getTime()) / 60000); if (elapsed < (punishmentStatus.durationMinutes || 30)) return; if (punishmentItem?.nfcTagId) { setSessionToStop(session); setPunishmentScanMode('stop'); setPunishmentScanOpen(true); return; } } 
-      setSessionToStop(session); setSelectedFeelings([]); setReflectionNote(''); setReflectionOpen(true); 
+      if (session.type === 'punishment') { 
+          const elapsed = Math.floor((Date.now() - session.startTime.getTime()) / 60000); 
+          // Zeit-Sperre bleibt aktiv (Strafe muss abgesessen werden)
+          if (elapsed < (punishmentStatus.durationMinutes || 30)) return; 
+          
+          // KORREKTUR: Kein NFC-Zwang mehr beim Beenden!
+          // if (punishmentItem?.nfcTagId) { ... } -> ENTFERNT
+      } 
+      setSessionToStop(session); 
+      setSelectedFeelings([]); 
+      setReflectionNote(''); 
+      setReflectionOpen(true); 
   };
   
   const handleConfirmStopSession = async () => { if (!sessionToStop) return; setLoading(true); try { await stopSession(sessionToStop, { feelings: selectedFeelings, note: reflectionNote }); if(sessionToStop.type === 'punishment') { await clearPunishment(currentUser.uid); const status = await getActivePunishment(currentUser.uid); setPunishmentStatus(status || { active: false }); } } catch(e){ showToast("Fehler", "error"); } finally { setReflectionOpen(false); setSessionToStop(null); setLoading(false); } };
