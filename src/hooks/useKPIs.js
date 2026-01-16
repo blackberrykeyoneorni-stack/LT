@@ -55,26 +55,26 @@ export const useKPIs = (items = [], activeSessions = [], historySessions = []) =
         const activeItems = safeItems.filter(i => i.status === 'active');
         const washingItems = safeItems.filter(i => i.status === 'washing');
         const archivedItems = safeItems.filter(i => i.status === 'archived');
-        const itemsWithWears = safeItems.filter(i => (i.wearCount || 0) > 0);
         
         // --- 2. CORE METRICS (Single Source of Truth) ---
         
+        // Financials: Total Value (Nur aktive Items) & Total Cost (Alle Items für CPNH)
+        const totalValue = activeItems.reduce((acc, i) => acc + (parseFloat(i.cost) || 0), 0);
+        const totalCostAll = safeItems.reduce((acc, i) => acc + (parseFloat(i.cost) || 0), 0);
+
         // A. Enclosure (Nylons vs Gesamt)
         const nylons = activeItems.filter(i => (i.mainCategory || '').toLowerCase().includes('nylon'));
         const enclosureVal = activeItems.length > 0 ? Math.round((nylons.length / activeItems.length) * 100) : 0;
 
         // B. Nocturnal (Nacht-Quote aus Historie)
-        // Unterscheidung: Dashboard nutzt oft Heuristik, Stats nutzt echte Historie.
-        // Wir berechnen hier den "echten" Wert, wenn Historie da ist.
         const instructionSessions = safeHistory.filter(s => s.type === 'instruction');
         const nightSessions = instructionSessions.filter(s => s.period && s.period.includes('night'));
         const nocturnalVal = instructionSessions.length > 0 ? Math.round((nightSessions.length / instructionSessions.length) * 100) : 0;
 
         // C. CPNH (Cost Per Nylon Hour)
-        const totalCost = safeItems.reduce((acc, i) => acc + (parseFloat(i.cost) || 0), 0);
         const totalMinutes = safeItems.reduce((acc, i) => acc + (i.totalMinutes || 0), 0);
         const totalHours = totalMinutes / 60;
-        const cpnhVal = totalHours > 0 ? (totalCost / totalHours).toFixed(2) : "0.00";
+        const cpnhVal = totalHours > 0 ? (totalCostAll / totalHours).toFixed(2) : "0.00";
 
         // D. Compliance Lag (Ø Verzögerung)
         const sessionsWithLag = instructionSessions.filter(s => typeof s.complianceLagMinutes === 'number');
@@ -84,7 +84,6 @@ export const useKPIs = (items = [], activeSessions = [], historySessions = []) =
         // E. Exposure (Tragezeit Verhältnis)
         let exposureVal = 0;
         if (safeHistory.length > 0) {
-            const firstSessionDate = safeHistory[0].startTime; // Annahme: history ist sortiert oder wir sortieren
             // Sichergehen dass wir das älteste Datum haben
             const sortedStart = [...safeHistory].sort((a,b) => a.startTime - b.startTime);
             const start = sortedStart.length > 0 ? sortedStart[0].startTime : new Date();
@@ -111,14 +110,13 @@ export const useKPIs = (items = [], activeSessions = [], historySessions = []) =
         const vibeVal = Object.keys(tags).sort((a,b) => tags[b] - tags[a])[0] || "Neutral";
 
         // --- 3. FEM-INDEX (Gamified Score) ---
-        // Dies bleibt für das Dashboard relevant
         const gapScore = calculateGapScore(safeItems, activeSessions);
         
         // Nylon Index (Nutzungsintensität für Score)
         const nylonIndex = nylons.length > 0 
             ? (nylons.reduce((acc, i) => acc + (i.totalMinutes || 0), 0) / nylons.length) / 60 
             : 0;
-        const nocturnalScore = Math.min(nylonIndex * 10, 100); // Score Variante
+        const nocturnalScore = Math.min(nylonIndex * 10, 100); 
 
         const totalReleases = releaseStats.totalReleases || 0;
         const keptReleases = releaseStats.keptOn || 0;
@@ -129,7 +127,7 @@ export const useKPIs = (items = [], activeSessions = [], historySessions = []) =
         const complianceScore = (spermaScoreRate + freshRate) / 2;
 
         const femIndexTotal = Math.round(
-            (enclosureVal * 0.20) + // Nutzt jetzt den zentralen Enclosure Wert
+            (enclosureVal * 0.20) + 
             (gapScore * 0.40) + 
             (nocturnalScore * 0.20) + 
             (complianceScore * 0.20)
@@ -139,7 +137,7 @@ export const useKPIs = (items = [], activeSessions = [], historySessions = []) =
         return {
             // Rohdaten für Dashboard Widgets
             basics: { total: safeItems.length, active: activeItems.length, washing: washingItems.length, archived: archivedItems.length },
-            financials: { totalValue, avgCPW: 0 /* vereinfacht */, amortizationRate: 0 /* vereinfacht */ },
+            financials: { totalValue, avgCPW: 0, amortizationRate: 0 },
             
             // Standardisierte Metriken für Stats.jsx
             coreMetrics: {
