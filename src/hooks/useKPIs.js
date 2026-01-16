@@ -24,7 +24,7 @@ const calculateGapScore = (items, currentSessions) => {
     return (remaining / 36) * 100;
 };
 
-// SIGNATUR ERWEITERT: historySessions (optional) für Stats
+// SIGNATUR: items, activeSessions, historySessions (optional)
 export const useKPIs = (items = [], activeSessions = [], historySessions = []) => {
     const { currentUser } = useAuth();
     const [releaseStats, setReleaseStats] = useState({ totalReleases: 0, keptOn: 0 });
@@ -58,9 +58,17 @@ export const useKPIs = (items = [], activeSessions = [], historySessions = []) =
         
         // --- 2. CORE METRICS (Single Source of Truth) ---
         
-        // Financials: Total Value (Nur aktive Items) & Total Cost (Alle Items für CPNH)
+        // Financials
         const totalValue = activeItems.reduce((acc, i) => acc + (parseFloat(i.cost) || 0), 0);
         const totalCostAll = safeItems.reduce((acc, i) => acc + (parseFloat(i.cost) || 0), 0);
+        
+        // CPW Berechnung (Cost per Wear)
+        const totalWears = safeItems.reduce((acc, i) => acc + (i.wearCount || 0), 0);
+        const avgCPWVal = totalWears > 0 ? (totalCostAll / totalWears) : 0;
+
+        // Health / Orphans (Aktive Items ohne Tragevorgang oder sehr lange nicht getragen)
+        // Definition Orphan: Aktiv, aber wearCount == 0
+        const orphanCountVal = activeItems.filter(i => !i.wearCount || i.wearCount === 0).length;
 
         // A. Enclosure (Nylons vs Gesamt)
         const nylons = activeItems.filter(i => (i.mainCategory || '').toLowerCase().includes('nylon'));
@@ -84,7 +92,6 @@ export const useKPIs = (items = [], activeSessions = [], historySessions = []) =
         // E. Exposure (Tragezeit Verhältnis)
         let exposureVal = 0;
         if (safeHistory.length > 0) {
-            // Sichergehen dass wir das älteste Datum haben
             const sortedStart = [...safeHistory].sort((a,b) => a.startTime - b.startTime);
             const start = sortedStart.length > 0 ? sortedStart[0].startTime : new Date();
             
@@ -109,14 +116,16 @@ export const useKPIs = (items = [], activeSessions = [], historySessions = []) =
         });
         const vibeVal = Object.keys(tags).sort((a,b) => tags[b] - tags[a])[0] || "Neutral";
 
-        // --- 3. FEM-INDEX (Gamified Score) ---
+        // --- 3. FEM-INDEX & INFOTILES DATEN ---
         const gapScore = calculateGapScore(safeItems, activeSessions);
         
-        // Nylon Index (Nutzungsintensität für Score)
-        const nylonIndex = nylons.length > 0 
+        // Nylon Index (Durchschnittliche Tragezeit von Nylons in Stunden)
+        const nylonIndexVal = nylons.length > 0 
             ? (nylons.reduce((acc, i) => acc + (i.totalMinutes || 0), 0) / nylons.length) / 60 
             : 0;
-        const nocturnalScore = Math.min(nylonIndex * 10, 100); 
+        
+        // Score Komponenten
+        const nocturnalScore = Math.min(nylonIndexVal * 10, 100); 
 
         const totalReleases = releaseStats.totalReleases || 0;
         const keptReleases = releaseStats.keptOn || 0;
@@ -133,11 +142,16 @@ export const useKPIs = (items = [], activeSessions = [], historySessions = []) =
             (complianceScore * 0.20)
         );
 
-        // --- RETURN ---
+        // --- RETURN OBJECT (Strukturiert für InfoTiles & Stats) ---
         return {
-            // Rohdaten für Dashboard Widgets
+            // Für InfoTiles.jsx
+            health: { orphanCount: orphanCountVal },
+            financials: { totalValue, avgCPW: avgCPWVal, amortizationRate: 0 },
+            usage: { nylonIndex: nylonIndexVal },
+            spermaScore: { rate: spermaScoreRate, total: totalReleases, kept: keptReleases },
+
+            // Rohdaten Basics
             basics: { total: safeItems.length, active: activeItems.length, washing: washingItems.length, archived: archivedItems.length },
-            financials: { totalValue, avgCPW: 0, amortizationRate: 0 },
             
             // Standardisierte Metriken für Stats.jsx
             coreMetrics: {

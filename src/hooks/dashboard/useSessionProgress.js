@@ -3,7 +3,6 @@ import {
     collection, query, where, getDocs, orderBy, limit, doc, getDoc, onSnapshot 
 } from 'firebase/firestore';
 import { db } from '../../firebase';
-import { calculateDurationMinutes } from '../../utils/dateUtils';
 import { startSession, stopSession as serviceStopSession } from '../../services/SessionService';
 import { checkReleaseOutcome } from '../../services/ReleaseService';
 
