@@ -44,7 +44,7 @@ import { DESIGN_TOKENS, PALETTE, MOTION } from '../theme/obsidianDesign';
 import { 
     Box, Typography, Dialog, DialogTitle, DialogContent, DialogActions, 
     Snackbar, Alert, FormGroup, FormControlLabel, Checkbox, TextField, 
-    Button, CircularProgress, Container, Paper, Chip, LinearProgress, Divider
+    Button, CircularProgress, Container, Paper, Chip, LinearProgress, Divider, IconButton
 } from '@mui/material';
 import AnalyticsIcon from '@mui/icons-material/Analytics';
 import NightlightRoundIcon from '@mui/icons-material/NightlightRound';
@@ -347,7 +347,7 @@ export default function Dashboard() {
       setSessionToStop(session); setSelectedFeelings([]); setReflectionNote(''); setReflectionOpen(true); 
   };
   
-  const handleConfirmStopSession = async () => { if (!sessionToStop) return; setLoading(true); try { await stopSession(sessionToStop, { feelings: selectedFeelings, note: reflectionNote }); if(sessionToStop.type === 'punishment') { await clearPunishment(currentUser.uid); setPunishmentStatus(await getActivePunishment(currentUser.uid)); } } catch(e){ showToast("Fehler", "error"); } finally { setReflectionOpen(false); setSessionToStop(null); setLoading(false); } };
+  const handleConfirmStopSession = async () => { if (!sessionToStop) return; setLoading(true); try { await stopSession(sessionToStop, { feelings: selectedFeelings, note: reflectionNote }); if(sessionToStop.type === 'punishment') { await clearPunishment(currentUser.uid); const status = await getActivePunishment(currentUser.uid); setPunishmentStatus(status || { active: false }); } } catch(e){ showToast("Fehler", "error"); } finally { setReflectionOpen(false); setSessionToStop(null); setLoading(false); } };
 
   const handleStartAudit = async () => { const auditItems = await initializeAudit(currentUser.uid, items); setPendingAuditItems(auditItems); setCurrentAuditIndex(0); setAuditOpen(true); };
   const handleConfirmAuditItem = async () => { await confirmAuditItem(currentUser.uid, pendingAuditItems[currentAuditIndex].id, currentCondition, currentLocationCorrect); showToast(`${pendingAuditItems[currentAuditIndex].name} geprüft`, "success"); if(currentAuditIndex<pendingAuditItems.length-1) setCurrentAuditIndex(prev=>prev+1); else { setAuditOpen(false); setAuditDue(false); showToast("Audit abgeschlossen", "success"); } };

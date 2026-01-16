@@ -1,238 +1,389 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import Calendar from 'react-calendar';
-import 'react-calendar/dist/Calendar.css';
-import { collection, query, onSnapshot, doc, setDoc, deleteDoc, getDocs, orderBy } from 'firebase/firestore'; 
+import { 
+  collection, query, getDocs
+} from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useItems } from '../contexts/ItemContext';
+
+// UI & THEME
 import { 
-  Box, Container, Typography, Paper, 
-  Dialog, DialogTitle, DialogContent, DialogActions, 
-  Button, List, ListItem, ListItemText, ListItemAvatar, 
-  Avatar, Divider, CircularProgress, Chip 
+    Box, Container, Typography, IconButton, Paper, 
+    ToggleButton, ToggleButtonGroup, Chip,
+    Stack, useTheme
 } from '@mui/material';
 import { motion, AnimatePresence } from 'framer-motion';
+import { DESIGN_TOKENS, PALETTE } from '../theme/obsidianDesign';
 
 // ICONS
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
-import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle'; 
-import HistoryIcon from '@mui/icons-material/History'; 
+import CalendarViewMonthIcon from '@mui/icons-material/CalendarViewMonth';
+import ViewListIcon from '@mui/icons-material/ViewList'; // Besser passend für die neue Ansicht
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 
-// --- ZENTRALES DESIGN ---
-import { DESIGN_TOKENS, PALETTE, MOTION } from '../theme/obsidianDesign';
+// --- HILFSFUNKTIONEN ---
 
-// UTILS
-import { format, isBefore, startOfDay, differenceInMinutes, parseISO } from 'date-fns';
-import { de } from 'date-fns/locale';
-
-const formatDurationDisplay = (mins) => {
-    if (!mins || isNaN(mins)) return '0m';
-    const h = Math.floor(mins / 60);
-    const m = mins % 60;
-    return `${h}h ${m}m`;
+const getStartOfWeek = (date) => {
+    const d = new Date(date);
+    const day = d.getDay();
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Montag als Wochenstart
+    return new Date(d.setDate(diff));
 };
 
-export default function CalendarPage() {
+const addDays = (date, days) => {
+    const result = new Date(date);
+    result.setDate(result.getDate() + days);
+    return result;
+};
+
+const isSameDay = (d1, d2) => {
+    return d1.getDate() === d2.getDate() &&
+           d1.getMonth() === d2.getMonth() &&
+           d1.getFullYear() === d2.getFullYear();
+};
+
+const formatDuration = (totalMinutes) => {
+    const h = Math.floor(totalMinutes / 60);
+    const m = Math.round(totalMinutes % 60);
+    return `${h}h ${m < 10 ? '0'+m : m}m`;
+};
+
+// --- DATA HOOK ---
+const useCalendarData = (currentUser, items) => {
+    const [sessions, setSessions] = useState([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        if (!currentUser) return;
+
+        const fetchSessions = async () => {
+            setLoading(true);
+            try {
+                const q = query(collection(db, `users/${currentUser.uid}/sessions`));
+                const snap = await getDocs(q);
+                
+                const loadedSessions = snap.docs.map(doc => {
+                    const data = doc.data();
+                    const sessionItems = (data.itemIds || [data.itemId]).map(id => items.find(i => i.id === id)).filter(Boolean);
+                    
+                    let hasNylon = false;
+                    let hasLingerie = false;
+                    
+                    sessionItems.forEach(item => {
+                        const cat = (item.mainCategory || '').toLowerCase();
+                        const sub = (item.subCategory || '').toLowerCase();
+                        if (cat.includes('nylon') || sub.includes('strumpfhose') || sub.includes('stockings')) hasNylon = true;
+                        else if (cat.includes('wäsche') || cat.includes('dessous') || sub.includes('body') || sub.includes('corsage')) hasLingerie = true;
+                    });
+
+                    return {
+                        id: doc.id,
+                        date: data.startTime ? data.startTime.toDate() : new Date(),
+                        duration: data.durationMinutes || 0,
+                        type: data.type,
+                        hasNylon,
+                        hasLingerie
+                    };
+                });
+                
+                setSessions(loadedSessions);
+            } catch (e) {
+                console.error("Calendar Fetch Error", e);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        if (items.length > 0) fetchSessions();
+    }, [currentUser, items]);
+
+    return { sessions, loading };
+};
+
+// --- COMPONENTS ---
+
+// 1. NEUE WOCHEN-ZEILE (Transponiert)
+const WeekDayRow = ({ date, sessions, isToday }) => {
+    const daySessions = sessions.filter(s => isSameDay(s.date, date));
+    
+    // Aggregation der Zeiten
+    // Hinweis: Wenn eine Session beides hat, zählt sie für beides.
+    const nylonMinutes = daySessions.filter(s => s.hasNylon).reduce((acc, s) => acc + s.duration, 0);
+    const lingerieMinutes = daySessions.filter(s => s.hasLingerie).reduce((acc, s) => acc + s.duration, 0);
+    
+    const dayName = date.toLocaleDateString('de-DE', { weekday: 'short' }).toUpperCase();
+    const dayNumber = date.getDate();
+    const isFuture = date > new Date();
+
+    return (
+        <Paper sx={{ 
+            mb: 1, p: 1.5, 
+            display: 'flex', alignItems: 'center', gap: 2,
+            ...DESIGN_TOKENS.glassCard,
+            borderLeft: isToday ? `4px solid ${PALETTE.primary.main}` : '1px solid rgba(255,255,255,0.1)',
+            opacity: isFuture ? 0.5 : 1
+        }}>
+            {/* Datums-Block */}
+            <Box sx={{ 
+                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                minWidth: 50, borderRight: '1px solid rgba(255,255,255,0.1)', pr: 2
+            }}>
+                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 'bold' }}>{dayName}</Typography>
+                <Typography variant="h5" sx={{ fontWeight: 600, color: isToday ? PALETTE.primary.main : 'text.primary' }}>{dayNumber}</Typography>
+            </Box>
+
+            {/* Statistik-Balken */}
+            <Box sx={{ flex: 1 }}>
+                {(nylonMinutes === 0 && lingerieMinutes === 0) ? (
+                    <Typography variant="body2" color="text.disabled" sx={{ fontStyle: 'italic' }}>
+                        Keine Aktivität
+                    </Typography>
+                ) : (
+                    <Stack spacing={1}>
+                        {/* NYLON BAR */}
+                        {nylonMinutes > 0 && (
+                            <Box sx={{ 
+                                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                bgcolor: `${PALETTE.accents.purple}15`, 
+                                borderRadius: 1, px: 1.5, py: 0.5,
+                                border: `1px solid ${PALETTE.accents.purple}44`
+                            }}>
+                                <Typography variant="caption" sx={{ color: PALETTE.accents.purple, fontWeight: 'bold' }}>NYLON</Typography>
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                    <AccessTimeIcon sx={{ fontSize: 14, color: PALETTE.accents.purple }} />
+                                    <Typography variant="body2" sx={{ color: PALETTE.text.primary, fontWeight: 600 }}>
+                                        {formatDuration(nylonMinutes)}
+                                    </Typography>
+                                </Box>
+                            </Box>
+                        )}
+
+                        {/* DESSUS BAR */}
+                        {lingerieMinutes > 0 && (
+                            <Box sx={{ 
+                                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                bgcolor: `${PALETTE.accents.red}15`, 
+                                borderRadius: 1, px: 1.5, py: 0.5,
+                                border: `1px solid ${PALETTE.accents.red}44`
+                            }}>
+                                <Typography variant="caption" sx={{ color: PALETTE.accents.red, fontWeight: 'bold' }}>DESSOUS</Typography>
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                    <AccessTimeIcon sx={{ fontSize: 14, color: PALETTE.accents.red }} />
+                                    <Typography variant="body2" sx={{ color: PALETTE.text.primary, fontWeight: 600 }}>
+                                        {formatDuration(lingerieMinutes)}
+                                    </Typography>
+                                </Box>
+                            </Box>
+                        )}
+                    </Stack>
+                )}
+            </Box>
+        </Paper>
+    );
+};
+
+// 2. Monats-Zelle (Bleibt kompakt für Übersicht)
+const MonthDayCell = ({ date, sessions, isToday }) => {
+    const daySessions = sessions.filter(s => isSameDay(s.date, date));
+    const nylonMinutes = daySessions.filter(s => s.hasNylon).reduce((acc, s) => acc + s.duration, 0);
+    const lingerieMinutes = daySessions.filter(s => s.hasLingerie).reduce((acc, s) => acc + s.duration, 0);
+    
+    const hasActivity = nylonMinutes > 0 || lingerieMinutes > 0;
+
+    return (
+        <Paper 
+            sx={{ 
+                height: 80, p: 0.5, 
+                display: 'flex', flexDirection: 'column', justifyContent: 'flex-start',
+                bgcolor: isToday ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.02)',
+                border: isToday ? `1px solid ${PALETTE.primary.main}` : '1px solid rgba(255,255,255,0.05)',
+                borderRadius: 1
+            }}
+        >
+            <Typography variant="caption" sx={{ color: isToday ? PALETTE.primary.main : 'text.secondary', fontWeight: 'bold', alignSelf: 'center' }}>
+                {date.getDate()}
+            </Typography>
+
+            {hasActivity && (
+                <Stack spacing={0.5} mt={1} sx={{ width: '100%', alignItems: 'center' }}>
+                    {nylonMinutes > 0 && (
+                        <Box sx={{ width: '80%', height: 4, borderRadius: 2, bgcolor: PALETTE.accents.purple }} />
+                    )}
+                    {lingerieMinutes > 0 && (
+                        <Box sx={{ width: '80%', height: 4, borderRadius: 2, bgcolor: PALETTE.accents.red }} />
+                    )}
+                </Stack>
+            )}
+        </Paper>
+    );
+};
+
+export default function Calendar() {
   const { currentUser } = useAuth();
   const { items } = useItems();
   
-  // States
-  const [date, setDate] = useState(new Date());
-  const [plans, setPlans] = useState({});
-  const [history, setHistory] = useState({});
-  const [loadingHistory, setLoadingHistory] = useState(true);
+  const [view, setView] = useState('week'); 
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const [direction, setDirection] = useState(0);
+
+  const { sessions } = useCalendarData(currentUser, items);
+
+  const handleNext = () => {
+      setDirection(1);
+      if (view === 'week') setCurrentDate(addDays(currentDate, 7));
+      else setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
+  };
+
+  const handlePrev = () => {
+      setDirection(-1);
+      if (view === 'week') setCurrentDate(addDays(currentDate, -7));
+      else setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
+  };
+
+  const handleReset = () => {
+      setDirection(0);
+      setCurrentDate(new Date());
+  };
+
+  const today = new Date();
   
-  // Dialogs
-  const [openPlanDialog, setOpenPlanDialog] = useState(false);
-  const [openHistoryDialog, setOpenHistoryDialog] = useState(false);
-  const [selectedDateStr, setSelectedDateStr] = useState('');
-  const [selectedPlanItems, setSelectedPlanItems] = useState([]); 
-  
-  const activeItems = useMemo(() => items.filter(i => i.status === 'active'), [items]);
-
-  // --- DATEN LADEN (Unverändert) ---
-  useEffect(() => {
-    if (!currentUser) return;
-    const qPlan = query(collection(db, `users/${currentUser.uid}/planning`));
-    const unsubPlan = onSnapshot(qPlan, (snapshot) => {
-      const planData = {};
-      snapshot.docs.forEach(doc => planData[doc.id] = doc.data().itemIds || []);
-      setPlans(planData);
-    });
-
-    const fetchHistory = async () => {
-        try {
-            const qHist = query(collection(db, `users/${currentUser.uid}/sessions`), orderBy('startTime', 'desc'));
-            const snapshot = await getDocs(qHist);
-            const histData = {};
-            snapshot.docs.forEach(doc => {
-                const data = doc.data();
-                if (!data.startTime?.toDate || !data.endTime?.toDate) return;
-                const start = data.startTime.toDate();
-                const end = data.endTime.toDate();
-                const dateKey = format(start, 'yyyy-MM-dd');
-                const durationMins = differenceInMinutes(end, start);
-                
-                if (!histData[dateKey]) histData[dateKey] = { sessions: [], nylonsDuration: 0, dessousDuration: 0, hasNylons: false, hasDessous: false };
-                
-                const primaryItem = items.find(i => i.id === data.itemId);
-                let isNylon = false, isDessous = false;
-                if (primaryItem?.mainCategory) {
-                    const cat = primaryItem.mainCategory.toLowerCase();
-                    if (cat.includes('nylon')) isNylon = true;
-                    if (cat.includes('dessous') || cat.includes('lingerie') || cat.includes('wäsche')) isDessous = true;
-                }
-                if (isNylon) { histData[dateKey].nylonsDuration += durationMins; histData[dateKey].hasNylons = true; }
-                if (isDessous) { histData[dateKey].dessousDuration += durationMins; histData[dateKey].hasDessous = true; }
-                
-                if (isNylon || isDessous) histData[dateKey].sessions.push({ start, end, duration: durationMins, isNylon, isDessous });
-            });
-            setHistory(histData);
-        } catch (error) { console.error("Fehler History:", error); } finally { setLoadingHistory(false); }
-    };
-    fetchHistory();
-    return () => unsubPlan();
-  }, [currentUser, items]);
-
-  // --- HANDLER ---
-  const handleDayClick = (value) => {
-    try {
-        const dateStr = format(value, 'yyyy-MM-dd');
-        setSelectedDateStr(dateStr);
-        setDate(value);
-        if (isBefore(value, startOfDay(new Date()))) setOpenHistoryDialog(true);
-        else {
-            setSelectedPlanItems(plans[dateStr] || []);
-            setOpenPlanDialog(true);
-        }
-    } catch (e) { console.error(e); }
-  };
-
-  const savePlan = async () => {
-      if (!selectedDateStr) return;
-      const ref = doc(db, `users/${currentUser.uid}/planning`, selectedDateStr);
-      if (selectedPlanItems.length > 0) await setDoc(ref, { date: selectedDateStr, itemIds: selectedPlanItems });
-      else await deleteDoc(ref);
-      setOpenPlanDialog(false);
-  };
-
-  const togglePlanItem = (id) => {
-      setSelectedPlanItems(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
-  };
-
-  // --- RENDER TILE ---
-  const renderTileContent = ({ date, view }) => {
-      if (view !== 'month') return null;
-      try {
-          const dateStr = format(date, 'yyyy-MM-dd');
-          const isPast = isBefore(date, startOfDay(new Date()));
+  // Berechne Tage für die Ansicht
+  const daysToRender = useMemo(() => {
+      const days = [];
+      if (view === 'week') {
+          const start = getStartOfWeek(currentDate);
+          for (let i = 0; i < 7; i++) days.push(addDays(start, i));
+      } else {
+          const year = currentDate.getFullYear();
+          const month = currentDate.getMonth();
+          const firstDay = new Date(year, month, 1);
+          const lastDay = new Date(year, month + 1, 0);
           
-          if (isPast) {
-              const dayData = history[dateStr];
-              if (!dayData) return null;
-              return (
-                  <Box sx={{ display: 'flex', gap: 0.5, mt: 1 }}>
-                      {dayData.hasNylons && <motion.div variants={MOTION.pop} initial="initial" animate="animate"><Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: PALETTE.primary.main, boxShadow: `0 0 5px ${PALETTE.primary.main}` }} /></motion.div>}
-                      {dayData.hasDessous && <motion.div variants={MOTION.pop} initial="initial" animate="animate" transition={{delay: 0.1}}><Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: PALETTE.accents.pink, boxShadow: `0 0 5px ${PALETTE.accents.pink}` }} /></motion.div>}
-                  </Box>
-              );
-          } else {
-              const planIds = plans[dateStr];
-              if (planIds?.length > 0) return <motion.div sx={{ mt: 1 }} variants={MOTION.pop} initial="initial" animate="animate"><CheckCircleIcon sx={{ fontSize: 14, color: PALETTE.accents.green }} /></motion.div>;
-          }
-      } catch (e) { return null; }
-      return null;
+          let startPadding = firstDay.getDay() - 1; 
+          if (startPadding < 0) startPadding = 6;
+          
+          for (let i = 0; i < startPadding; i++) days.push(null);
+          for (let i = 1; i <= lastDay.getDate(); i++) days.push(new Date(year, month, i));
+      }
+      return days;
+  }, [currentDate, view]);
+
+  const monthLabel = currentDate.toLocaleDateString('de-DE', { month: 'long', year: 'numeric' });
+
+  const variants = {
+      enter: (dir) => ({ x: dir > 0 ? 300 : -300, opacity: 0 }),
+      center: { x: 0, opacity: 1 },
+      exit: (dir) => ({ x: dir > 0 ? -300 : 300, opacity: 0 })
   };
 
   return (
-    <motion.div variants={MOTION.page} initial="initial" animate="animate" exit="exit">
-        <Box sx={DESIGN_TOKENS.bottomNavSpacer}>
-        <Container maxWidth="md">
-            <Typography variant="h4" gutterBottom sx={DESIGN_TOKENS.textGradient}>Kalender</Typography>
-
-            {/* ZENTRALISIERTE CALENDAR STYLES WERDEN HIER ANGEWENDET */}
-            <Paper sx={{ p: 2, ...DESIGN_TOKENS.glassCard, ...DESIGN_TOKENS.calendar }}>
-            {loadingHistory ? <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}><CircularProgress color="primary" /></Box> : (
-                <Calendar onChange={setDate} value={date} tileContent={renderTileContent} onClickDay={handleDayClick} prevLabel={<ChevronLeftIcon />} nextLabel={<ChevronRightIcon />} locale="de-DE" />
-            )}
-            </Paper>
-
-            <Box sx={{ mt: 3, display: 'flex', gap: 3, justifyContent: 'center' }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: PALETTE.primary.main }} /><Typography variant="caption" sx={{ color: 'text.secondary' }}>Nylons</Typography></Box>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: PALETTE.accents.pink }} /><Typography variant="caption" sx={{ color: 'text.secondary' }}>Dessous</Typography></Box>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><CheckCircleIcon sx={{ fontSize: 14, color: PALETTE.accents.green }} /><Typography variant="caption" sx={{ color: 'text.secondary' }}>Geplant</Typography></Box>
+    <Box sx={DESIGN_TOKENS.bottomNavSpacer}>
+        <Container maxWidth="md" sx={{ pt: 2, pb: 4, minHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
+            
+            {/* HEADER */}
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+                <Box>
+                    <Typography variant="h4" sx={{ ...DESIGN_TOKENS.textGradient, fontWeight: 'bold' }}>
+                        Kalender
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                        Zeit-Tracking Übersicht
+                    </Typography>
+                </Box>
+                
+                <ToggleButtonGroup 
+                    value={view} 
+                    exclusive 
+                    onChange={(e, v) => v && setView(v)}
+                    size="small"
+                    sx={{ bgcolor: 'rgba(255,255,255,0.05)' }}
+                >
+                    <ToggleButton value="week" sx={{ color: 'text.secondary', '&.Mui-selected': { color: PALETTE.primary.main } }}>
+                        <ViewListIcon />
+                    </ToggleButton>
+                    <ToggleButton value="month" sx={{ color: 'text.secondary', '&.Mui-selected': { color: PALETTE.primary.main } }}>
+                        <CalendarViewMonthIcon />
+                    </ToggleButton>
+                </ToggleButtonGroup>
             </Box>
 
-            {/* --- DIALOGS (Zentralisiert) --- */}
-            <Dialog open={openHistoryDialog} onClose={() => setOpenHistoryDialog(false)} fullWidth maxWidth="xs" PaperProps={DESIGN_TOKENS.dialog.paper}>
-                <DialogTitle sx={{ ...DESIGN_TOKENS.dialog.title.sx, color: PALETTE.primary.main }}>
-                    <HistoryIcon color="inherit" />
-                    {selectedDateStr ? format(parseISO(selectedDateStr), 'EEEE, d. MMMM', { locale: de }) : ''}
-                </DialogTitle>
-                <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
-                    {(() => {
-                        const data = history[selectedDateStr];
-                        if (!data || (!data.hasNylons && !data.hasDessous)) return <Typography color="text.secondary" align="center" sx={{ py: 3 }}>Keine Einträge.</Typography>;
-                        return (
-                            <Box>
-                                <Box sx={{ display: 'flex', justifyContent: 'space-around', mb: 3, p: 1, bgcolor: 'rgba(255,255,255,0.03)', borderRadius: 2 }}>
-                                    {data.hasNylons && <Box sx={{ textAlign: 'center' }}><Typography variant="caption" display="block">Nylons</Typography><Typography variant="h6" sx={{ color: PALETTE.primary.main }}>{formatDurationDisplay(data.nylonsDuration)}</Typography></Box>}
-                                    {data.hasDessous && <Box sx={{ textAlign: 'center' }}><Typography variant="caption" display="block">Dessous</Typography><Typography variant="h6" sx={{ color: PALETTE.accents.pink }}>{formatDurationDisplay(data.dessousDuration)}</Typography></Box>}
-                                </Box>
-                                <List component={motion.ul} variants={MOTION.listContainer} initial="hidden" animate="show" sx={{ p: 0 }}>
-                                    <AnimatePresence>
-                                        {data.sessions.sort((a,b)=>a.start-b.start).map((s, idx) => (
-                                            <motion.li key={idx} variants={MOTION.listItem} style={{ listStyle: 'none' }}>
-                                                <Paper sx={{ p: 2, mb: 1.5, bgcolor: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.05)' }}>
-                                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                                                        <AccessTimeIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
-                                                        <Typography variant="body1">{format(s.start, 'HH:mm')} - {format(s.end, 'HH:mm')}</Typography>
-                                                        <Typography variant="caption" sx={{ ml: 'auto', bgcolor: 'rgba(255,255,255,0.1)', px: 1, py: 0.5, borderRadius: 1 }}>{formatDurationDisplay(s.duration)}</Typography>
-                                                    </Box>
-                                                    <Box sx={{ display: 'flex', gap: 1 }}>
-                                                        {s.isNylon && <Chip label="Nylons" size="small" sx={{ ...DESIGN_TOKENS.chip.active, height: 24 }} />}
-                                                        {s.isDessous && <Chip label="Dessous" size="small" sx={{ ...DESIGN_TOKENS.chip.active, borderColor: PALETTE.accents.pink, color: PALETTE.accents.pink, bgcolor: `${PALETTE.accents.pink}22`, height: 24 }} />}
-                                                    </Box>
-                                                </Paper>
-                                            </motion.li>
-                                        ))}
-                                    </AnimatePresence>
-                                </List>
-                            </Box>
-                        );
-                    })()}
-                </DialogContent>
-                <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}><Button onClick={() => setOpenHistoryDialog(false)} color="inherit">Schließen</Button></DialogActions>
-            </Dialog>
+            {/* NAVIGATION */}
+            <Paper sx={{ 
+                p: 1, mb: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                ...DESIGN_TOKENS.glassCard
+            }}>
+                <IconButton onClick={handlePrev}><ChevronLeftIcon /></IconButton>
+                <Typography variant="h6" fontWeight="bold" onClick={handleReset} sx={{ cursor: 'pointer' }}>
+                    {monthLabel} {view === 'week' && `(KW ${getKw(currentDate)})`}
+                </Typography>
+                <IconButton onClick={handleNext}><ChevronRightIcon /></IconButton>
+            </Paper>
 
-            <Dialog open={openPlanDialog} onClose={() => setOpenPlanDialog(false)} fullWidth maxWidth="sm" PaperProps={DESIGN_TOKENS.dialog.paper}>
-                <DialogTitle sx={DESIGN_TOKENS.dialog.title.sx}>Planung</DialogTitle>
-                <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
-                    <List component={motion.ul} variants={MOTION.listContainer} initial="hidden" animate="show" sx={{ maxHeight: '40vh', overflow: 'auto', bgcolor: 'rgba(0,0,0,0.2)', borderRadius: 2 }}>
-                        {activeItems.map(item => (
-                            <motion.li key={item.id} variants={MOTION.listItem} style={{ listStyle: 'none' }}>
-                                <ListItem button onClick={() => togglePlanItem(item.id)} sx={{ 
-                                    bgcolor: selectedPlanItems.includes(item.id) ? 'rgba(255,255,255,0.05)' : 'transparent', mb: 0.5, 
-                                    borderLeft: selectedPlanItems.includes(item.id) ? `4px solid ${PALETTE.primary.main}` : '4px solid transparent' 
-                                }}>
-                                    <ListItemAvatar><Avatar src={item.imageUrl} variant="rounded" /></ListItemAvatar>
-                                    <ListItemText primary={item.name} secondary={`${item.brand} • ${item.subCategory}`} />
-                                    {selectedPlanItems.includes(item.id) ? <CheckCircleIcon sx={{ color: PALETTE.primary.main }} /> : <AddCircleOutlineIcon color="action" />}
-                                </ListItem>
-                            </motion.li>
-                        ))}
-                    </List>
-                </DialogContent>
-                <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}>
-                    <Button onClick={() => setOpenPlanDialog(false)} color="inherit">Abbrechen</Button>
-                    <Button onClick={savePlan} variant="contained" sx={DESIGN_TOKENS.buttonGradient}>Speichern</Button>
-                </DialogActions>
-            </Dialog>
+            {/* CONTENT AREA */}
+            <Box sx={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+                <AnimatePresence initial={false} custom={direction} mode="wait">
+                    <motion.div
+                        key={`${view}-${currentDate.toISOString()}`}
+                        custom={direction}
+                        variants={variants}
+                        initial="enter"
+                        animate="center"
+                        exit="exit"
+                        transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+                        style={{ width: '100%' }}
+                    >
+                        {view === 'week' ? (
+                            // NEUE WOCHEN ANSICHT (Transponiert)
+                            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+                                {daysToRender.map((date, idx) => (
+                                    <WeekDayRow 
+                                        key={idx} 
+                                        date={date} 
+                                        sessions={sessions} 
+                                        isToday={isSameDay(date, today)} 
+                                    />
+                                ))}
+                            </Box>
+                        ) : (
+                            // MONATS ANSICHT (Grid)
+                            <Box sx={{ 
+                                display: 'grid', 
+                                gridTemplateColumns: 'repeat(7, 1fr)', 
+                                gap: 1,
+                                alignContent: 'start'
+                            }}>
+                                {['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'].map(d => (
+                                    <Typography key={d} variant="caption" color="text.secondary" align="center" sx={{ mb: 1 }}>
+                                        {d}
+                                    </Typography>
+                                ))}
+                                {daysToRender.map((date, idx) => (
+                                    date ? (
+                                        <MonthDayCell 
+                                            key={idx} 
+                                            date={date} 
+                                            sessions={sessions} 
+                                            isToday={isSameDay(date, today)} 
+                                        />
+                                    ) : <Box key={idx} />
+                                ))}
+                            </Box>
+                        )}
+                    </motion.div>
+                </AnimatePresence>
+            </Box>
+
         </Container>
-        </Box>
-    </motion.div>
+    </Box>
   );
+}
+
+// Hilfsfunktion für Kalenderwoche
+function getKw(date) {
+    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const dayNum = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(),0,1));
+    return Math.ceil((((d - yearStart) / 86400000) + 1)/7);
 }
