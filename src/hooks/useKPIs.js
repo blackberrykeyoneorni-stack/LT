@@ -67,7 +67,6 @@ export const useKPIs = (items = [], activeSessions = [], historySessions = []) =
         const avgCPWVal = totalWears > 0 ? (totalCostAll / totalWears) : 0;
 
         // Health / Orphans (Aktive Items ohne Tragevorgang oder sehr lange nicht getragen)
-        // Definition Orphan: Aktiv, aber wearCount == 0
         const orphanCountVal = activeItems.filter(i => !i.wearCount || i.wearCount === 0).length;
 
         // A. Enclosure (Nylons vs Gesamt)
@@ -109,17 +108,39 @@ export const useKPIs = (items = [], activeSessions = [], historySessions = []) =
         const punishmentCount = safeHistory.filter(s => s.type === 'punishment').length;
         const resistanceVal = safeHistory.length > 0 ? Math.round((punishmentCount / safeHistory.length) * 100) : 0;
 
-        // G. Vibe
+        // G. Vibe (Dominanz)
         const tags = {};
         safeItems.forEach(i => {
             if(Array.isArray(i.vibeTags)) i.vibeTags.forEach(t => tags[t] = (tags[t] || 0) + 1);
         });
         const vibeVal = Object.keys(tags).sort((a,b) => tags[b] - tags[a])[0] || "Neutral";
 
+        // H. Voluntarismus (Neu: Verhältnis Freiwillig / Befohlen)
+        const volSessions = safeHistory.filter(s => s.type === 'voluntary').length;
+        const instrSessions = safeHistory.filter(s => s.type === 'instruction').length;
+        const voluntarismVal = instrSessions === 0 ? (volSessions > 0 ? volSessions.toFixed(2) : "0.00") : (volSessions / instrSessions).toFixed(2);
+
+        // I. Endurance (Neu: Ø Session Dauer in Stunden)
+        let totalEnduranceMs = 0;
+        let enduranceCount = 0;
+        safeHistory.forEach(s => {
+             if (s.startTime) {
+                // Falls Session noch läuft (kein endTime), nehmen wir 'jetzt' für die Berechnung
+                const end = s.endTime || new Date(); 
+                const diff = (end - s.startTime);
+                if (diff > 0) {
+                    totalEnduranceMs += diff;
+                    enduranceCount++;
+                }
+            }
+        });
+        const enduranceVal = enduranceCount > 0 ? (totalEnduranceMs / enduranceCount / 1000 / 3600).toFixed(1) : "0.0";
+
+
         // --- 3. FEM-INDEX & INFOTILES DATEN ---
         const gapScore = calculateGapScore(safeItems, activeSessions);
         
-        // Nylon Index (Durchschnittliche Tragezeit von Nylons in Stunden)
+        // Nylon Index
         const nylonIndexVal = nylons.length > 0 
             ? (nylons.reduce((acc, i) => acc + (i.totalMinutes || 0), 0) / nylons.length) / 60 
             : 0;
@@ -162,7 +183,11 @@ export const useKPIs = (items = [], activeSessions = [], historySessions = []) =
                 exposure: exposureVal,
                 resistance: resistanceVal,
                 vibe: vibeVal,
-                sessionCount: safeHistory.length
+                sessionCount: safeHistory.length,
+                
+                // NEU HINZUGEFÜGT
+                voluntarism: voluntarismVal,
+                endurance: enduranceVal
             },
 
             // Gamification Score

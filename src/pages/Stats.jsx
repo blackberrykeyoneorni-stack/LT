@@ -18,9 +18,9 @@ import { Icons } from '../theme/appIcons';
 
 // Icons
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
-import SpeedIcon from '@mui/icons-material/Speed';
+import SpeedIcon from '@mui/icons-material/Speed'; // Für Ausdauer
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
-import PsychologyIcon from '@mui/icons-material/Psychology';
+import PsychologyIcon from '@mui/icons-material/Psychology'; // Für Voluntarismus
 import TimerIcon from '@mui/icons-material/Timer';
 import SecurityIcon from '@mui/icons-material/Security';
 
@@ -61,10 +61,10 @@ export default function Statistics() {
     }, [currentUser]);
 
     // --- 2. KPI CALCULATION (Via Hook) ---
-    // Wir übergeben 'sessions' als drittes Argument (history)
+    // Alle Metriken kommen jetzt zentral aus dem Hook
     const { coreMetrics, basics } = useKPIs(items, [], sessions);
 
-    // --- 3. CHART LOGIK (Bleibt hier, da UI-spezifisch) ---
+    // --- 3. CHART LOGIK (Bleibt hier, da spezifisch für interaktiven Trend) ---
     const calculateTrend = (metricId) => {
         const displayDays = 30;
         const windowSize = 5;
@@ -110,6 +110,27 @@ export default function Statistics() {
                     val = sum / relevant.length;
                 }
             }
+            // Trend für Voluntarismus
+            else if (metricId === 'voluntarism') {
+                const vol = daySessions.filter(s => s.type === 'voluntary').length;
+                const instr = daySessions.filter(s => s.type === 'instruction').length;
+                val = instr > 0 ? (vol / instr) : vol; 
+            }
+            // Trend für Ausdauer
+            else if (metricId === 'endurance') {
+                let dMins = 0;
+                let dCount = 0;
+                daySessions.forEach(s => {
+                    const end = s.endTime || new Date();
+                    dMins += (end - s.startTime) / 60000;
+                    dCount++;
+                });
+                val = dCount > 0 ? (dMins / dCount / 60) : 0;
+            }
+            // Fallback: Enclosure (konstant, da historisch schwer rekonstruierbar ohne Snapshots)
+            else if (metricId === 'enclosure') {
+                 val = coreMetrics.enclosure; 
+            }
             else {
                 val = daySessions.length;
             }
@@ -134,7 +155,7 @@ export default function Statistics() {
     };
 
     const handleCardClick = (metricId, title) => { 
-        if (['exposure', 'nocturnal', 'resistance', 'enclosure', 'compliance'].includes(metricId)) {
+        if (['exposure', 'nocturnal', 'resistance', 'enclosure', 'compliance', 'voluntarism', 'endurance'].includes(metricId)) {
             calculateTrend(metricId);
             setSelectedMetric({id: metricId, title}); 
         } else {
@@ -145,11 +166,10 @@ export default function Statistics() {
     // Forensik Helper
     const forensics = {
         archivedCount: basics?.archived || 0,
-        realizedCPW: 0, // Könnte man auch in useKPIs schieben, aber hier ok
+        realizedCPW: 0,
         reasonsData: []
     };
     
-    // Einfache Berechnung für Pie Chart (bleibt hier für Performance/Rendering Logic)
     if (items.length > 0) {
         const archived = items.filter(i => i.status === 'archived');
         let totalCost = 0; let totalWears = 0;
@@ -164,9 +184,11 @@ export default function Statistics() {
     }
 
     const getUnit = (metricId) => {
-        if (metricId === 'exposure') return ' h';
+        if (metricId === 'exposure') return ' h'; 
+        if (metricId === 'endurance') return ' h';
         if (metricId === 'nocturnal') return ' %';
         if (metricId === 'compliance') return ' m';
+        if (metricId === 'voluntarism') return ''; 
         return '';
     };
 
@@ -179,8 +201,10 @@ export default function Statistics() {
         { id: 'compliance', title: 'Compliance Lag', val: `${coreMetrics.complianceLag}m`, sub: 'Ø Verzögerung', icon: TimerIcon, color: PALETTE.accents.red },
         { id: 'exposure', title: 'Exposure', val: `${coreMetrics.exposure}%`, sub: 'Tragezeit-Ratio', icon: AccessTimeIcon, color: PALETTE.primary.main },
         { id: 'resistance', title: 'Resistance', val: `${coreMetrics.resistance}%`, sub: 'Straf-Quote', icon: SecurityIcon, color: PALETTE.accents.gold },
-        { id: 'vibe', title: 'Vibe', val: coreMetrics.vibe, sub: 'Dominanz', icon: PsychologyIcon, color: PALETTE.accents.blue },
-        { id: 'velocity', title: 'Sessions', val: coreMetrics.sessionCount, sub: 'Total', icon: SpeedIcon, color: PALETTE.text.secondary },
+        
+        // Greift jetzt auf die Hook-Daten zu
+        { id: 'voluntarism', title: 'Voluntarism', val: coreMetrics.voluntarism, sub: 'Wille / Befehl', icon: PsychologyIcon, color: PALETTE.accents.blue },
+        { id: 'endurance', title: 'Endurance', val: `${coreMetrics.endurance}h`, sub: 'Ø Dauer', icon: SpeedIcon, color: PALETTE.text.secondary },
     ];
 
     return (
@@ -202,9 +226,9 @@ export default function Statistics() {
                                     height: '100%', 
                                     ...DESIGN_TOKENS.glassCard,
                                     borderColor: `1px solid ${m.color}40`,
-                                    cursor: ['exposure', 'nocturnal', 'resistance', 'compliance', 'enclosure'].includes(m.id) ? 'pointer' : 'default',
+                                    cursor: m.id !== 'cpnh' ? 'pointer' : 'default',
                                     transition: 'transform 0.2s',
-                                    '&:hover': { transform: 'translateY(-2px)', borderColor: m.color }
+                                    '&:hover': { transform: m.id !== 'cpnh' ? 'translateY(-2px)' : 'none', borderColor: m.color }
                                 }}
                             >
                                 <CardContent sx={{ p: 2, textAlign: 'center' }}>
