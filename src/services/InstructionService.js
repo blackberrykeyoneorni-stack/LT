@@ -102,15 +102,20 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
         if (plannedItems && plannedItems.length > 0) {
             console.log("InstructionService: Führe geplanten Plan aus.");
             
+            // Titel generieren: Subkategorien bevorzugen (z.B. "Strumpfhose & Slip")
+            const titleNames = plannedItems.map(i => i.subCategory || i.name || 'Item').join(' & ');
+
             // Sofortige Rückgabe des Plans als Anweisung
             const instructionData = {
                 periodId,
                 generatedAt: serverTimestamp(),
                 isAccepted: false,
                 isPlanned: true, // Markierung für UI (optional)
+                itemName: titleNames, // NEU: Für den Dialog-Titel
                 items: plannedItems.map(i => ({
                     id: i.id,
-                    name: i.name || 'Unbenanntes Item',
+                    // NEU: Bevorzuge Subkategorie als Namen, Fallback auf Item-Name
+                    name: i.subCategory || i.name || 'Unbenanntes Item', 
                     brand: i.brand || '',
                     img: i.imageUrl || (i.images && i.images[0]) || null,
                     subCategory: i.subCategory || ''
@@ -191,13 +196,18 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
 
         if (selectedItems.length === 0) return null;
 
+        // Titel generieren: Subkategorien bevorzugen
+        const titleNames = selectedItems.map(i => i.subCategory || i.name || 'Item').join(' & ');
+
         const instructionData = {
             periodId,
             generatedAt: serverTimestamp(),
             isAccepted: false,
+            itemName: titleNames, // NEU: Für den Dialog-Titel
             items: selectedItems.map(i => ({
                 id: i.id,
-                name: i.name || 'Unbenanntes Item',
+                // NEU: Bevorzuge Subkategorie als Namen
+                name: i.subCategory || i.name || 'Unbenanntes Item',
                 brand: i.brand || '',
                 img: i.imageUrl || (i.images && i.images[0]) || null,
                 subCategory: i.subCategory || ''
