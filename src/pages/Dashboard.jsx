@@ -341,7 +341,6 @@ export default function Dashboard() {
   // --- NORMAL VIEW ---
   return (
     <Box sx={DESIGN_TOKENS.bottomNavSpacer}>
-      {/* KORREKTUR: TzdOverlay an State gebunden */}
       <TzdOverlay active={tzdActive} />
       <Container maxWidth="md" sx={{ pt: 2, pb: 4 }}>
         <motion.div variants={MOTION.page} initial="initial" animate="animate" exit="exit">

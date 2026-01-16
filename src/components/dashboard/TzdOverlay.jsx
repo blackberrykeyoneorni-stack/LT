@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Typography, Button, Container, Paper, LinearProgress, Stack } from '@mui/material';
-import { motion, AnimatePresence } from 'framer-motion'; // FIX: Import hinzugefügt
+import { motion, AnimatePresence } from 'framer-motion'; // WICHTIG: Dieser Import muss vorhanden sein!
 import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
 import { useAuth } from '../../contexts/AuthContext';
 import { getTZDStatus, confirmTZDBriefing, performCheckIn, emergencyBailout } from '../../services/TZDService';
@@ -92,7 +92,7 @@ export default function TzdOverlay({ active }) {
                         position: 'fixed',
                         top: 0, left: 0, right: 0, bottom: 0,
                         backgroundColor: 'rgba(0,0,0,0.95)',
-                        zIndex: 1300, // Über allem (MUI Modal ist oft 1300)
+                        zIndex: 1300,
                         display: 'flex',
                         flexDirection: 'column',
                         justifyContent: 'center',
@@ -174,7 +174,7 @@ export default function TzdOverlay({ active }) {
 
                                     <Box sx={{ width: '100%' }}>
                                         <LinearProgress 
-                                            variant="indeterminate" // Hidden Timer -> User sieht keinen echten Fortschritt
+                                            variant="indeterminate"
                                             sx={{ 
                                                 height: 10, 
                                                 borderRadius: 5,
