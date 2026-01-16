@@ -8,6 +8,7 @@ import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useItems } from '../contexts/ItemContext';
 import { useNFCGlobal } from '../contexts/NFCContext';
+import { motion } from 'framer-motion'; // HINZUGEFÜGT: Fix für ReferenceError
 
 // Services
 import { checkActiveSuspension } from '../services/SuspensionService';

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Typography, Button, Container, Paper, LinearProgress, Stack } from '@mui/material';
-import { motion, AnimatePresence } from 'framer-motion'; // WICHTIG: Dieser Import muss vorhanden sein!
+import { Box, Typography, Button, Container, Paper, LinearProgress, Stack, Chip } from '@mui/material'; // Import von Chip ergänzt
+import { motion, AnimatePresence } from 'framer-motion';
 import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
 import { useAuth } from '../../contexts/AuthContext';
 import { getTZDStatus, confirmTZDBriefing, performCheckIn, emergencyBailout } from '../../services/TZDService';

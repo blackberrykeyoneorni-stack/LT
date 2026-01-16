@@ -52,7 +52,7 @@ export const isItemEligibleForTZD = (item) => {
 
 // --- TRIGGER LOGIK (Für Dashboard) ---
 export const checkForTZDTrigger = async (userId, activeSessions, items) => {
-    // 1. Zeitfenster Prüfung (Sonntag 23:30 - Donnerstag 12:00)
+    // 1. Zeitfenster Prüfung (Sonntag 23:30 - Donnerstag 12:30)
     const now = new Date();
     const day = now.getDay(); 
     const hour = now.getHours();
@@ -63,9 +63,11 @@ export const checkForTZDTrigger = async (userId, activeSessions, items) => {
         if (hour === 23 && min >= 30) inWindow = true;
     } else if (day >= 1 && day <= 3) { // Mo, Di, Mi
         inWindow = true;
-    } else if (day === 4) { // Donnerstag bis 12:00
-        if (hour < 12) inWindow = true;
+    } else if (day === 4) { // Donnerstag bis 12:30
+        if (hour < 12 || (hour === 12 && min <= 30)) inWindow = true;
     }
+
+    // Freitag (5) und Samstag (6) bleiben false
 
     if (!inWindow) return false;
 
