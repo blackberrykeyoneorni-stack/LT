@@ -9,25 +9,20 @@ import { useAuth } from '../contexts/AuthContext';
 import { useItems } from '../contexts/ItemContext';
 import { useNFCGlobal } from '../contexts/NFCContext';
 
-// Services für Suspension Logic
+// Services
 import { checkActiveSuspension } from '../services/SuspensionService';
-
-// FRAMER MOTION
-import { motion } from 'framer-motion';
-
-// HOOKS
-import useSessionProgress from '../hooks/dashboard/useSessionProgress';
-import useFemIndex from '../hooks/dashboard/useFemIndex'; 
-import { useKPIs } from '../hooks/useKPIs'; 
-
-// SERVICES
 import { isAuditDue, initializeAudit, confirmAuditItem } from '../services/AuditService';
 import { getActivePunishment, clearPunishment, findPunishmentItem, registerOathRefusal } from '../services/PunishmentService';
 import { loadMonthlyBudget, calculatePurchasePriority } from '../services/BudgetService';
 import { generateAndSaveInstruction, getLastInstruction } from '../services/InstructionService';
 import { checkForTZDTrigger, getTZDStatus } from '../services/TZDService';
 
-// COMPONENTS
+// Hooks
+import useSessionProgress from '../hooks/dashboard/useSessionProgress';
+import useFemIndex from '../hooks/dashboard/useFemIndex'; 
+import { useKPIs } from '../hooks/useKPIs'; 
+
+// Components
 import TzdOverlay from '../components/dashboard/TzdOverlay'; 
 import ProgressBar from '../components/dashboard/ProgressBar';
 import FemIndexBar from '../components/dashboard/FemIndexBar';
@@ -39,24 +34,20 @@ import ReleaseProtocolDialog from '../components/dialogs/ReleaseProtocolDialog';
 import PunishmentDialog from '../components/dialogs/PunishmentDialog';
 import LaundryDialog from '../components/dialogs/LaundryDialog';
 
-// UI & THEME
 import { DESIGN_TOKENS, PALETTE, MOTION } from '../theme/obsidianDesign';
 import { 
     Box, Typography, Dialog, DialogTitle, DialogContent, DialogActions, 
     Snackbar, Alert, FormGroup, FormControlLabel, Checkbox, TextField, 
-    Button, CircularProgress, Container, Paper, Chip, LinearProgress, Divider, IconButton
+    Button, Container, Paper, Chip, LinearProgress, Divider, IconButton
 } from '@mui/material';
-import AnalyticsIcon from '@mui/icons-material/Analytics';
+import { Icons } from '../theme/appIcons';
+import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
+import LocalLaundryServiceIcon from '@mui/icons-material/LocalLaundryService';
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import NightlightRoundIcon from '@mui/icons-material/NightlightRound';
 import TimerIcon from '@mui/icons-material/Timer';
 import LinkOffIcon from '@mui/icons-material/LinkOff';
-import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
-import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
-import LocalLaundryServiceIcon from '@mui/icons-material/LocalLaundryService';
-import ArrowForwardIosIcon from '@mui/icons-material/ArrowForwardIos';
-import WarningAmberIcon from '@mui/icons-material/WarningAmber';
-import { Icons } from '../theme/appIcons';
-import { getGreeting } from '../utils/formatters';
+import AnalyticsIcon from '@mui/icons-material/Analytics';
 
 // --- HILFSFUNKTIONEN ---
 const getLocalISODate = (date) => { 
@@ -67,22 +58,16 @@ const getLocalISODate = (date) => {
 const calculatePeriodId = () => {
     const d = new Date(); 
     const mins = d.getHours() * 60 + d.getMinutes(); 
-    // Tag: 07:30 (450m) bis 23:00 (1380m)
     const isDay = mins >= 450 && mins < 1380;
     let dateStr = getLocalISODate(d);
-    
-    // Wenn vor 07:30 Uhr, gehört es zur Nacht des Vortages
     if (mins < 450) { 
-        const y = new Date(d); 
-        y.setDate(y.getDate() - 1); 
-        dateStr = getLocalISODate(y); 
+        const y = new Date(d); y.setDate(y.getDate() - 1); dateStr = getLocalISODate(y); 
     }
     return `${dateStr}-${isDay ? 'day' : 'night'}`;
 };
 
 const checkIsHoliday = (date) => {
-    const d = date.getDate();
-    const m = date.getMonth() + 1;
+    const d = date.getDate(); const m = date.getMonth() + 1;
     if (m === 12 && (d === 24 || d === 25 || d === 26)) return true;
     if (m === 12 && d === 31) return true;
     if (m === 1 && d === 1) return true;
@@ -94,7 +79,7 @@ const REFLECTION_TAGS = ["Sicher / Geborgen", "Erregt", "Gedemütigt", "Exponier
 // --- SUB-KOMPONENTE: INDEX DETAIL ---
 const IndexDetailDialog = ({ open, onClose, details }) => {
     if (!details) return null;
-    const renderMetricRow = (label, value, weight, icon, color) => (
+    const renderMetricRow = (label, value, color, icon) => (
         <Box sx={{ mb: 2 }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>{icon}<Typography variant="body2" color="text.secondary">{label}</Typography></Box>
@@ -109,10 +94,10 @@ const IndexDetailDialog = ({ open, onClose, details }) => {
             <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
                 <Box sx={{ textAlign: 'center', mb: 4 }}><Typography variant="h2" sx={{ ...DESIGN_TOKENS.textGradient, fontWeight: 'bold', fontSize: '3.5rem' }}>{details.score}</Typography><Typography variant="overline" color="text.secondary">COMPOSITE SCORE</Typography></Box>
                 <Box sx={{ px: 1 }}>
-                    {renderMetricRow("Enclosure (Material)", details.subScores.enclosure, 35, <CheckCircleOutlineIcon fontSize="small" color="primary" />, PALETTE.primary.main)}
-                    {renderMetricRow("Nocturnal (Nacht-Quote)", details.subScores.nocturnal, 25, <NightlightRoundIcon fontSize="small" sx={{ color: PALETTE.accents.purple }} />, PALETTE.accents.purple)}
-                    {renderMetricRow("Agilität (Reaktion)", details.subScores.compliance, 20, <TimerIcon fontSize="small" sx={{ color: PALETTE.accents.gold }} />, PALETTE.accents.gold)}
-                    {renderMetricRow("Disziplin (Lücken)", details.subScores.gap, 20, <LinkOffIcon fontSize="small" sx={{ color: PALETTE.accents.pink }} />, PALETTE.accents.pink)}
+                    {renderMetricRow("Enclosure (Material)", details.subScores.enclosure, PALETTE.primary.main, <CheckCircleOutlineIcon fontSize="small" color="primary" />)}
+                    {renderMetricRow("Nocturnal (Nacht-Quote)", details.subScores.nocturnal, PALETTE.accents.purple, <NightlightRoundIcon fontSize="small" sx={{ color: PALETTE.accents.purple }} />)}
+                    {renderMetricRow("Agilität (Reaktion)", details.subScores.compliance, PALETTE.accents.gold, <TimerIcon fontSize="small" sx={{ color: PALETTE.accents.gold }} />)}
+                    {renderMetricRow("Disziplin (Lücken)", details.subScores.gap, PALETTE.accents.pink, <LinkOffIcon fontSize="small" sx={{ color: PALETTE.accents.pink }} />)}
                 </Box>
             </DialogContent>
             <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}><Button onClick={onClose} fullWidth color="inherit">Schließen</Button></DialogActions>
@@ -131,30 +116,22 @@ export default function Dashboard() {
   const { femIndex, femIndexLoading, indexDetails } = useFemIndex(currentUser, items, activeSessions); 
   const kpis = useKPIs(items, activeSessions); 
 
-  const [wishlistCount, setWishlistCount] = useState(0);
-  const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(Date.now());
   const [tzdActive, setTzdActive] = useState(false);
 
-  // SUSPENSION STATE
+  // States
   const [activeSuspension, setActiveSuspension] = useState(null);
   const [loadingSuspension, setLoadingSuspension] = useState(true);
-
   const [instructionOpen, setInstructionOpen] = useState(false);
   const [currentInstruction, setCurrentInstruction] = useState(null);
   const [instructionStatus, setInstructionStatus] = useState('idle');
-  
   const [reflectionOpen, setReflectionOpen] = useState(false);
   const [sessionToStop, setSessionToStop] = useState(null);
   const [selectedFeelings, setSelectedFeelings] = useState([]);
   const [reflectionNote, setReflectionNote] = useState('');
-  
   const [oathProgress, setOathProgress] = useState(0);
   const [isHoldingOath, setIsHoldingOath] = useState(false);
   const oathTimerRef = useRef(null);
-  const lastCheckedPeriod = useRef(null);
-  const hasInitialLoadHappened = useRef(false);
-  
   const [laundryOpen, setLaundryOpen] = useState(false);
   const [auditDue, setAuditDue] = useState(false);
   const [auditOpen, setAuditOpen] = useState(false);
@@ -162,25 +139,17 @@ export default function Dashboard() {
   const [currentAuditIndex, setCurrentAuditIndex] = useState(0);
   const [currentCondition, setCurrentCondition] = useState(5);
   const [currentLocationCorrect, setCurrentLocationCorrect] = useState(true);
-  
   const [punishmentStatus, setPunishmentStatus] = useState({ active: false, deferred: false, reason: null, durationMinutes: 0 });
   const [punishmentItem, setPunishmentItem] = useState(null);
   const [punishmentScanOpen, setPunishmentScanOpen] = useState(false);
   const [punishmentScanMode, setPunishmentScanMode] = useState(null);
-  
   const [monthlyBudget, setMonthlyBudget] = useState(0);
   const [currentSpent, setCurrentSpent] = useState(0); 
   const [purchasePriority, setPurchasePriority] = useState([]);
-  
   const [maxInstructionItems, setMaxInstructionItems] = useState(1);
-  
   const [currentPeriod, setCurrentPeriod] = useState(calculatePeriodId());
-  
-  const isNight = currentPeriod ? currentPeriod.includes('night') : false;
-
   const [isFreeDay, setIsFreeDay] = useState(false);
   const [freeDayReason, setFreeDayReason] = useState('');
-
   const [releaseDialogOpen, setReleaseDialogOpen] = useState(false);
   const [releaseStep, setReleaseStep] = useState('confirm');
   const [releaseTimer, setReleaseTimer] = useState(600);
@@ -188,131 +157,107 @@ export default function Dashboard() {
   const releaseTimerInterval = useRef(null);
   const [indexDialogOpen, setIndexDialogOpen] = useState(false);
   const [toast, setToast] = useState({ open: false, message: '', severity: 'success' });
-  
-  const showToast = (message, severity = 'success') => setToast({ open: true, message, severity });
-  const handleCloseToast = () => setToast({ ...toast, open: false });
 
-  // Status für ActionButtons
+  const isNight = currentPeriod ? currentPeriod.includes('night') : false;
+  
+  // LOGIK FIX: Nur echte Instruktionen blockieren den Button
   const isInstructionActive = activeSessions.some(s => s.type === 'instruction');
   const isDailyGoalMet = progress.isDailyGoalMet;
 
-  const loadSettings = async () => { 
-      const pSnap = await getDoc(doc(db, `users/${currentUser.uid}/settings/preferences`));
-      let prefs = {};
-      if (pSnap.exists()) { 
-          prefs = pSnap.data();
-          setMaxInstructionItems(prefs.maxInstructionItems || 1); 
-      }
-      return prefs;
-  };
+  const showToast = (message, severity = 'success') => setToast({ open: true, message, severity });
+  const handleCloseToast = () => setToast({ ...toast, open: false });
 
-  const loadWishlist = async () => {
-      const s = await getDocs(query(collection(db, `users/${currentUser.uid}/wishlist`)));
-      setWishlistCount(s.docs.length);
-      return s.docs.map(d => ({id:d.id, ...d.data()}));
-  };
-
-  const loadBudgetInfo = async () => {
-      const bRef = doc(db, `users/${currentUser.uid}/settings/budget`);
-      const bSnap = await getDoc(bRef);
-      if(bSnap.exists()) { setMonthlyBudget(bSnap.data().monthlyLimit || 0); setCurrentSpent(bSnap.data().currentSpent || 0); }
-  };
-
-  // CHECK SUSPENSION
+  // 1. Initale Loads
   useEffect(() => {
-      const checkSuspension = async () => {
-          if (!currentUser) return;
-          const susp = await checkActiveSuspension(currentUser.uid);
-          setActiveSuspension(susp);
-          setLoadingSuspension(false);
-      };
-      checkSuspension();
-  }, [currentUser]);
+    if (!currentUser || itemsLoading) return;
+    const initLoad = async () => {
+        try {
+            const pSnap = await getDoc(doc(db, `users/${currentUser.uid}/settings/preferences`));
+            if(pSnap.exists()) setMaxInstructionItems(pSnap.data().maxInstructionItems || 1);
 
+            const statusData = await getActivePunishment(currentUser.uid);
+            setPunishmentStatus(statusData || { active: false });
+            setPunishmentItem(findPunishmentItem(items));
+            
+            setAuditDue(await isAuditDue(currentUser.uid));
+            setMonthlyBudget(await loadMonthlyBudget(currentUser.uid));
+            
+            const bRef = doc(db, `users/${currentUser.uid}/settings/budget`);
+            const bSnap = await getDoc(bRef);
+            if(bSnap.exists()) setCurrentSpent(bSnap.data().currentSpent || 0);
+
+            const susp = await checkActiveSuspension(currentUser.uid);
+            setActiveSuspension(susp);
+        } catch(e) { console.error(e); } finally { setLoadingSuspension(false); }
+    };
+    initLoad();
+    const timer = setInterval(() => setNow(Date.now()), 60000);
+    return () => clearInterval(timer);
+  }, [currentUser, items, itemsLoading]);
+
+  // 2. TZD Check
   useEffect(() => {
     let interval;
     const checkTZD = async () => {
         if (!currentUser || itemsLoading) return;
         const status = await getTZDStatus(currentUser.uid);
-        if (status.isActive) { if (!tzdActive) setTzdActive(true); return; } else { if (tzdActive) setTzdActive(false); }
-        const triggered = await checkForTZDTrigger(currentUser.uid, activeSessions, items);
-        if (triggered) setTzdActive(true);
+        
+        // Status Update
+        if (status.isActive) { 
+            if (!tzdActive) setTzdActive(true); 
+        } else { 
+            if (tzdActive) setTzdActive(false); 
+            // Nur triggern, wenn noch NICHT aktiv und eine Instruktion läuft
+            // Fix: Verhindert Trigger beim Starten der App wenn keine Session läuft
+            if (isInstructionActive) {
+                const triggered = await checkForTZDTrigger(currentUser.uid, activeSessions, items);
+                if (triggered) setTzdActive(true);
+            }
+        }
     };
     if (currentUser && !itemsLoading) { checkTZD(); interval = setInterval(checkTZD, 300000); }
     return () => clearInterval(interval);
-  }, [currentUser, items, activeSessions, itemsLoading, tzdActive]);
+  }, [currentUser, items, activeSessions, itemsLoading, tzdActive, isInstructionActive]);
 
-  useEffect(() => {
-      const d = new Date(now);
-      const day = d.getDay(); 
-      const isWeekend = (day === 0 || day === 6);
-      const isHoliday = checkIsHoliday(d);
-      setIsFreeDay(isWeekend || isHoliday);
-      if (isHoliday) setFreeDayReason('Holiday'); else if (isWeekend) setFreeDayReason('Weekend'); else setFreeDayReason('');
-  }, [now]);
-
-  const handleOpenRelease = () => { setReleaseStep('confirm'); setReleaseTimer(600); setReleaseIntensity(3); setReleaseDialogOpen(true); };
-  const handleStartReleaseTimer = () => {
-      setReleaseStep('timer');
-      if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current);
-      releaseTimerInterval.current = setInterval(() => {
-          setReleaseTimer(prev => { if(prev <= 1) { clearInterval(releaseTimerInterval.current); setReleaseStep('decision'); return 0; } return prev - 1; });
-      }, 1000);
-  };
-  const handleSkipTimer = () => { if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current); setReleaseStep('decision'); };
-  const handleReleaseDecision = async (outcome) => {
-      try {
-          await hookRegisterRelease(outcome, releaseIntensity);
-          if (outcome === 'maintained') showToast("Disziplin bewiesen.", "success"); else showToast("Sessions beendet.", "warning");
-      } catch (e) { showToast("Fehler beim Release", "error"); } finally { setReleaseDialogOpen(false); if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current); }
-  };
-
-  const checkAndGenerateInstruction = async (periodId) => {
-      if (!currentUser) return;
-      const d = new Date();
-      const isWeekendNow = (d.getDay() === 0 || d.getDay() === 6);
-      const isHolidayNow = checkIsHoliday(d);
-      const effectivelyFree = (isWeekendNow || isHolidayNow) && !periodId.includes('night');
-      
-      setInstructionStatus('loading'); 
-
-      if (effectivelyFree) {
-          try {
-              const instrData = await getLastInstruction(currentUser.uid);
-              if (instrData && instrData.periodId === periodId && instrData.isAccepted) setCurrentInstruction(instrData);
-              else setCurrentInstruction(null); 
-          } catch(e) {}
-          setInstructionStatus('ready');
-          return; 
-      }
-      
-      try {
-          const instrData = await getLastInstruction(currentUser.uid);
-          if (instrData && instrData.periodId === periodId) {
-              setCurrentInstruction(instrData);
-          } else {
-              const newInstruction = await generateAndSaveInstruction(currentUser.uid, items, activeSessions, periodId);
-              setCurrentInstruction(newInstruction || null);
-          }
-      } catch (e) { console.error(e); setCurrentInstruction(null); } finally { setInstructionStatus('ready'); }
-  };
-
+  // 3. Period & Instruction Generation
   useEffect(() => {
     const newPeriod = calculatePeriodId();
-    if (newPeriod !== lastCheckedPeriod.current) { 
-        lastCheckedPeriod.current = newPeriod; 
-        setCurrentPeriod(newPeriod); 
-    }
+    if (newPeriod !== currentPeriod) setCurrentPeriod(newPeriod);
+    
+    const d = new Date(now);
+    const day = d.getDay();
+    const isWeekend = (day === 0 || day === 6);
+    const isHoliday = checkIsHoliday(d);
+    setIsFreeDay(isWeekend || isHoliday);
+    setFreeDayReason(isHoliday ? 'Holiday' : (isWeekend ? 'Weekend' : ''));
   }, [now]);
 
   useEffect(() => {
     if (items.length > 0 && !sessionsLoading && currentPeriod) {
         const isIdle = instructionStatus === 'idle';
         const wrongPeriod = currentInstruction && currentInstruction.periodId !== currentPeriod;
-        if ((isIdle || wrongPeriod) && instructionStatus !== 'loading') { checkAndGenerateInstruction(currentPeriod); }
+        if ((isIdle || wrongPeriod) && instructionStatus !== 'loading') { 
+            const check = async () => {
+                setInstructionStatus('loading');
+                try {
+                    const instr = await getLastInstruction(currentUser.uid);
+                    if (instr && instr.periodId === currentPeriod) {
+                        setCurrentInstruction(instr);
+                    } else if (!isFreeDay || currentPeriod.includes('night')) {
+                        // Nur generieren wenn kein freier Tag oder es ist Nacht
+                        const newInstr = await generateAndSaveInstruction(currentUser.uid, items, activeSessions, currentPeriod);
+                        setCurrentInstruction(newInstr);
+                    } else {
+                        setCurrentInstruction(null);
+                    }
+                } catch(e){} finally { setInstructionStatus('ready'); }
+            };
+            check();
+        }
     }
-  }, [items.length, sessionsLoading, currentPeriod, currentInstruction, instructionStatus]);
+  }, [items.length, sessionsLoading, currentPeriod, currentInstruction, instructionStatus, isFreeDay]);
 
+  // Handlers
   const handleStartRequest = async (itemsToStart) => { 
       if (tzdActive) { showToast("ZUGRIFF VERWEIGERT: Zeitloses Diktat aktiv.", "error"); return; }
       const targetItems = itemsToStart || currentInstruction?.items;
@@ -323,7 +268,7 @@ export default function Dashboard() {
           showToast(`${targetItems.length} Sessions gestartet.`, "success");
       }
   };
-  
+
   const startOathPress = () => { setIsHoldingOath(true); setOathProgress(0); oathTimerRef.current = setInterval(() => { setOathProgress(prev => { if (prev >= 100) { clearInterval(oathTimerRef.current); handleAcceptOath(); return 100; } return prev + 0.4; }); }, 20); };
   const cancelOathPress = () => { clearInterval(oathTimerRef.current); setIsHoldingOath(false); setOathProgress(0); };
   
@@ -345,15 +290,9 @@ export default function Dashboard() {
       if (tzdActive) { showToast("STOPPEN VERWEIGERT.", "error"); return; }
       if (session.type === 'punishment') { 
           const elapsed = Math.floor((Date.now() - session.startTime.getTime()) / 60000); 
-          // Zeit-Sperre bleibt aktiv (Strafe muss abgesessen werden)
           if (elapsed < (punishmentStatus.durationMinutes || 30)) return; 
-          
-          // FIX: Kein NFC-Scan Zwang mehr beim Beenden
       } 
-      setSessionToStop(session); 
-      setSelectedFeelings([]); 
-      setReflectionNote(''); 
-      setReflectionOpen(true); 
+      setSessionToStop(session); setSelectedFeelings([]); setReflectionNote(''); setReflectionOpen(true); 
   };
   
   const handleConfirmStopSession = async () => { 
@@ -361,92 +300,56 @@ export default function Dashboard() {
       setLoading(true); 
       try { 
           await stopSession(sessionToStop, { feelings: selectedFeelings, note: reflectionNote }); 
-          
           if(sessionToStop.type === 'punishment') { 
               await clearPunishment(currentUser.uid); 
-              // FIX: Status manuell auf inaktiv setzen, statt Datenbank zu fragen (verhindert Race Condition)
               setPunishmentStatus({ active: false, deferred: false, reason: null, durationMinutes: 0 });
           } 
-      } catch(e){ 
-          showToast("Fehler", "error"); 
-      } finally { 
-          setReflectionOpen(false); 
-          setSessionToStop(null); 
-          setLoading(false); 
-      } 
+      } catch(e){ showToast("Fehler", "error"); } finally { setReflectionOpen(false); setSessionToStop(null); setLoading(false); } 
   };
 
   const handleStartAudit = async () => { const auditItems = await initializeAudit(currentUser.uid, items); setPendingAuditItems(auditItems); setCurrentAuditIndex(0); setAuditOpen(true); };
   const handleConfirmAuditItem = async () => { await confirmAuditItem(currentUser.uid, pendingAuditItems[currentAuditIndex].id, currentCondition, currentLocationCorrect); showToast(`${pendingAuditItems[currentAuditIndex].name} geprüft`, "success"); if(currentAuditIndex<pendingAuditItems.length-1) setCurrentAuditIndex(prev=>prev+1); else { setAuditOpen(false); setAuditDue(false); showToast("Audit abgeschlossen", "success"); } };
 
-  useEffect(() => {
-    if (!currentUser || hasInitialLoadHappened.current || itemsLoading) return;
-    const initLoad = async () => {
-        setLoading(true);
-        try {
-            await loadSettings(); 
-            const statusData = await getActivePunishment(currentUser.uid);
-            const [, wishlistData] = await Promise.all([ Promise.resolve(), loadWishlist() ]);
-            
-            setPunishmentItem(findPunishmentItem(items)); 
-            setPunishmentStatus(statusData || { active: false });
-            setAuditDue(await isAuditDue(currentUser.uid));
-            setMonthlyBudget(await loadMonthlyBudget(currentUser.uid));
-            await loadBudgetInfo(); 
-            setPurchasePriority(await calculatePurchasePriority(currentUser.uid, items, wishlistData));
-        } catch (e) { console.error(e); } finally { setLoading(false); }
-    };
-    initLoad(); hasInitialLoadHappened.current = true;
-    const timer = setInterval(() => setNow(Date.now()), 60000);
-    return () => clearInterval(timer);
-  }, [currentUser, items, itemsLoading]);
+  // RELEASE LOGIC
+  const handleOpenRelease = () => { setReleaseStep('confirm'); setReleaseTimer(600); setReleaseIntensity(3); setReleaseDialogOpen(true); };
+  const handleStartReleaseTimer = () => { setReleaseStep('timer'); if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current); releaseTimerInterval.current = setInterval(() => { setReleaseTimer(prev => { if(prev <= 1) { clearInterval(releaseTimerInterval.current); setReleaseStep('decision'); return 0; } return prev - 1; }); }, 1000); };
+  const handleSkipTimer = () => { if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current); setReleaseStep('decision'); };
+  const handleReleaseDecision = async (outcome) => { try { await hookRegisterRelease(outcome, releaseIntensity); if (outcome === 'maintained') showToast("Disziplin bewiesen.", "success"); else showToast("Sessions beendet.", "warning"); } catch (e) { showToast("Fehler beim Release", "error"); } finally { setReleaseDialogOpen(false); if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current); } };
 
-  // SUSPENSION CHECK
   if (loadingSuspension) return <Box sx={{ p: 4, textAlign: 'center' }}>System Check...</Box>;
 
-  // --- SPECIAL MODE: SUSPENSION ACTIVE ---
+  // SUSPENSION VIEW
   if (activeSuspension) {
       return (
         <Box sx={DESIGN_TOKENS.bottomNavSpacer}>
             <Container maxWidth="sm" sx={{ pt: 10, textAlign: 'center' }}>
-                <Box sx={{ mb: 4, color: PALETTE.accents.gold }}>
-                    <Icons.Shield sx={{ fontSize: 80 }} />
-                </Box>
-                <Typography variant="h4" gutterBottom sx={{ fontWeight: 'bold', letterSpacing: 2 }}>
-                    PROTOKOLL AUSGESETZT
-                </Typography>
+                <Box sx={{ mb: 4, color: PALETTE.accents.gold }}><Icons.Shield sx={{ fontSize: 80 }} /></Box>
+                <Typography variant="h4" gutterBottom sx={{ fontWeight: 'bold', letterSpacing: 2 }}>PROTOKOLL AUSGESETZT</Typography>
                 <Paper sx={{ p: 4, ...DESIGN_TOKENS.glassCard, border: `1px solid ${PALETTE.accents.gold}` }}>
                     <Chip label={activeSuspension.type.toUpperCase()} sx={{ bgcolor: PALETTE.accents.gold, color: '#000', fontWeight: 'bold', mb: 2 }} />
                     <Typography variant="h6" sx={{ mb: 1 }}>{activeSuspension.reason}</Typography>
-                    <Typography variant="body2" color="text.secondary">
-                        Geplant bis: {activeSuspension.endDate.toLocaleDateString()}
-                    </Typography>
+                    <Typography variant="body2" color="text.secondary">Geplant bis: {activeSuspension.endDate.toLocaleDateString()}</Typography>
                     <Divider sx={{ my: 3 }} />
-                    <Typography variant="caption" sx={{ display: 'block', mb: 2 }}>
-                        Status: Autorisierte Abwesenheit. Keine Aufgaben.
-                    </Typography>
+                    <Typography variant="caption" sx={{ display: 'block', mb: 2 }}>Status: Autorisierte Abwesenheit. Keine Aufgaben.</Typography>
                 </Paper>
-                <Typography variant="caption" color="text.secondary" sx={{ mt: 4, display: 'block' }}>
-                    Um den Dienst wieder aufzunehmen, gehe zu Einstellungen.
-                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 4, display: 'block' }}>Um den Dienst wieder aufzunehmen, gehe zu Einstellungen.</Typography>
             </Container>
         </Box>
       );
   }
 
-  // --- NORMAL MODE ---
+  // --- NORMAL VIEW ---
   return (
     <Box sx={DESIGN_TOKENS.bottomNavSpacer}>
-      <TzdOverlay active={false} />
+      {/* KORREKTUR: TzdOverlay an State gebunden */}
+      <TzdOverlay active={tzdActive} />
       <Container maxWidth="md" sx={{ pt: 2, pb: 4 }}>
         <motion.div variants={MOTION.page} initial="initial" animate="animate" exit="exit">
             
-            {/* 1. Header: CLEAN (Nur Titel) */}
             <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Typography variant="h4" sx={DESIGN_TOKENS.textGradient}>Dashboard</Typography>
             </Box>
 
-            {/* 2. ProgressBar */}
             <ProgressBar 
                 currentMinutes={progress.currentContinuousMinutes} 
                 targetHours={dailyTargetHours} 
@@ -454,13 +357,9 @@ export default function Dashboard() {
                 progressData={progress}
             />
 
-            {/* 3. FemIndex */}
             <FemIndexBar femIndex={femIndex || 0} loading={femIndexLoading} />
-
-            {/* 4. KPI Tiles */}
             <InfoTiles kpis={kpis} />
 
-            {/* 5. ActionButtons (Instruction / Punishment) */}
             <ActionButtons 
                 punishmentStatus={punishmentStatus} 
                 auditDue={auditDue}
@@ -479,76 +378,39 @@ export default function Dashboard() {
                 onStartAudit={handleStartAudit}
             />
 
-            {/* 6. Active Sessions (Items) */}
             <ActiveSessionsList 
                 activeSessions={activeSessions} 
                 items={items}
-                punishmentStatus={punishmentStatus} 
+                punishmentStatus={punishmentStatus}
                 onNavigateItem={(id) => navigate(`/item/${id}`)}
                 onStopSession={stopSession}
                 onOpenRelease={handleOpenRelease}
             />
 
-            {/* 7. Laundry Button (Styling: Form wie oben, Farbe zurückhaltend, Chip integriert) */}
             <Button
-              variant="contained"
-              fullWidth
-              size="large"
-              onClick={() => setLaundryOpen(true)}
+              variant="contained" fullWidth size="large" onClick={() => setLaundryOpen(true)}
               sx={{ 
-                  mb: 2, 
-                  py: 2,
-                  bgcolor: 'rgba(255,255,255,0.05)', 
-                  color: 'text.primary',
-                  boxShadow: 'none',
-                  justifyContent: 'space-between',
-                  px: 3,
+                  mb: 2, py: 2, bgcolor: 'rgba(255,255,255,0.05)', color: 'text.primary', boxShadow: 'none', justifyContent: 'space-between', px: 3,
                   '&:hover': { bgcolor: 'rgba(255,255,255,0.1)', boxShadow: 'none' }
               }}
             >
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                <LocalLaundryServiceIcon />
-                <Typography variant="button" sx={{ fontWeight: 'bold' }}>Wäschekorb</Typography>
-              </Box>
-              <Chip 
-                label={`${items.filter(i => i.status === 'washing').length} Stk.`} 
-                size="small" 
-                sx={{ 
-                    bgcolor: 'rgba(255,255,255,0.1)', 
-                    color: 'text.primary',
-                    fontWeight: 'bold',
-                    borderRadius: '4px'
-                }} 
-              />
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}><LocalLaundryServiceIcon /><Typography variant="button" sx={{ fontWeight: 'bold' }}>Wäschekorb</Typography></Box>
+              <Chip label={`${items.filter(i => i.status === 'washing').length} Stk.`} size="small" sx={{ bgcolor: 'rgba(255,255,255,0.1)', color: 'text.primary', fontWeight: 'bold', borderRadius: '4px' }} />
             </Button>
 
-            {/* 8. Budget Button (Gleiches Styling) */}
             <Button
-              variant="contained"
-              fullWidth
-              size="large"
-              onClick={() => navigate('/budget')}
+              variant="contained" fullWidth size="large" onClick={() => navigate('/budget')}
               sx={{ 
-                  mb: 4, 
-                  py: 2,
-                  bgcolor: 'rgba(255,255,255,0.05)', 
-                  color: 'text.primary',
-                  boxShadow: 'none',
-                  justifyContent: 'flex-start',
-                  px: 3,
+                  mb: 4, py: 2, bgcolor: 'rgba(255,255,255,0.05)', color: 'text.primary', boxShadow: 'none', justifyContent: 'flex-start', px: 3,
                   '&:hover': { bgcolor: 'rgba(255,255,255,0.1)', boxShadow: 'none' }
               }}
             >
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                <AccountBalanceWalletIcon />
-                <Typography variant="button" sx={{ fontWeight: 'bold' }}>Budget & Finanzen</Typography>
-              </Box>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}><AccountBalanceWalletIcon /><Typography variant="button" sx={{ fontWeight: 'bold' }}>Budget & Finanzen</Typography></Box>
             </Button>
 
         </motion.div>
       </Container>
 
-      {/* Dialogs */}
       <InstructionDialog open={instructionOpen} onClose={() => setInstructionOpen(false)} instruction={currentInstruction} items={items} isHoldingOath={isHoldingOath} oathProgress={oathProgress} onStartOath={startOathPress} onCancelOath={cancelOathPress} onDeclineOath={handleDeclineOath} onStartRequest={handleStartRequest} onNavigateItem={(id) => { setInstructionOpen(false); navigate(`/item/${id}`); }} isFreeDay={isFreeDay} freeDayReason={freeDayReason} loadingStatus={instructionStatus === 'idle' ? 'loading' : instructionStatus} isNight={isNight} showToast={showToast} />
       <PunishmentDialog open={punishmentScanOpen} onClose={() => setPunishmentScanOpen(false)} mode={punishmentScanMode} punishmentItem={punishmentItem} isScanning={isNfcScanning} onScan={handlePunishmentScanTrigger} />
       <LaundryDialog open={laundryOpen} onClose={() => setLaundryOpen(false)} washingItems={items.filter(i => i.status === 'washing')} onWashItem={async (id) => { try { await updateDoc(doc(db, `users/${currentUser.uid}/items`, id), { status: 'active', cleanDate: serverTimestamp(), historyLog: arrayUnion({ type: 'wash', date: new Date().toISOString() }) }); if(kpis?.basics?.washing <= 1) setLaundryOpen(false); } catch(e){}} } onWashAll={async () => { try { const timestamp = new Date().toISOString(); const promises = items.filter(i=>i.status==='washing').map(i => updateDoc(doc(db, `users/${currentUser.uid}/items`, i.id), { status: 'active', cleanDate: serverTimestamp(), historyLog: arrayUnion({ type: 'wash', date: timestamp }) })); await Promise.all(promises); setLaundryOpen(false); } catch (e) {} }} />

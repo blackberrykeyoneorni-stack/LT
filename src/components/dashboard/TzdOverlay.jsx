@@ -1,123 +1,221 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Typography, Button, CircularProgress, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions } from '@mui/material';
-import WarningAmberIcon from '@mui/icons-material/WarningAmber';
-import LockIcon from '@mui/icons-material/Lock';
-import FingerprintIcon from '@mui/icons-material/Fingerprint';
-import { doc, getDoc } from 'firebase/firestore'; 
-import { db } from '../../firebase';
-import { performCheckIn, confirmTZDBriefing, terminateTZD } from '../../services/TZDService';
+import { Box, Typography, Button, Container, Paper, LinearProgress, Stack } from '@mui/material';
+import { motion, AnimatePresence } from 'framer-motion'; // FIX: Import hinzugefügt
+import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
 import { useAuth } from '../../contexts/AuthContext';
-import { registerRelease } from '../../services/ReleaseService';
-import { PALETTE, DESIGN_TOKENS } from '../../theme/obsidianDesign';
+import { getTZDStatus, confirmTZDBriefing, performCheckIn, emergencyBailout } from '../../services/TZDService';
+import LockIcon from '@mui/icons-material/Lock';
+import WarningIcon from '@mui/icons-material/Warning';
+import TimerIcon from '@mui/icons-material/Timer';
+import SecurityIcon from '@mui/icons-material/Security';
 
-export default function TzdOverlay({ active, onRefresh }) { 
+export default function TzdOverlay({ active }) {
     const { currentUser } = useAuth();
     const [status, setStatus] = useState(null);
-    const [loading, setLoading] = useState(false);
-    const [showReleaseDialog, setShowReleaseDialog] = useState(false);
-    const [timeDisplay, setTimeDisplay] = useState({ hours: 0, minutes: 0, seconds: 0 });
-    const [itemDetails, setItemDetails] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [tick, setTick] = useState(0);
 
+    // Initial Status laden
     useEffect(() => {
-        if (!currentUser || !active) return;
-        const loadStatus = async () => {
+        if (!active || !currentUser) return;
+        
+        const load = async () => {
+            const s = await getTZDStatus(currentUser.uid);
+            setStatus(s);
+            setLoading(false);
+        };
+        load();
+    }, [active, currentUser]);
+
+    // Timer Loop & Check-In (alle 10s)
+    useEffect(() => {
+        if (!active || !currentUser || !status?.isActive || status?.stage !== 'running') return;
+
+        const interval = setInterval(async () => {
             try {
-                const docRef = doc(db, `users/${currentUser.uid}/status/tzd`);
-                const docSnap = await getDoc(docRef);
-                if (docSnap.exists()) setStatus(docSnap.data());
-            } catch (e) { console.error("TZD Error", e); }
-        };
-        loadStatus();
-        const interval = setInterval(loadStatus, 5000);
+                const updated = await performCheckIn(currentUser.uid, status);
+                if (updated) {
+                    if (updated.completed || !updated.isActive) {
+                        // Protokoll beendet -> Reload um Overlay zu schließen
+                        window.location.reload(); 
+                    } else {
+                        setStatus(updated);
+                    }
+                }
+            } catch (e) {
+                console.error("TZD Tick Error", e);
+            }
+            setTick(t => t + 1);
+        }, 10000);
+
         return () => clearInterval(interval);
-    }, [currentUser, active]);
+    }, [active, currentUser, status?.isActive, status?.stage]);
 
-    useEffect(() => {
-        if (status?.itemId && !itemDetails && currentUser) {
-            getDoc(doc(db, `users/${currentUser.uid}/items`, status.itemId)).then(snap => { if (snap.exists()) setItemDetails(snap.data()); });
-        }
-    }, [status?.itemId, currentUser, itemDetails]);
-
-    useEffect(() => {
-        if (!status || !status.isActive || status.stage === 'briefing') return;
-        const updateTimer = () => {
-            const now = new Date();
-            const start = status.startTime?.toDate ? status.startTime.toDate() : (status.startTime ? new Date(status.startTime) : new Date());
-            const diff = Math.floor((now - start) / 1000);
-            if (diff >= 0) setTimeDisplay({ hours: Math.floor(diff / 3600), minutes: Math.floor((diff % 3600) / 60), seconds: diff % 60 });
-        };
-        updateTimer();
-        const interval = setInterval(updateTimer, 1000);
-        return () => clearInterval(interval);
-    }, [status]);
-
-    const handleAction = async (fn, ...args) => {
+    const handleConfirm = async () => {
+        if(!currentUser) return;
         setLoading(true);
-        try { 
-            await fn(currentUser.uid, ...args); 
-            const docRef = doc(db, `users/${currentUser.uid}/status/tzd`);
-            const docSnap = await getDoc(docRef);
-            if (docSnap.exists()) setStatus(docSnap.data());
-            if (onRefresh) onRefresh(); 
-        } catch (e) { alert(e.message); } finally { setLoading(false); }
+        await confirmTZDBriefing(currentUser.uid);
+        const s = await getTZDStatus(currentUser.uid);
+        setStatus(s);
+        setLoading(false);
     };
 
-    if (!active || !status || !status.isActive) return null;
-
-    const overlayStyle = {
-        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-        bgcolor: PALETTE.background.default, // Deep Black
-        zIndex: 9998,
-        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#fff'
+    const handleBailout = async () => {
+        if(!currentUser || !window.confirm("ACHTUNG: Dies gilt als Verweigerung und zieht sofortige Bestrafung nach sich. Fortfahren?")) return;
+        setLoading(true);
+        await emergencyBailout(currentUser.uid);
+        window.location.reload();
     };
 
-    if (status.stage === 'briefing') {
+    if (!active) return null;
+
+    // Loading State innerhalb des Overlays
+    if (loading && !status) {
         return (
-             <Box sx={overlayStyle}>
-                <Box sx={{ maxWidth: 400, width: '100%', p: 4, textAlign: 'center' }}>
-                    <WarningAmberIcon sx={{ fontSize: 60, color: PALETTE.accents.red, mb: 2 }} />
-                    <Typography variant="h4" sx={{ fontWeight: 'bold', color: PALETTE.accents.red, mb: 1, letterSpacing: 2 }}>PROTOKOLL</Typography>
-                    <Typography variant="body1" sx={{ color: '#fff', mb: 4 }}>
-                        Kontrolle übernommen für:<br/><span style={{ fontSize: '1.5em', fontWeight: 'bold', display:'block', marginTop:'10px' }}>{status.itemName}</span>
-                    </Typography>
-                    <Button variant="outlined" color="error" size="large" fullWidth onClick={() => handleAction(confirmTZDBriefing)}>
-                        {loading ? <CircularProgress size={24} color="error"/> : "AKZEPTIEREN"}
-                    </Button>
-                </Box>
-             </Box>
+            <Box sx={{ position: 'fixed', inset: 0, zIndex: 9999, bgcolor: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Typography variant="h6" color="primary">SYSTEM INTERLOCK...</Typography>
+            </Box>
         );
     }
 
+    const isBriefing = status?.stage === 'briefing';
+    const progress = status ? Math.min(100, (status.accumulatedMinutes / status.targetDurationMinutes) * 100) : 0;
+
     return (
-        <>
-            <Box sx={overlayStyle}>
-                <Box sx={{ position: 'absolute', top: '15%', textAlign: 'center' }}>
-                    <LockIcon sx={{ fontSize: 40, color: '#333', mb: 2 }} />
-                    <Typography variant="overline" sx={{ letterSpacing: 6, color: '#444', display: 'block' }}>LOCKED</Typography>
-                    <Typography variant="h5" sx={{ color: '#fff', fontWeight: 300, mt: 1 }}>{status.itemName}</Typography>
-                    {itemDetails?.customId && <Typography variant="caption" sx={{ color: PALETTE.primary.main, letterSpacing: 1, mt: 0.5, display: 'block' }}>ID: {itemDetails.customId}</Typography>}
-                </Box>
-                <Box sx={{ textAlign: 'center' }}>
-                    <Typography variant="h1" sx={{ fontFamily: '"Playfair Display", serif', fontSize: '5rem', color: '#e0e0e0', fontWeight: 400, lineHeight: 1 }}>
-                        {String(timeDisplay.hours).padStart(2,'0')}:{String(timeDisplay.minutes).padStart(2,'0')}
-                    </Typography>
-                    <Typography variant="caption" sx={{ color: '#333', letterSpacing: 4, mt: 1, display: 'block' }}>ELAPSED TIME</Typography>
-                </Box>
-                <Box sx={{ position: 'absolute', bottom: '10%', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
-                    <Button variant="outlined" onClick={() => handleAction(performCheckIn)} disabled={loading} startIcon={<FingerprintIcon />} sx={{ color: '#fff', borderColor: 'rgba(255,255,255,0.2)', px: 5, py: 1.5, borderRadius: 0, '&:hover': { borderColor: '#fff', bgcolor: 'rgba(255,255,255,0.05)' } }}>
-                        PRÄSENZ BESTÄTIGEN
-                    </Button>
-                    <Button color="error" size="small" onClick={() => setShowReleaseDialog(true)} sx={{ opacity: 0.5, fontSize: '0.7rem' }}>NOTFALL / FEHLALARM BEENDEN</Button>
-                </Box>
-            </Box>
-            <Dialog open={showReleaseDialog} onClose={() => setShowReleaseDialog(false)} sx={{ zIndex: 9999 }} PaperProps={DESIGN_TOKENS.dialog.paper}>
-                <DialogTitle sx={DESIGN_TOKENS.dialog.title.sx}>ABBRUCH / RESET</DialogTitle>
-                <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}><DialogContentText>Notfall-Abbruch.</DialogContentText></DialogContent>
-                <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}>
-                    <Button onClick={() => setShowReleaseDialog(false)} color="inherit">Zurück</Button>
-                    <Button onClick={() => handleAction(async (uid) => { await registerRelease('tzd_force_end', 1); await terminateTZD(uid, false); setShowReleaseDialog(false); window.location.reload(); })} color="error" variant="contained">BEENDEN (FORCE)</Button>
-                </DialogActions>
-            </Dialog>
-        </>
+        <AnimatePresence>
+            {active && (
+                <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    style={{
+                        position: 'fixed',
+                        top: 0, left: 0, right: 0, bottom: 0,
+                        backgroundColor: 'rgba(0,0,0,0.95)',
+                        zIndex: 1300, // Über allem (MUI Modal ist oft 1300)
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        padding: '20px',
+                        backdropFilter: 'blur(10px)'
+                    }}
+                >
+                    <Container maxWidth="sm">
+                        <Paper sx={{ 
+                            p: 4, 
+                            border: `2px solid ${PALETTE.primary.main}`,
+                            bgcolor: 'rgba(0,0,0,0.9)',
+                            textAlign: 'center',
+                            boxShadow: `0 0 50px ${PALETTE.primary.main}44`
+                        }}>
+                            
+                            {/* HEADER */}
+                            <Box sx={{ mb: 4, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                                <SecurityIcon sx={{ fontSize: 60, color: PALETTE.primary.main }} />
+                                <Typography variant="h4" sx={{ fontWeight: 'bold', color: '#fff', letterSpacing: 2 }}>
+                                    ZEITLOSES DIKTAT
+                                </Typography>
+                                <Chip 
+                                    label={isBriefing ? "PHASE 1: BRIEFING" : "PHASE 2: ENCLOSURE"} 
+                                    sx={{ 
+                                        bgcolor: isBriefing ? PALETTE.accents.gold : PALETTE.primary.main, 
+                                        color: '#000', fontWeight: 'bold' 
+                                    }} 
+                                />
+                            </Box>
+
+                            {/* CONTENT */}
+                            {isBriefing ? (
+                                <Stack spacing={3}>
+                                    <Typography variant="body1" sx={{ color: '#ccc' }}>
+                                        Der Algorithmus hat eine zufällige Kontrolle ausgelöst.
+                                        Ihre Garderobe wurde vorübergehend auf ein spezifisches Setup beschränkt.
+                                    </Typography>
+                                    
+                                    <Paper sx={{ p: 2, bgcolor: 'rgba(255,255,255,0.05)', borderLeft: `4px solid ${PALETTE.accents.gold}` }}>
+                                        <Typography variant="caption" color="text.secondary" display="block" mb={1}>
+                                            ZIEL-OBJEKT
+                                        </Typography>
+                                        <Typography variant="h6" color="primary">
+                                            {status?.itemName || "Unbekanntes Item"}
+                                        </Typography>
+                                        {status?.lockedItems?.length > 1 && (
+                                            <Typography variant="caption" color="text.secondary">
+                                                + {status.lockedItems.length - 1} weitere
+                                            </Typography>
+                                        )}
+                                    </Paper>
+
+                                    <Typography variant="body2" color="error">
+                                        Warnung: Die Dauer der Maßnahme ist unbekannt (Hidden Timer). 
+                                        Verlassen Sie das Setup nicht, bis das System die Freigabe erteilt.
+                                    </Typography>
+
+                                    <Button 
+                                        variant="contained" 
+                                        size="large"
+                                        onClick={handleConfirm}
+                                        sx={{ ...DESIGN_TOKENS.buttonGradient, py: 2 }}
+                                    >
+                                        VERSTANDEN & AKZEPTIEREN
+                                    </Button>
+                                </Stack>
+                            ) : (
+                                <Stack spacing={4}>
+                                    <Box>
+                                        <Typography variant="h2" sx={{ fontFamily: 'monospace', color: PALETTE.primary.main, mb: 1 }}>
+                                            AKTIV
+                                        </Typography>
+                                        <Typography variant="caption" color="text.secondary">
+                                            ZEIT LÄUFT VERBORGEN
+                                        </Typography>
+                                    </Box>
+
+                                    <Box sx={{ width: '100%' }}>
+                                        <LinearProgress 
+                                            variant="indeterminate" // Hidden Timer -> User sieht keinen echten Fortschritt
+                                            sx={{ 
+                                                height: 10, 
+                                                borderRadius: 5,
+                                                bgcolor: 'rgba(255,255,255,0.1)',
+                                                '& .MuiLinearProgress-bar': { bgcolor: PALETTE.primary.main }
+                                            }} 
+                                        />
+                                    </Box>
+
+                                    <Paper sx={{ p: 2, bgcolor: 'rgba(0,0,0,0.5)', border: `1px solid ${PALETTE.text.muted}` }}>
+                                        <Stack direction="row" alignItems="center" gap={2}>
+                                            <LockIcon color="error" />
+                                            <Box sx={{ textAlign: 'left' }}>
+                                                <Typography variant="body2" sx={{ color: '#fff' }}>
+                                                    App-Funktionen gesperrt.
+                                                </Typography>
+                                                <Typography variant="caption" color="text.secondary">
+                                                    Warten Sie auf System-Freigabe.
+                                                </Typography>
+                                            </Box>
+                                        </Stack>
+                                    </Paper>
+                                </Stack>
+                            )}
+
+                            {/* EMERGENCY EXIT */}
+                            <Box sx={{ mt: 6, pt: 2, borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+                                <Button 
+                                    color="error" 
+                                    size="small" 
+                                    startIcon={<WarningIcon />}
+                                    onClick={handleBailout}
+                                >
+                                    NOT-ABBRUCH (STRAFE)
+                                </Button>
+                            </Box>
+
+                        </Paper>
+                    </Container>
+                </motion.div>
+            )}
+        </AnimatePresence>
     );
 }

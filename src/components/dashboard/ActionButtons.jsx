@@ -27,7 +27,7 @@ export default function ActionButtons({
   const showFreeMode = isFreeDay && !isNight && !instructionAlreadyStarted;
 
   // SPERR-LOGIK
-  // 1. Session läuft bereits -> Sperren
+  // 1. Session läuft bereits -> Sperren (nur wenn Instruction Type)
   const blockSessionRunning = isInstructionActive;
   // 2. Tagesziel erreicht -> Sperren (gilt nur für Tagesanweisungen, Nachts darf man immer)
   const blockGoalReached = isDailyGoalMet && !isNight;
@@ -89,7 +89,6 @@ export default function ActionButtons({
   if (showFreeMode) {
       label = freeDayReason === 'Holiday' ? "FEIERTAG (FREI)" : "WOCHENENDE (FREI)";
       icon = freeDayReason === 'Holiday' ? <CelebrationIcon /> : <WeekendIcon />;
-      // Free Mode bleibt klickbar (zeigt Info), ist aber visuell "inaktiv" (siehe Styling unten)
   } else {
       if (blockSessionRunning) {
           label = "SESSION LÄUFT";
@@ -110,23 +109,16 @@ export default function ActionButtons({
             aria-disabled={showFreeMode}
             sx={{ 
                 py: 2, fontWeight: 'bold', fontSize: '1.1rem',
-                
-                // Normales Styling (Gradient wenn aktiv)
                 ...(!showFreeMode && !isDisabled && (isNight || !currentInstruction) ? DESIGN_TOKENS.buttonGradient : {}),
-                
-                // Free Mode Styling (Transparent)
                 ...(showFreeMode ? { 
                     background: 'transparent', 
                     border: `1px solid ${PALETTE.text.muted}`,
                     color: PALETTE.text.muted 
                 } : {}),
-
-                // Disabled Styling (Expliziter Override für bessere Lesbarkeit im Dark Mode falls nötig)
                 '&.Mui-disabled': {
                     bgcolor: 'rgba(255, 255, 255, 0.12)',
                     color: 'rgba(255, 255, 255, 0.3)'
                 },
-                
                 transition: isHoldingOath ? 'background-color 5s linear' : 'all 0.2s'
             }} 
             onClick={onOpenInstruction} 
