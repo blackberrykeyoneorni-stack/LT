@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  collection, query, getDocs, addDoc, Timestamp 
+  collection, query, getDocs, addDoc, Timestamp, serverTimestamp 
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useItems } from '../contexts/ItemContext';
+import { getAllSuspensions } from '../services/SuspensionService'; // NEU: Import
 
 // UI & THEME
 import { 
@@ -27,6 +28,7 @@ import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import EventIcon from '@mui/icons-material/Event';
 import InfoIcon from '@mui/icons-material/Info';
+import BlockIcon from '@mui/icons-material/Block'; // NEU: Icon für Ausfall
 
 // --- HILFSFUNKTIONEN ---
 
@@ -55,13 +57,20 @@ const formatDuration = (totalMinutes) => {
     return `${h}h ${m < 10 ? '0'+m : m}m`;
 };
 
-const formatTimeRange = (date, durationMinutes) => {
-    if (!date) return "Unbekannt";
-    const start = new Date(date);
-    const end = new Date(start.getTime() + durationMinutes * 60000);
-    
-    const formatTime = (d) => d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
-    return `${formatTime(start)} - ${formatTime(end)}`;
+// NEU: Helper um zu prüfen, ob ein Datum in einer Suspension liegt
+const getSuspensionForDate = (date, suspensions) => {
+    if (!suspensions || suspensions.length === 0) return null;
+    // Zeitanteile für Vergleich nullen
+    const checkDate = new Date(date);
+    checkDate.setHours(12, 0, 0, 0); // Mittag um Zeitzonenprobleme zu minimieren
+
+    return suspensions.find(s => {
+        const start = new Date(s.startDate);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(s.endDate);
+        end.setHours(23, 59, 59, 999);
+        return checkDate >= start && checkDate <= end;
+    });
 };
 
 // --- LOGIK: ZEITEN VERSCHMELZEN ---
@@ -93,14 +102,16 @@ const calculateEffectiveMinutes = (sessions) => {
     return Math.floor(totalMs / 60000);
 };
 
-// --- DATA HOOK ---
+// --- DATA HOOK (ERWEITERT) ---
 const useCalendarData = (currentUser, items) => {
     const [sessions, setSessions] = useState([]);
+    const [suspensions, setSuspensions] = useState([]); // NEU: State für Ausfallzeiten
     const [loading, setLoading] = useState(true);
 
-    const fetchSessions = async () => {
+    const fetchData = async () => {
         setLoading(true);
         try {
+            // 1. Sessions laden
             const q = query(collection(db, `users/${currentUser.uid}/sessions`));
             const snap = await getDocs(q);
             
@@ -125,13 +136,16 @@ const useCalendarData = (currentUser, items) => {
                     type: data.type,
                     hasNylon,
                     hasLingerie,
-                    items: sessionItems // Wichtig für Detailansicht
+                    items: sessionItems 
                 };
             });
-            
-            // Sortieren nach Datum
             loadedSessions.sort((a, b) => a.date - b.date);
             setSessions(loadedSessions);
+
+            // 2. Suspensions laden (NEU)
+            const loadedSuspensions = await getAllSuspensions(currentUser.uid);
+            setSuspensions(loadedSuspensions);
+
         } catch (e) {
             console.error("Calendar Fetch Error", e);
         } finally {
@@ -140,10 +154,10 @@ const useCalendarData = (currentUser, items) => {
     };
 
     useEffect(() => {
-        if (currentUser && items.length > 0) fetchSessions();
+        if (currentUser && items.length > 0) fetchData();
     }, [currentUser, items]);
 
-    return { sessions, loading, refreshSessions: fetchSessions };
+    return { sessions, suspensions, loading, refreshSessions: fetchData };
 };
 
 // --- SUB-KOMPONENTEN ---
@@ -222,13 +236,15 @@ const PlanSessionDialog = ({ open, onClose, date, items, onSave }) => {
     );
 };
 
-// 2. Detail-Dialog
-const DayDetailDialog = ({ open, onClose, date, sessions, onOpenPlan }) => {
+// 2. Detail-Dialog (ERWEITERT um Suspension Info)
+const DayDetailDialog = ({ open, onClose, date, sessions, suspensions, onOpenPlan }) => {
     if (!date) return null;
 
-    // Sessions für diesen Tag filtern
     const daySessions = sessions.filter(s => isSameDay(s.date, date));
     daySessions.sort((a, b) => a.date - b.date);
+    
+    // Prüfen auf Suspension
+    const activeSuspension = getSuspensionForDate(date, suspensions);
 
     return (
         <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm" PaperProps={DESIGN_TOKENS.dialog.paper}>
@@ -237,17 +253,43 @@ const DayDetailDialog = ({ open, onClose, date, sessions, onOpenPlan }) => {
                     <Typography variant="h6">{date.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' })}</Typography>
                     <Typography variant="caption" color="text.secondary">Tagesprotokoll</Typography>
                 </Box>
-                <IconButton onClick={onOpenPlan} sx={{ color: PALETTE.primary.main }}>
-                    <AddCircleOutlineIcon />
-                </IconButton>
+                {/* Plus-Button nur anzeigen, wenn KEINE Suspension aktiv ist */}
+                {!activeSuspension && (
+                    <IconButton onClick={onOpenPlan} sx={{ color: PALETTE.primary.main }}>
+                        <AddCircleOutlineIcon />
+                    </IconButton>
+                )}
             </DialogTitle>
             
             <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
+                {/* NEU: Suspension Hinweis */}
+                {activeSuspension && (
+                    <Paper sx={{ 
+                        p: 2, mb: 3, 
+                        bgcolor: `${PALETTE.accents.gold}15`, 
+                        border: `1px solid ${PALETTE.accents.gold}44`,
+                        display: 'flex', alignItems: 'center', gap: 2
+                    }}>
+                        <BlockIcon sx={{ color: PALETTE.accents.gold, fontSize: 30 }} />
+                        <Box>
+                            <Typography variant="subtitle1" fontWeight="bold" sx={{ color: PALETTE.accents.gold }}>
+                                AUSFALLZEIT AKTIV
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary">
+                                Grund: {activeSuspension.reason}
+                            </Typography>
+                            <Chip size="small" label={activeSuspension.status} sx={{ mt: 1, bgcolor: 'rgba(0,0,0,0.3)', color: '#fff' }} />
+                        </Box>
+                    </Paper>
+                )}
+
                 {daySessions.length === 0 ? (
-                    <Box sx={{ py: 4, textAlign: 'center', opacity: 0.5 }}>
-                        <EventIcon sx={{ fontSize: 40, mb: 1 }} />
-                        <Typography>Keine Einträge für diesen Tag.</Typography>
-                    </Box>
+                    !activeSuspension && (
+                        <Box sx={{ py: 4, textAlign: 'center', opacity: 0.5 }}>
+                            <EventIcon sx={{ fontSize: 40, mb: 1 }} />
+                            <Typography>Keine Einträge für diesen Tag.</Typography>
+                        </Box>
+                    )
                 ) : (
                     <List>
                         {daySessions.map((session, index) => (
@@ -304,12 +346,15 @@ const DayDetailDialog = ({ open, onClose, date, sessions, onOpenPlan }) => {
     );
 };
 
-// 3. Wochen-Zeile
-const WeekDayRow = ({ date, sessions, isToday, onClick }) => {
+// 3. Wochen-Zeile (ERWEITERT um Suspension Anzeige)
+const WeekDayRow = ({ date, sessions, suspensions, isToday, onClick }) => {
     const daySessions = sessions.filter(s => isSameDay(s.date, date));
     const nylonMinutes = calculateEffectiveMinutes(daySessions.filter(s => s.hasNylon));
     const lingerieMinutes = calculateEffectiveMinutes(daySessions.filter(s => s.hasLingerie));
     
+    // Check auf Suspension
+    const activeSuspension = getSuspensionForDate(date, suspensions);
+
     const dayName = date.toLocaleDateString('de-DE', { weekday: 'short' }).toUpperCase();
     const dayNumber = date.getDate();
     const isFuture = date > new Date();
@@ -321,8 +366,10 @@ const WeekDayRow = ({ date, sessions, isToday, onClick }) => {
                 mb: 1, p: 1.5, 
                 display: 'flex', alignItems: 'center', gap: 2,
                 ...DESIGN_TOKENS.glassCard,
-                borderLeft: isToday ? `4px solid ${PALETTE.primary.main}` : '1px solid rgba(255,255,255,0.1)',
-                opacity: isFuture ? 0.6 : 1,
+                borderLeft: isToday ? `4px solid ${PALETTE.primary.main}` : (activeSuspension ? `4px solid ${PALETTE.accents.gold}` : '1px solid rgba(255,255,255,0.1)'),
+                // Wenn Suspension, leicht einfärben
+                bgcolor: activeSuspension ? 'rgba(255, 215, 0, 0.03)' : undefined,
+                opacity: isFuture && !activeSuspension ? 0.6 : 1,
                 cursor: 'pointer',
                 transition: 'all 0.2s',
                 '&:hover': { bgcolor: 'rgba(255,255,255,0.08)' }
@@ -333,63 +380,82 @@ const WeekDayRow = ({ date, sessions, isToday, onClick }) => {
                 minWidth: 50, borderRight: '1px solid rgba(255,255,255,0.1)', pr: 2
             }}>
                 <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 'bold' }}>{dayName}</Typography>
-                <Typography variant="h5" sx={{ fontWeight: 600, color: isToday ? PALETTE.primary.main : 'text.primary' }}>{dayNumber}</Typography>
+                <Typography variant="h5" sx={{ fontWeight: 600, color: isToday ? PALETTE.primary.main : (activeSuspension ? PALETTE.accents.gold : 'text.primary') }}>{dayNumber}</Typography>
             </Box>
 
             <Box sx={{ flex: 1 }}>
-                {(nylonMinutes === 0 && lingerieMinutes === 0) ? (
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Typography variant="body2" color="text.disabled" sx={{ fontStyle: 'italic' }}>
-                            {isFuture ? "Planen..." : "Keine Aktivität"}
+                {activeSuspension ? (
+                    // NEU: Anzeige für Ausfallzeit
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <BlockIcon sx={{ fontSize: 18, color: PALETTE.accents.gold }} />
+                        <Typography variant="body2" sx={{ color: PALETTE.accents.gold, fontWeight: 'bold', letterSpacing: 1 }}>
+                            AUSFALLZEIT
                         </Typography>
-                        {isFuture && <AddCircleOutlineIcon sx={{ color: 'text.disabled', fontSize: 20 }} />}
+                        <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
+                            {activeSuspension.reason}
+                        </Typography>
                     </Box>
                 ) : (
-                    <Stack spacing={1}>
-                        {nylonMinutes > 0 && (
-                            <Box sx={{ 
-                                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                                bgcolor: `${PALETTE.accents.purple}15`, 
-                                borderRadius: 1, px: 1.5, py: 0.5,
-                                border: `1px solid ${PALETTE.accents.purple}44`
-                            }}>
-                                <Typography variant="caption" sx={{ color: PALETTE.accents.purple, fontWeight: 'bold' }}>NYLON</Typography>
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                    <AccessTimeIcon sx={{ fontSize: 14, color: PALETTE.accents.purple }} />
-                                    <Typography variant="body2" sx={{ color: PALETTE.text.primary, fontWeight: 600 }}>
-                                        {formatDuration(nylonMinutes)}
-                                    </Typography>
-                                </Box>
+                    // Standard Anzeige (Nylon / Lingerie / Leer)
+                    <>
+                        {(nylonMinutes === 0 && lingerieMinutes === 0) ? (
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <Typography variant="body2" color="text.disabled" sx={{ fontStyle: 'italic' }}>
+                                    {isFuture ? "Planen..." : "Keine Aktivität"}
+                                </Typography>
+                                {isFuture && <AddCircleOutlineIcon sx={{ color: 'text.disabled', fontSize: 20 }} />}
                             </Box>
+                        ) : (
+                            <Stack spacing={1}>
+                                {nylonMinutes > 0 && (
+                                    <Box sx={{ 
+                                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                        bgcolor: `${PALETTE.accents.purple}15`, 
+                                        borderRadius: 1, px: 1.5, py: 0.5,
+                                        border: `1px solid ${PALETTE.accents.purple}44`
+                                    }}>
+                                        <Typography variant="caption" sx={{ color: PALETTE.accents.purple, fontWeight: 'bold' }}>NYLON</Typography>
+                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                            <AccessTimeIcon sx={{ fontSize: 14, color: PALETTE.accents.purple }} />
+                                            <Typography variant="body2" sx={{ color: PALETTE.text.primary, fontWeight: 600 }}>
+                                                {formatDuration(nylonMinutes)}
+                                            </Typography>
+                                        </Box>
+                                    </Box>
+                                )}
+                                {lingerieMinutes > 0 && (
+                                    <Box sx={{ 
+                                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                        bgcolor: `${PALETTE.accents.red}15`, 
+                                        borderRadius: 1, px: 1.5, py: 0.5,
+                                        border: `1px solid ${PALETTE.accents.red}44`
+                                    }}>
+                                        <Typography variant="caption" sx={{ color: PALETTE.accents.red, fontWeight: 'bold' }}>DESSOUS</Typography>
+                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                            <AccessTimeIcon sx={{ fontSize: 14, color: PALETTE.accents.red }} />
+                                            <Typography variant="body2" sx={{ color: PALETTE.text.primary, fontWeight: 600 }}>
+                                                {formatDuration(lingerieMinutes)}
+                                            </Typography>
+                                        </Box>
+                                    </Box>
+                                )}
+                            </Stack>
                         )}
-                        {lingerieMinutes > 0 && (
-                            <Box sx={{ 
-                                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                                bgcolor: `${PALETTE.accents.red}15`, 
-                                borderRadius: 1, px: 1.5, py: 0.5,
-                                border: `1px solid ${PALETTE.accents.red}44`
-                            }}>
-                                <Typography variant="caption" sx={{ color: PALETTE.accents.red, fontWeight: 'bold' }}>DESSOUS</Typography>
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                    <AccessTimeIcon sx={{ fontSize: 14, color: PALETTE.accents.red }} />
-                                    <Typography variant="body2" sx={{ color: PALETTE.text.primary, fontWeight: 600 }}>
-                                        {formatDuration(lingerieMinutes)}
-                                    </Typography>
-                                </Box>
-                            </Box>
-                        )}
-                    </Stack>
+                    </>
                 )}
             </Box>
         </Paper>
     );
 };
 
-// 4. Monats-Zelle
-const MonthDayCell = ({ date, sessions, isToday, onClick }) => {
+// 4. Monats-Zelle (ERWEITERT um Suspension Dot)
+const MonthDayCell = ({ date, sessions, suspensions, isToday, onClick }) => {
     const daySessions = sessions.filter(s => isSameDay(s.date, date));
     const hasNylon = daySessions.some(s => s.hasNylon);
     const hasLingerie = daySessions.some(s => s.hasLingerie);
+    
+    // Check auf Suspension
+    const activeSuspension = getSuspensionForDate(date, suspensions);
 
     return (
         <Paper 
@@ -397,16 +463,23 @@ const MonthDayCell = ({ date, sessions, isToday, onClick }) => {
             sx={{ 
                 height: 80, p: 0.5, 
                 display: 'flex', flexDirection: 'column', justifyContent: 'flex-start',
-                bgcolor: isToday ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.02)',
-                border: isToday ? `1px solid ${PALETTE.primary.main}` : '1px solid rgba(255,255,255,0.05)',
+                position: 'relative', // Für absolute Positionierung des Dots
+                bgcolor: isToday ? 'rgba(255,255,255,0.08)' : (activeSuspension ? 'rgba(255, 215, 0, 0.05)' : 'rgba(255,255,255,0.02)'),
+                border: isToday ? `1px solid ${PALETTE.primary.main}` : (activeSuspension ? `1px solid ${PALETTE.accents.gold}44` : '1px solid rgba(255,255,255,0.05)'),
                 borderRadius: 1,
                 cursor: 'pointer',
                 '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' }
             }}
         >
-            <Typography variant="caption" sx={{ color: isToday ? PALETTE.primary.main : 'text.secondary', fontWeight: 'bold', alignSelf: 'center' }}>
-                {date.getDate()}
-            </Typography>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%', px: 0.5 }}>
+                <Typography variant="caption" sx={{ color: isToday ? PALETTE.primary.main : 'text.secondary', fontWeight: 'bold' }}>
+                    {date.getDate()}
+                </Typography>
+                {/* NEU: Goldener Punkt für Suspension */}
+                {activeSuspension && (
+                    <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: PALETTE.accents.gold }} />
+                )}
+            </Box>
 
             {(hasNylon || hasLingerie) && (
                 <Stack spacing={0.5} mt={1} sx={{ width: '100%', alignItems: 'center' }}>
@@ -431,7 +504,8 @@ export default function Calendar() {
   const [planOpen, setPlanOpen] = useState(false);
   const [selectedDay, setSelectedDay] = useState(null);
 
-  const { sessions, refreshSessions } = useCalendarData(currentUser, items);
+  // Hook lädt nun auch suspensions
+  const { sessions, suspensions, refreshSessions } = useCalendarData(currentUser, items);
 
   const handleDayClick = (date) => {
       setSelectedDay(date);
@@ -443,7 +517,7 @@ export default function Calendar() {
           await addDoc(collection(db, `users/${currentUser.uid}/sessions`), {
               ...sessionData,
               startTime: Timestamp.fromDate(sessionData.startTime),
-              createdAt: serverTimestamp() // Importiere serverTimestamp falls nötig oder new Date()
+              createdAt: serverTimestamp() 
           });
           refreshSessions();
       } catch (e) {
@@ -561,6 +635,7 @@ export default function Calendar() {
                                         key={idx} 
                                         date={date} 
                                         sessions={sessions} 
+                                        suspensions={suspensions} // Pass down suspensions
                                         isToday={isSameDay(date, today)} 
                                         onClick={handleDayClick}
                                     />
@@ -584,6 +659,7 @@ export default function Calendar() {
                                             key={idx} 
                                             date={date} 
                                             sessions={sessions} 
+                                            suspensions={suspensions} // Pass down suspensions
                                             isToday={isSameDay(date, today)} 
                                             onClick={handleDayClick}
                                         />
@@ -601,6 +677,7 @@ export default function Calendar() {
                 onClose={() => setDetailOpen(false)} 
                 date={selectedDay} 
                 sessions={sessions}
+                suspensions={suspensions} // Pass down suspensions
                 onOpenPlan={() => { setDetailOpen(false); setPlanOpen(true); }}
             />
 

@@ -27,7 +27,7 @@ export const addSuspension = async (userId, data) => {
 };
 
 /**
- * Lädt alle geplanten oder aktiven Aussetzungen.
+ * Lädt NUR aktive oder geplante Aussetzungen (für Dashboard/Checks).
  */
 export const getSuspensions = async (userId) => {
     const q = query(
@@ -42,6 +42,28 @@ export const getSuspensions = async (userId) => {
         startDate: d.data().startDate.toDate(),
         endDate: d.data().endDate.toDate()
     }));
+};
+
+/**
+ * NEU: Lädt ALLE Aussetzungen (auch vergangene) für den Kalender.
+ */
+export const getAllSuspensions = async (userId) => {
+    try {
+        const q = query(
+            collection(db, `users/${userId}/${COLLECTION}`),
+            orderBy('startDate', 'desc')
+        );
+        const snap = await getDocs(q);
+        return snap.docs.map(d => ({ 
+            id: d.id, 
+            ...d.data(),
+            startDate: d.data().startDate?.toDate ? d.data().startDate.toDate() : new Date(d.data().startDate),
+            endDate: d.data().endDate?.toDate ? d.data().endDate.toDate() : new Date(d.data().endDate)
+        }));
+    } catch (e) {
+        console.error("Error loading history:", e);
+        return [];
+    }
 };
 
 /**
