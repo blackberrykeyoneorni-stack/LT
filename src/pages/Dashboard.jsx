@@ -50,16 +50,9 @@ import TimerIcon from '@mui/icons-material/Timer';
 import LinkOffIcon from '@mui/icons-material/LinkOff';
 import AnalyticsIcon from '@mui/icons-material/Analytics';
 
-// --- WICHTIG: Wiederhergestellte Konstante ---
 const REFLECTION_TAGS = [
-    "Sicher / Geborgen", 
-    "Erregt", 
-    "Gedemütigt", 
-    "Exponiert / Öffentlich", 
-    "Feminin", 
-    "Besitztum (Owned)", 
-    "Unwürdig", 
-    "Stolz"
+    "Sicher / Geborgen", "Erregt", "Gedemütigt", "Exponiert / Öffentlich", 
+    "Feminin", "Besitztum (Owned)", "Unwürdig", "Stolz"
 ];
 
 // --- HILFSFUNKTIONEN ---
@@ -122,8 +115,8 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const { startBindingScan, isScanning: isNfcScanning } = useNFCGlobal();
   
-  // Hook Nutzung: loadActiveSessions ist nun verfügbar
-  const { activeSessions, progress, loading: sessionsLoading, dailyTargetHours, startInstructionSession, stopSession, registerRelease: hookRegisterRelease, loadActiveSessions } = useSessionProgress(currentUser, items);
+  // Hook liefert jetzt Live-Daten via onSnapshot
+  const { activeSessions, progress, loading: sessionsLoading, dailyTargetHours, startInstructionSession, stopSession, registerRelease: hookRegisterRelease } = useSessionProgress(currentUser, items);
   
   const { femIndex, femIndexLoading, indexDetails } = useFemIndex(currentUser, items, activeSessions); 
   const kpis = useKPIs(items, activeSessions); 
@@ -207,9 +200,7 @@ export default function Dashboard() {
 
   // 2. Punishment Item Load
   useEffect(() => {
-      if (items.length > 0) {
-          setPunishmentItem(findPunishmentItem(items));
-      }
+      if (items.length > 0) setPunishmentItem(findPunishmentItem(items));
   }, [items]);
 
   // 3. TZD Check
@@ -218,16 +209,8 @@ export default function Dashboard() {
     const checkTZD = async () => {
         if (!currentUser || itemsLoading) return;
         const status = await getTZDStatus(currentUser.uid);
-        
-        if (status.isActive) { 
-            if (!tzdActive) setTzdActive(true); 
-        } else { 
-            if (tzdActive) setTzdActive(false); 
-            if (isInstructionActive) {
-                const triggered = await checkForTZDTrigger(currentUser.uid, activeSessions, items);
-                if (triggered) setTzdActive(true);
-            }
-        }
+        if (status.isActive) { if (!tzdActive) setTzdActive(true); } 
+        else { if (tzdActive) setTzdActive(false); if (isInstructionActive) { const triggered = await checkForTZDTrigger(currentUser.uid, activeSessions, items); if (triggered) setTzdActive(true); } }
     };
     if (currentUser && !itemsLoading) { checkTZD(); interval = setInterval(checkTZD, 300000); }
     return () => clearInterval(interval);
@@ -277,9 +260,6 @@ export default function Dashboard() {
           const payload = { ...currentInstruction, items: targetItems };
           await startInstructionSession(payload); 
           setInstructionOpen(false); 
-          
-          if (typeof loadActiveSessions === 'function') await loadActiveSessions();
-          
           showToast(`${targetItems.length} Sessions gestartet.`, "success");
       }
   };
@@ -303,9 +283,6 @@ export default function Dashboard() {
           await addDoc(collection(db,`users/${currentUser.uid}/sessions`),{ itemId:punishmentItem.id, itemIds:[punishmentItem.id], type:'punishment', startTime:serverTimestamp(), endTime:null }); 
           await updateDoc(doc(db,`users/${currentUser.uid}/status/punishment`),{active:true,deferred:false}); 
           setPunishmentStatus(await getActivePunishment(currentUser.uid)); 
-          
-          if (typeof loadActiveSessions === 'function') await loadActiveSessions();
-
           setPunishmentScanOpen(false); 
       } 
   };
@@ -322,14 +299,12 @@ export default function Dashboard() {
   
   const handleConfirmStopSession = async () => { 
       if (!sessionToStop) return; 
-      // Loading State hier ggf. lokal oder global
       try { 
           await stopSession(sessionToStop, { feelings: selectedFeelings, note: reflectionNote }); 
           if(sessionToStop.type === 'punishment') { 
               await clearPunishment(currentUser.uid); 
               setPunishmentStatus({ active: false, deferred: false, reason: null, durationMinutes: 0 });
           } 
-          if (typeof loadActiveSessions === 'function') await loadActiveSessions();
       } catch(e){ showToast("Fehler", "error"); } finally { setReflectionOpen(false); setSessionToStop(null); } 
   };
 

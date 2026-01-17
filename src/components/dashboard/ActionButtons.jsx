@@ -15,7 +15,7 @@ import { motion } from 'framer-motion';
 
 export default function ActionButtons({ 
   punishmentStatus, 
-  punishmentRunning, // NEU: Prop vom Dashboard
+  punishmentRunning, 
   auditDue, isFreeDay, freeDayReason, 
   currentInstruction, currentPeriod, isHoldingOath, 
   isInstructionActive, isDailyGoalMet,
@@ -26,6 +26,7 @@ export default function ActionButtons({
   const isNight = currentPeriod && currentPeriod.includes('night');
   const instructionAlreadyStarted = currentInstruction && currentInstruction.isAccepted;
   
+  // Logik: Freier Tag nur, wenn nicht schon eine Instruction läuft (z.B. Nachts)
   const showFreeMode = isFreeDay && !isNight && !instructionAlreadyStarted;
 
   const blockSessionRunning = isInstructionActive;
@@ -38,7 +39,6 @@ export default function ActionButtons({
       {punishmentStatus.active && punishmentWindowOpen && (
         <Box sx={{ mb: 3 }}>
             {punishmentRunning ? (
-                /* STATUS: LÄUFT (Nicht mehr klickbar) */
                 <Button 
                     variant="outlined" fullWidth size="large" disabled
                     startIcon={<TimerIcon />}
@@ -56,7 +56,6 @@ export default function ActionButtons({
                     STRAFE LÄUFT...
                 </Button>
             ) : (
-                /* STATUS: BEREIT ZUM START (Klickbar) */
                 <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
                     <Button 
                         variant="contained" fullWidth size="large"
@@ -101,12 +100,19 @@ export default function ActionButtons({
         </Box>
       )}
 
-      {/* 4. ANWEISUNG / FREI / GESPERRT */}
+      {/* 4. HAUPT BUTTON (Instruction / Frei / Status) */}
       {(() => {
           let label = isNight ? "NACHTANWEISUNG ÖFFNEN" : "TAGESANWEISUNG ÖFFNEN";
           let icon = isNight ? <DarkModeIcon /> : <LightModeIcon />;
           let isDisabled = false;
           let isBlockedStyle = false;
+
+          // Free Mode Styling (FIX: Sichtbarer machen)
+          const freeModeSx = {
+              background: 'rgba(255,255,255,0.05)', // Leicht sichtbar statt transparent
+              border: `1px solid ${PALETTE.accents.green}`, // Grüner Rahmen für "Frei"
+              color: PALETTE.accents.green
+          };
 
           if (showFreeMode) {
               label = freeDayReason === 'Holiday' ? "FEIERTAG (FREI)" : "WOCHENENDE (FREI)";
@@ -134,12 +140,12 @@ export default function ActionButtons({
                         aria-disabled={showFreeMode}
                         sx={{ 
                             py: 2, fontWeight: 'bold', fontSize: '1.1rem',
-                            ...(!showFreeMode && !isBlockedStyle && (isNight || !currentInstruction) ? DESIGN_TOKENS.buttonGradient : {}),
-                            ...(showFreeMode ? { 
-                                background: 'transparent', 
-                                border: `1px solid ${PALETTE.text.muted}`,
-                                color: PALETTE.text.muted 
-                            } : {}),
+                            // Standard Gradient nur wenn NICHT Free Mode und NICHT Disabled
+                            ...(!showFreeMode && !isBlockedStyle ? DESIGN_TOKENS.buttonGradient : {}),
+                            
+                            // Free Mode Styling anwenden
+                            ...(showFreeMode ? freeModeSx : {}),
+                            
                             '&.Mui-disabled': {
                                 bgcolor: 'rgba(255, 255, 255, 0.12)',
                                 color: 'rgba(255, 255, 255, 0.3)'
