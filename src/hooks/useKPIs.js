@@ -3,13 +3,22 @@ import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 
+// Helper für sicheres Date Parsing
+const safeDate = (val) => {
+    if (!val) return null;
+    if (typeof val.toDate === 'function') return val.toDate();
+    if (val instanceof Date) return val;
+    const d = new Date(val);
+    return isNaN(d.getTime()) ? null : d;
+};
+
 // Hilfsfunktion für den Gap-Score (lokal)
 const calculateGapScore = (items, currentSessions) => {
     if (currentSessions && currentSessions.length > 0) return 100;
     if (!items || items.length === 0) return 0;
 
     const lastWornDates = items
-        .map(i => i.lastWorn ? (i.lastWorn.toDate ? i.lastWorn.toDate() : new Date(i.lastWorn)) : null)
+        .map(i => safeDate(i.lastWorn))
         .filter(d => d !== null);
 
     if (lastWornDates.length === 0) return 0;
@@ -24,7 +33,6 @@ const calculateGapScore = (items, currentSessions) => {
     return (remaining / 36) * 100;
 };
 
-// SIGNATUR: items, activeSessions, historySessions (optional)
 export const useKPIs = (items = [], activeSessions = [], historySessions = []) => {
     const { currentUser } = useAuth();
     const [releaseStats, setReleaseStats] = useState({ totalReleases: 0, keptOn: 0 });
@@ -56,78 +64,85 @@ export const useKPIs = (items = [], activeSessions = [], historySessions = []) =
         const washingItems = safeItems.filter(i => i.status === 'washing');
         const archivedItems = safeItems.filter(i => i.status === 'archived');
         
-        // --- 2. CORE METRICS (Single Source of Truth) ---
+        // --- 2. CORE METRICS ---
         
         // Financials
         const totalValue = activeItems.reduce((acc, i) => acc + (parseFloat(i.cost) || 0), 0);
         const totalCostAll = safeItems.reduce((acc, i) => acc + (parseFloat(i.cost) || 0), 0);
         
-        // CPW Berechnung (Cost per Wear)
+        // CPW Berechnung
         const totalWears = safeItems.reduce((acc, i) => acc + (i.wearCount || 0), 0);
         const avgCPWVal = totalWears > 0 ? (totalCostAll / totalWears) : 0;
 
-        // Health / Orphans (Aktive Items ohne Tragevorgang oder sehr lange nicht getragen)
+        // Health
         const orphanCountVal = activeItems.filter(i => !i.wearCount || i.wearCount === 0).length;
 
-        // A. Enclosure (Nylons vs Gesamt)
+        // A. Enclosure
         const nylons = activeItems.filter(i => (i.mainCategory || '').toLowerCase().includes('nylon'));
         const enclosureVal = activeItems.length > 0 ? Math.round((nylons.length / activeItems.length) * 100) : 0;
 
-        // B. Nocturnal (Nacht-Quote aus Historie)
+        // B. Nocturnal
         const instructionSessions = safeHistory.filter(s => s.type === 'instruction');
         const nightSessions = instructionSessions.filter(s => s.period && s.period.includes('night'));
         const nocturnalVal = instructionSessions.length > 0 ? Math.round((nightSessions.length / instructionSessions.length) * 100) : 0;
 
-        // C. CPNH (Cost Per Nylon Hour)
+        // C. CPNH
         const totalMinutes = safeItems.reduce((acc, i) => acc + (i.totalMinutes || 0), 0);
         const totalHours = totalMinutes / 60;
         const cpnhVal = totalHours > 0 ? (totalCostAll / totalHours).toFixed(2) : "0.00";
 
-        // D. Compliance Lag (Ø Verzögerung)
+        // D. Compliance Lag
         const sessionsWithLag = instructionSessions.filter(s => typeof s.complianceLagMinutes === 'number');
         const totalLag = sessionsWithLag.reduce((acc, s) => acc + s.complianceLagMinutes, 0);
         const complianceLagVal = sessionsWithLag.length > 0 ? Math.round(totalLag / sessionsWithLag.length) : 0;
 
-        // E. Exposure (Tragezeit Verhältnis)
+        // E. Exposure (Fix: sichere Dates)
         let exposureVal = 0;
         if (safeHistory.length > 0) {
-            const sortedStart = [...safeHistory].sort((a,b) => a.startTime - b.startTime);
-            const start = sortedStart.length > 0 ? sortedStart[0].startTime : new Date();
+            // Wir müssen sicherstellen, dass wir hier echte Dates haben, falls safeDate im Aufrufer nicht genutzt wurde
+            const sortedStart = [...safeHistory].sort((a,b) => {
+                 const dA = safeDate(a.startTime) || new Date(0);
+                 const dB = safeDate(b.startTime) || new Date(0);
+                 return dA - dB;
+            });
+            const start = safeDate(sortedStart[0]?.startTime) || new Date();
             
             let totalSessionDuration = 0;
             safeHistory.forEach(s => {
-                if(s.endTime && s.startTime) {
-                    totalSessionDuration += (s.endTime - s.startTime);
+                const sStart = safeDate(s.startTime);
+                const sEnd = safeDate(s.endTime);
+                if(sStart && sEnd) {
+                    totalSessionDuration += (sEnd - sStart);
                 }
             });
             const totalTimeSinceStart = Date.now() - start.getTime();
             exposureVal = totalTimeSinceStart > 0 ? Math.round((totalSessionDuration / totalTimeSinceStart) * 100) : 0;
         }
 
-        // F. Resistance (Straf-Quote)
+        // F. Resistance
         const punishmentCount = safeHistory.filter(s => s.type === 'punishment').length;
         const resistanceVal = safeHistory.length > 0 ? Math.round((punishmentCount / safeHistory.length) * 100) : 0;
 
-        // G. Vibe (Dominanz)
+        // G. Vibe
         const tags = {};
         safeItems.forEach(i => {
             if(Array.isArray(i.vibeTags)) i.vibeTags.forEach(t => tags[t] = (tags[t] || 0) + 1);
         });
         const vibeVal = Object.keys(tags).sort((a,b) => tags[b] - tags[a])[0] || "Neutral";
 
-        // H. Voluntarismus (Neu: Verhältnis Freiwillig / Befohlen)
+        // H. Voluntarismus
         const volSessions = safeHistory.filter(s => s.type === 'voluntary').length;
         const instrSessions = safeHistory.filter(s => s.type === 'instruction').length;
         const voluntarismVal = instrSessions === 0 ? (volSessions > 0 ? volSessions.toFixed(2) : "0.00") : (volSessions / instrSessions).toFixed(2);
 
-        // I. Endurance (Neu: Ø Session Dauer in Stunden)
+        // I. Endurance (Fix: sichere Dates)
         let totalEnduranceMs = 0;
         let enduranceCount = 0;
         safeHistory.forEach(s => {
-             if (s.startTime) {
-                // Falls Session noch läuft (kein endTime), nehmen wir 'jetzt' für die Berechnung
-                const end = s.endTime || new Date(); 
-                const diff = (end - s.startTime);
+             const sStart = safeDate(s.startTime);
+             if (sStart) {
+                const sEnd = safeDate(s.endTime) || new Date(); 
+                const diff = (sEnd - sStart);
                 if (diff > 0) {
                     totalEnduranceMs += diff;
                     enduranceCount++;
@@ -136,16 +151,13 @@ export const useKPIs = (items = [], activeSessions = [], historySessions = []) =
         });
         const enduranceVal = enduranceCount > 0 ? (totalEnduranceMs / enduranceCount / 1000 / 3600).toFixed(1) : "0.0";
 
-
-        // --- 3. FEM-INDEX & INFOTILES DATEN ---
+        // --- 3. FEM-INDEX ---
         const gapScore = calculateGapScore(safeItems, activeSessions);
         
-        // Nylon Index
         const nylonIndexVal = nylons.length > 0 
             ? (nylons.reduce((acc, i) => acc + (i.totalMinutes || 0), 0) / nylons.length) / 60 
             : 0;
         
-        // Score Komponenten
         const nocturnalScore = Math.min(nylonIndexVal * 10, 100); 
 
         const totalReleases = releaseStats.totalReleases || 0;
@@ -163,18 +175,13 @@ export const useKPIs = (items = [], activeSessions = [], historySessions = []) =
             (complianceScore * 0.20)
         );
 
-        // --- RETURN OBJECT (Strukturiert für InfoTiles & Stats) ---
         return {
-            // Für InfoTiles.jsx
             health: { orphanCount: orphanCountVal },
             financials: { totalValue, avgCPW: avgCPWVal, amortizationRate: 0 },
             usage: { nylonIndex: nylonIndexVal },
             spermaScore: { rate: spermaScoreRate, total: totalReleases, kept: keptReleases },
-
-            // Rohdaten Basics
             basics: { total: safeItems.length, active: activeItems.length, washing: washingItems.length, archived: archivedItems.length },
             
-            // Standardisierte Metriken für Stats.jsx
             coreMetrics: {
                 enclosure: enclosureVal,
                 nocturnal: nocturnalVal,
@@ -184,13 +191,10 @@ export const useKPIs = (items = [], activeSessions = [], historySessions = []) =
                 resistance: resistanceVal,
                 vibe: vibeVal,
                 sessionCount: safeHistory.length,
-                
-                // NEU HINZUGEFÜGT
                 voluntarism: voluntarismVal,
                 endurance: enduranceVal
             },
 
-            // Gamification Score
             femIndex: {
                 score: femIndexTotal,
                 details: {

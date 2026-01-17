@@ -18,11 +18,28 @@ import { Icons } from '../theme/appIcons';
 
 // Icons
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
-import SpeedIcon from '@mui/icons-material/Speed'; // Für Ausdauer
+import SpeedIcon from '@mui/icons-material/Speed'; 
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
-import PsychologyIcon from '@mui/icons-material/Psychology'; // Für Voluntarismus
+import PsychologyIcon from '@mui/icons-material/Psychology'; 
 import TimerIcon from '@mui/icons-material/Timer';
 import SecurityIcon from '@mui/icons-material/Security';
+
+// --- HELPER: Safe Date Parsing ---
+// Verhindert "h is not a function" Fehler bei Timestamps
+const safeDate = (val) => {
+    if (!val) return null;
+    // Wenn es eine Firestore Timestamp Methode hat
+    if (typeof val.toDate === 'function') {
+        return val.toDate();
+    }
+    // Wenn es bereits ein Date Objekt ist
+    if (val instanceof Date) {
+        return val;
+    }
+    // Fallback: String oder Number Parsing
+    const d = new Date(val);
+    return isNaN(d.getTime()) ? null : d;
+};
 
 export default function Statistics() {
     const { currentUser } = useAuth();
@@ -42,29 +59,32 @@ export default function Statistics() {
                 const iSnap = await getDocs(collection(db, `users/${currentUser.uid}/items`));
                 const loadedItems = iSnap.docs.map(d => ({ 
                     id: d.id, ...d.data(), 
-                    purchaseDate: d.data().purchaseDate?.toDate ? d.data().purchaseDate.toDate() : new Date(d.data().purchaseDate || Date.now()) 
+                    purchaseDate: safeDate(d.data().purchaseDate) || new Date()
                 }));
                 setItems(loadedItems);
 
-                // History laden (für Stats zwingend notwendig)
+                // History laden
                 const sSnap = await getDocs(query(collection(db, `users/${currentUser.uid}/sessions`), orderBy('startTime', 'asc')));
                 const loadedSessions = sSnap.docs.map(d => ({ 
                     id: d.id, ...d.data(), 
-                    startTime: d.data().startTime?.toDate ? d.data().startTime.toDate() : new Date(d.data().startTime),
-                    endTime: d.data().endTime?.toDate ? d.data().endTime.toDate() : (d.data().endTime ? new Date(d.data().endTime) : null)
+                    startTime: safeDate(d.data().startTime) || new Date(),
+                    endTime: safeDate(d.data().endTime)
                 }));
                 setSessions(loadedSessions);
 
-            } catch (e) { console.error(e); } finally { setLoading(false); }
+            } catch (e) { 
+                console.error("Stats Load Error:", e); 
+            } finally { 
+                setLoading(false); 
+            }
         };
         loadData();
     }, [currentUser]);
 
-    // --- 2. KPI CALCULATION (Via Hook) ---
-    // Alle Metriken kommen jetzt zentral aus dem Hook
+    // --- 2. KPI CALCULATION ---
     const { coreMetrics, basics } = useKPIs(items, [], sessions);
 
-    // --- 3. CHART LOGIK (Bleibt hier, da spezifisch für interaktiven Trend) ---
+    // --- 3. CHART LOGIK ---
     const calculateTrend = (metricId) => {
         const displayDays = 30;
         const windowSize = 5;
@@ -110,13 +130,11 @@ export default function Statistics() {
                     val = sum / relevant.length;
                 }
             }
-            // Trend für Voluntarismus
             else if (metricId === 'voluntarism') {
                 const vol = daySessions.filter(s => s.type === 'voluntary').length;
                 const instr = daySessions.filter(s => s.type === 'instruction').length;
                 val = instr > 0 ? (vol / instr) : vol; 
             }
-            // Trend für Ausdauer
             else if (metricId === 'endurance') {
                 let dMins = 0;
                 let dCount = 0;
@@ -127,7 +145,6 @@ export default function Statistics() {
                 });
                 val = dCount > 0 ? (dMins / dCount / 60) : 0;
             }
-            // Fallback: Enclosure (konstant, da historisch schwer rekonstruierbar ohne Snapshots)
             else if (metricId === 'enclosure') {
                  val = coreMetrics.enclosure; 
             }
@@ -188,7 +205,6 @@ export default function Statistics() {
         if (metricId === 'endurance') return ' h';
         if (metricId === 'nocturnal') return ' %';
         if (metricId === 'compliance') return ' m';
-        if (metricId === 'voluntarism') return ''; 
         return '';
     };
 
@@ -201,8 +217,6 @@ export default function Statistics() {
         { id: 'compliance', title: 'Compliance Lag', val: `${coreMetrics.complianceLag}m`, sub: 'Ø Verzögerung', icon: TimerIcon, color: PALETTE.accents.red },
         { id: 'exposure', title: 'Exposure', val: `${coreMetrics.exposure}%`, sub: 'Tragezeit-Ratio', icon: AccessTimeIcon, color: PALETTE.primary.main },
         { id: 'resistance', title: 'Resistance', val: `${coreMetrics.resistance}%`, sub: 'Straf-Quote', icon: SecurityIcon, color: PALETTE.accents.gold },
-        
-        // Greift jetzt auf die Hook-Daten zu
         { id: 'voluntarism', title: 'Voluntarism', val: coreMetrics.voluntarism, sub: 'Wille / Befehl', icon: PsychologyIcon, color: PALETTE.accents.blue },
         { id: 'endurance', title: 'Endurance', val: `${coreMetrics.endurance}h`, sub: 'Ø Dauer', icon: SpeedIcon, color: PALETTE.text.secondary },
     ];
@@ -219,25 +233,28 @@ export default function Statistics() {
 
                 <Grid container spacing={2} sx={{ mb: 4 }}>
                     {metrics.map((m) => (
-                        <Grid item xs={6} sm={3} key={m.id} component={motion.div} variants={MOTION.listItem}>
-                            <Card 
-                                onClick={() => handleCardClick(m.id, m.title)}
-                                sx={{ 
-                                    height: '100%', 
-                                    ...DESIGN_TOKENS.glassCard,
-                                    borderColor: `1px solid ${m.color}40`,
-                                    cursor: m.id !== 'cpnh' ? 'pointer' : 'default',
-                                    transition: 'transform 0.2s',
-                                    '&:hover': { transform: m.id !== 'cpnh' ? 'translateY(-2px)' : 'none', borderColor: m.color }
-                                }}
-                            >
-                                <CardContent sx={{ p: 2, textAlign: 'center' }}>
-                                    <m.icon sx={{ color: m.color, fontSize: 28, mb: 1 }} />
-                                    <Typography variant="h5" fontWeight="bold" sx={{ color: PALETTE.text.primary }}>{m.val}</Typography>
-                                    <Typography variant="caption" sx={{ color: m.color, display:'block', fontWeight:'bold', textTransform:'uppercase', fontSize:'0.65rem' }}>{m.title}</Typography>
-                                    <Typography variant="caption" sx={{ color: 'text.secondary', fontSize:'0.6rem' }}>{m.sub}</Typography>
-                                </CardContent>
-                            </Card>
+                        // FIX: component={motion.div} entfernt und Animation direkt auf Card Container angewendet
+                        <Grid item xs={6} sm={3} key={m.id}>
+                            <motion.div variants={MOTION.listItem} style={{ height: '100%' }}>
+                                <Card 
+                                    onClick={() => handleCardClick(m.id, m.title)}
+                                    sx={{ 
+                                        height: '100%', 
+                                        ...DESIGN_TOKENS.glassCard,
+                                        borderColor: `1px solid ${m.color}40`,
+                                        cursor: m.id !== 'cpnh' ? 'pointer' : 'default',
+                                        transition: 'transform 0.2s',
+                                        '&:hover': { transform: m.id !== 'cpnh' ? 'translateY(-2px)' : 'none', borderColor: m.color }
+                                    }}
+                                >
+                                    <CardContent sx={{ p: 2, textAlign: 'center' }}>
+                                        <m.icon sx={{ color: m.color, fontSize: 28, mb: 1 }} />
+                                        <Typography variant="h5" fontWeight="bold" sx={{ color: PALETTE.text.primary }}>{m.val}</Typography>
+                                        <Typography variant="caption" sx={{ color: m.color, display:'block', fontWeight:'bold', textTransform:'uppercase', fontSize:'0.65rem' }}>{m.title}</Typography>
+                                        <Typography variant="caption" sx={{ color: 'text.secondary', fontSize:'0.6rem' }}>{m.sub}</Typography>
+                                    </CardContent>
+                                </Card>
+                            </motion.div>
                         </Grid>
                     ))}
                 </Grid>
@@ -251,43 +268,47 @@ export default function Statistics() {
                 </motion.div>
 
                 <Grid container spacing={3}>
-                    <Grid item xs={12} sm={4} component={motion.div} variants={MOTION.listItem}>
-                        <Paper sx={{ p: 2, height: '100%', border: `1px solid ${PALETTE.accents.crimson}`, bgcolor: `${PALETTE.accents.crimson}10`, textAlign: 'center', display: 'flex', flexDirection: 'column', justifyContent: 'center', borderRadius: '12px' }}>
-                            <Typography variant="caption" color="error">GLOBAL CPW</Typography>
-                            <Typography variant="h4" fontWeight="bold" color={PALETTE.text.primary}>{forensics.realizedCPW.toFixed(2)} €</Typography>
-                            <Typography variant="caption" color="text.secondary">Investition pro Nutzung</Typography>
-                        </Paper>
+                    <Grid item xs={12} sm={4}>
+                         <motion.div variants={MOTION.listItem} style={{ height: '100%' }}>
+                            <Paper sx={{ p: 2, height: '100%', border: `1px solid ${PALETTE.accents.crimson}`, bgcolor: `${PALETTE.accents.crimson}10`, textAlign: 'center', display: 'flex', flexDirection: 'column', justifyContent: 'center', borderRadius: '12px' }}>
+                                <Typography variant="caption" color="error">GLOBAL CPW</Typography>
+                                <Typography variant="h4" fontWeight="bold" color={PALETTE.text.primary}>{forensics.realizedCPW.toFixed(2)} €</Typography>
+                                <Typography variant="caption" color="text.secondary">Investition pro Nutzung</Typography>
+                            </Paper>
+                        </motion.div>
                     </Grid>
                     
-                    <Grid item xs={12} sm={8} component={motion.div} variants={MOTION.listItem}>
-                        <Paper sx={{ p: 2, height: 350, ...DESIGN_TOKENS.glassCard }}>
-                            <Typography variant="subtitle2" gutterBottom align="center">Verlust-Ursachen</Typography>
-                            {forensics.reasonsData.length > 0 ? (
-                                <Box sx={{height: 300, width: '100%'}}>
-                                    <ResponsiveContainer>
-                                        <PieChart>
-                                            <Pie
-                                                data={forensics.reasonsData}
-                                                cx="50%" cy="50%"
-                                                innerRadius={60} outerRadius={80}
-                                                paddingAngle={5}
-                                                dataKey="value"
-                                            >
-                                                {forensics.reasonsData.map((entry, index) => (
-                                                    <Cell key={`cell-${index}`} fill={entry.color} stroke="none" />
-                                                ))}
-                                            </Pie>
-                                            <RechartsTooltip contentStyle={{ backgroundColor: '#000', borderRadius: '8px', border: 'none' }} />
-                                            <Legend verticalAlign="bottom" height={36} iconType="circle" />
-                                        </PieChart>
-                                    </ResponsiveContainer>
-                                </Box>
-                            ) : (
-                                <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                    <Typography color="text.secondary">Keine Daten verfügbar</Typography>
-                                </Box>
-                            )}
-                        </Paper>
+                    <Grid item xs={12} sm={8}>
+                        <motion.div variants={MOTION.listItem} style={{ height: '100%' }}>
+                            <Paper sx={{ p: 2, height: 350, ...DESIGN_TOKENS.glassCard }}>
+                                <Typography variant="subtitle2" gutterBottom align="center">Verlust-Ursachen</Typography>
+                                {forensics.reasonsData.length > 0 ? (
+                                    <Box sx={{height: 300, width: '100%'}}>
+                                        <ResponsiveContainer>
+                                            <PieChart>
+                                                <Pie
+                                                    data={forensics.reasonsData}
+                                                    cx="50%" cy="50%"
+                                                    innerRadius={60} outerRadius={80}
+                                                    paddingAngle={5}
+                                                    dataKey="value"
+                                                >
+                                                    {forensics.reasonsData.map((entry, index) => (
+                                                        <Cell key={`cell-${index}`} fill={entry.color} stroke="none" />
+                                                    ))}
+                                                </Pie>
+                                                <RechartsTooltip contentStyle={{ backgroundColor: '#000', borderRadius: '8px', border: 'none' }} />
+                                                <Legend verticalAlign="bottom" height={36} iconType="circle" />
+                                            </PieChart>
+                                        </ResponsiveContainer>
+                                    </Box>
+                                ) : (
+                                    <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                        <Typography color="text.secondary">Keine Daten verfügbar</Typography>
+                                    </Box>
+                                )}
+                            </Paper>
+                        </motion.div>
                     </Grid>
                 </Grid>
             </motion.div>
