@@ -17,7 +17,7 @@ import { getActivePunishment, clearPunishment, findPunishmentItem, registerOathR
 import { loadMonthlyBudget } from '../services/BudgetService';
 import { generateAndSaveInstruction, getLastInstruction } from '../services/InstructionService';
 import { checkForTZDTrigger, getTZDStatus } from '../services/TZDService';
-import { registerRelease as apiRegisterRelease } from '../services/ReleaseService'; // Direkt importieren für Overlay
+import { registerRelease as apiRegisterRelease } from '../services/ReleaseService'; 
 
 // Hooks
 import useSessionProgress from '../hooks/dashboard/useSessionProgress';
@@ -26,7 +26,7 @@ import { useKPIs } from '../hooks/useKPIs';
 
 // Components
 import TzdOverlay from '../components/dashboard/TzdOverlay'; 
-import ForcedReleaseOverlay from '../components/dashboard/ForcedReleaseOverlay'; // NEU
+import ForcedReleaseOverlay from '../components/dashboard/ForcedReleaseOverlay';
 import ProgressBar from '../components/dashboard/ProgressBar';
 import FemIndexBar from '../components/dashboard/FemIndexBar';
 import ActionButtons from '../components/dashboard/ActionButtons';
@@ -120,8 +120,11 @@ export default function Dashboard() {
   // Hook liefert jetzt Live-Daten via onSnapshot
   const { activeSessions, progress, loading: sessionsLoading, dailyTargetHours, startInstructionSession, stopSession, registerRelease: hookRegisterRelease } = useSessionProgress(currentUser, items);
   
-  const { femIndex, femIndexLoading, indexDetails } = useFemIndex(currentUser, items, activeSessions); 
+  // 1. ZUERST KPI BERECHNEN (holt intern Nocturnal History)
   const kpis = useKPIs(items, activeSessions); 
+
+  // 2. DANN FEM-INDEX BERECHNEN (nutzt externen Nocturnal Score)
+  const { femIndex, femIndexLoading, indexDetails } = useFemIndex(currentUser, items, activeSessions, kpis.coreMetrics.nocturnal); 
 
   const [now, setNow] = useState(Date.now());
   const [tzdActive, setTzdActive] = useState(false);
@@ -164,7 +167,7 @@ export default function Dashboard() {
   const [indexDialogOpen, setIndexDialogOpen] = useState(false);
   const [toast, setToast] = useState({ open: false, message: '', severity: 'success' });
   
-  // NEU: State für Forced Release Overlay (Die Falle)
+  // NEU: State für Forced Release Overlay
   const [forcedReleaseOpen, setForcedReleaseOpen] = useState(false);
   const [forcedReleaseMethod, setForcedReleaseMethod] = useState(null);
 
@@ -258,13 +261,11 @@ export default function Dashboard() {
     }
   }, [items.length, sessionsLoading, currentPeriod, currentInstruction, instructionStatus, isFreeDay]);
 
-  // NEU: CHECK FOR FORCED RELEASE (PERSISTENCE)
-  // Dieser Effekt prüft auch beim Neuladen, ob eine Falle aktiv ist
+  // Forced Release Persistence Check
   useEffect(() => {
       if (isInstructionActive && currentInstruction) {
           const fr = currentInstruction.forcedRelease;
           if (fr && fr.required === true && fr.executed === false) {
-              // FALLE ZUSCHNAPPEN LASSEN
               if (!forcedReleaseOpen) {
                   setForcedReleaseMethod(fr.method);
                   setForcedReleaseOpen(true);
@@ -283,7 +284,6 @@ export default function Dashboard() {
           setInstructionOpen(false); 
           showToast(`${targetItems.length} Sessions gestartet.`, "success");
           
-          // DIREKTE PRÜFUNG NACH DEM START: Ist Forced Release nötig?
           if (currentInstruction?.forcedRelease?.required && !currentInstruction.forcedRelease.executed) {
               setForcedReleaseMethod(currentInstruction.forcedRelease.method);
               setForcedReleaseOpen(true);
@@ -343,25 +343,13 @@ export default function Dashboard() {
   const handleSkipTimer = () => { if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current); setReleaseStep('decision'); };
   const handleReleaseDecision = async (outcome) => { try { await hookRegisterRelease(outcome, releaseIntensity); if (outcome === 'maintained') showToast("Disziplin bewiesen.", "success"); else showToast("Sessions beendet.", "warning"); } catch (e) { showToast("Fehler beim Release", "error"); } finally { setReleaseDialogOpen(false); if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current); } };
 
-  // NEU: Handler für Forced Release (Die Falle)
   const handleConfirmForcedRelease = async () => {
       try {
-          // 1. Release in Statistik eintragen
-          await apiRegisterRelease(currentUser.uid, 'maintained', 5); // Default 'maintained' als Erfolg
-          
-          // 2. Instruction updaten -> executed = true (damit Overlay nicht wiederkommt)
-          await updateDoc(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), {
-              "forcedRelease.executed": true
-          });
-          
-          // 3. UI Update
-          setCurrentInstruction(prev => ({
-              ...prev,
-              forcedRelease: { ...prev.forcedRelease, executed: true }
-          }));
+          await apiRegisterRelease(currentUser.uid, 'maintained', 5);
+          await updateDoc(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), { "forcedRelease.executed": true });
+          setCurrentInstruction(prev => ({ ...prev, forcedRelease: { ...prev.forcedRelease, executed: true } }));
           setForcedReleaseOpen(false);
           showToast("Protokoll erfüllt. Du darfst schlafen.", "success");
-
       } catch (e) {
           console.error("Error confirming forced release:", e);
           showToast("Fehler beim Speichern.", "error");
@@ -370,26 +358,13 @@ export default function Dashboard() {
 
   const handleRefuseForcedRelease = async () => {
       try {
-          // 1. Strafe registrieren
           await registerPunishment(currentUser.uid, "Forced Release Protocol verweigert", 60);
-          
-          // 2. Punishment Status aktualisieren (UI)
           const newStatus = await getActivePunishment(currentUser.uid);
           setPunishmentStatus(newStatus);
-          
-          // 3. Instruction updaten -> executed = true (damit Overlay verschwindet, aber Strafe bleibt)
-          await updateDoc(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), {
-              "forcedRelease.executed": true
-          });
-
-          // 4. UI Update
-          setCurrentInstruction(prev => ({
-            ...prev,
-            forcedRelease: { ...prev.forcedRelease, executed: true }
-          }));
+          await updateDoc(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), { "forcedRelease.executed": true });
+          setCurrentInstruction(prev => ({ ...prev, forcedRelease: { ...prev.forcedRelease, executed: true } }));
           setForcedReleaseOpen(false);
           showToast("Strafe registriert. Schlaf jetzt... wenn du kannst.", "warning");
-
       } catch (e) {
           console.error("Error refusing forced release:", e);
       }
@@ -420,7 +395,6 @@ export default function Dashboard() {
     <Box sx={DESIGN_TOKENS.bottomNavSpacer}>
       <TzdOverlay active={tzdActive} />
       
-      {/* NEU: FORCED RELEASE OVERLAY (Modal) */}
       <ForcedReleaseOverlay 
           open={forcedReleaseOpen}
           method={forcedReleaseMethod}

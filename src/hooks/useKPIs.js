@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, orderBy, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -37,6 +37,7 @@ export const useKPIs = (items = [], activeSessions = [], historySessions = []) =
     const { currentUser } = useAuth();
     const [releaseStats, setReleaseStats] = useState({ totalReleases: 0, keptOn: 0 });
     const [nowTrigger, setNowTrigger] = useState(Date.now());
+    const [internalHistory, setInternalHistory] = useState([]); // Eigener Speicher für Historie
 
     // Live-Listener für Release Stats
     useEffect(() => {
@@ -49,6 +50,26 @@ export const useKPIs = (items = [], activeSessions = [], historySessions = []) =
         return () => unsubscribe();
     }, [currentUser]);
 
+    // Lade Historie selbstständig, wenn sie nicht von außen (z.B. Dashboard) kommt
+    useEffect(() => {
+        if (!currentUser) return;
+        if (!historySessions || historySessions.length === 0) {
+            const loadHistory = async () => {
+                try {
+                    const q = query(collection(db, `users/${currentUser.uid}/sessions`), orderBy('startTime', 'desc'));
+                    const snap = await getDocs(q);
+                    const loaded = snap.docs.map(d => ({ 
+                        id: d.id, ...d.data(),
+                        startTime: safeDate(d.data().startTime),
+                        endTime: safeDate(d.data().endTime)
+                    }));
+                    setInternalHistory(loaded);
+                } catch(e) { console.error("KPI History Load Error", e); }
+            };
+            loadHistory();
+        }
+    }, [currentUser, historySessions]); // Re-run nur wenn historySessions sich ändert (z.B. beim Wechsel zu Stats)
+
     // Heartbeat
     useEffect(() => {
         const timer = setInterval(() => setNowTrigger(Date.now()), 60000);
@@ -57,7 +78,8 @@ export const useKPIs = (items = [], activeSessions = [], historySessions = []) =
 
     return useMemo(() => {
         const safeItems = Array.isArray(items) ? items : [];
-        const safeHistory = Array.isArray(historySessions) ? historySessions : [];
+        // Nutze übergebene Historie oder die intern geladene
+        const safeHistory = (historySessions && historySessions.length > 0) ? historySessions : internalHistory;
 
         // --- 1. BASIS DATEN ---
         const activeItems = safeItems.filter(i => i.status === 'active');
@@ -81,10 +103,50 @@ export const useKPIs = (items = [], activeSessions = [], historySessions = []) =
         const nylons = activeItems.filter(i => (i.mainCategory || '').toLowerCase().includes('nylon'));
         const enclosureVal = activeItems.length > 0 ? Math.round((nylons.length / activeItems.length) * 100) : 0;
 
-        // B. Nocturnal
-        const instructionSessions = safeHistory.filter(s => s.type === 'instruction');
-        const nightSessions = instructionSessions.filter(s => s.period && s.period.includes('night'));
-        const nocturnalVal = instructionSessions.length > 0 ? Math.round((nightSessions.length / instructionSessions.length) * 100) : 0;
+        // B. Nocturnal (SINGLE SOURCE OF TRUTH LOGIK)
+        // Startdatum: 15.12.2025, Uhrzeit: 03:00 Uhr
+        // Zählt Nächte, in denen zu diesem Zeitpunkt eine Session mit Nylons aktiv war.
+        const startDate = new Date(2025, 11, 15, 3, 0, 0); // Monat ist 0-basiert (11 = Dez)
+        const now = new Date();
+        let totalNights = 0;
+        let wornNights = 0;
+
+        if (now > startDate) {
+             let checkDate = new Date(startDate);
+             while (checkDate <= now) {
+                 totalNights++;
+                 const checkTime = checkDate.getTime();
+                 
+                 // Prüfen: War zu checkTime eine Session aktiv, die Nylons beinhaltet?
+                 const isWearingNylon = safeHistory.some(s => {
+                     const start = safeDate(s.startTime);
+                     const end = safeDate(s.endTime); // undefined/null = läuft noch
+                     
+                     if (!start) return false;
+                     
+                     // Zeit-Check: Überlappt 03:00 Uhr?
+                     if (checkTime >= start.getTime() && (!end || checkTime <= end.getTime())) {
+                         // Item-Check: Ist es Nylon?
+                         const sItemIds = s.itemIds || (s.itemId ? [s.itemId] : []);
+                         return sItemIds.some(id => {
+                             const item = safeItems.find(i => i.id === id);
+                             if (!item) return false;
+                             const cat = (item.mainCategory || '').toLowerCase();
+                             const sub = (item.subCategory || '').toLowerCase();
+                             return cat.includes('nylon') || sub.includes('strumpfhose') || sub.includes('stockings');
+                         });
+                     }
+                     return false;
+                 });
+
+                 if (isWearingNylon) wornNights++;
+                 
+                 // Einen Tag weiter
+                 checkDate.setDate(checkDate.getDate() + 1);
+             }
+        }
+        
+        const nocturnalVal = totalNights > 0 ? Math.round((wornNights / totalNights) * 100) : 0;
 
         // C. CPNH
         const totalMinutes = safeItems.reduce((acc, i) => acc + (i.totalMinutes || 0), 0);
@@ -92,6 +154,7 @@ export const useKPIs = (items = [], activeSessions = [], historySessions = []) =
         const cpnhVal = totalHours > 0 ? (totalCostAll / totalHours).toFixed(2) : "0.00";
 
         // D. Compliance Lag
+        const instructionSessions = safeHistory.filter(s => s.type === 'instruction');
         const sessionsWithLag = instructionSessions.filter(s => typeof s.complianceLagMinutes === 'number');
         const totalLag = sessionsWithLag.reduce((acc, s) => acc + s.complianceLagMinutes, 0);
         const complianceLagVal = sessionsWithLag.length > 0 ? Math.round(totalLag / sessionsWithLag.length) : 0;
@@ -99,7 +162,6 @@ export const useKPIs = (items = [], activeSessions = [], historySessions = []) =
         // E. Exposure (Fix: sichere Dates)
         let exposureVal = 0;
         if (safeHistory.length > 0) {
-            // Wir müssen sicherstellen, dass wir hier echte Dates haben, falls safeDate im Aufrufer nicht genutzt wurde
             const sortedStart = [...safeHistory].sort((a,b) => {
                  const dA = safeDate(a.startTime) || new Date(0);
                  const dB = safeDate(b.startTime) || new Date(0);
@@ -158,7 +220,8 @@ export const useKPIs = (items = [], activeSessions = [], historySessions = []) =
             ? (nylons.reduce((acc, i) => acc + (i.totalMinutes || 0), 0) / nylons.length) / 60 
             : 0;
         
-        const nocturnalScore = Math.min(nylonIndexVal * 10, 100); 
+        // WICHTIG: Hier verwenden wir jetzt den zentral berechneten nocturnalVal für die Anzeige
+        const nocturnalScore = nocturnalVal; 
 
         const totalReleases = releaseStats.totalReleases || 0;
         const keptReleases = releaseStats.keptOn || 0;
@@ -203,5 +266,5 @@ export const useKPIs = (items = [], activeSessions = [], historySessions = []) =
                 }
             }
         };
-    }, [items, releaseStats, activeSessions, historySessions, nowTrigger]); 
+    }, [items, releaseStats, activeSessions, historySessions, internalHistory, nowTrigger]); 
 };

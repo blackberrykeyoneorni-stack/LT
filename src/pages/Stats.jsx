@@ -25,18 +25,14 @@ import TimerIcon from '@mui/icons-material/Timer';
 import SecurityIcon from '@mui/icons-material/Security';
 
 // --- HELPER: Safe Date Parsing ---
-// Verhindert "h is not a function" Fehler bei Timestamps
 const safeDate = (val) => {
     if (!val) return null;
-    // Wenn es eine Firestore Timestamp Methode hat
     if (typeof val.toDate === 'function') {
         return val.toDate();
     }
-    // Wenn es bereits ein Date Objekt ist
     if (val instanceof Date) {
         return val;
     }
-    // Fallback: String oder Number Parsing
     const d = new Date(val);
     return isNaN(d.getTime()) ? null : d;
 };
@@ -114,11 +110,34 @@ export default function Statistics() {
                 val = mins / 60; 
             } 
             else if (metricId === 'nocturnal') {
-                const total = daySessions.length;
-                if (total > 0) {
-                    const night = daySessions.filter(s => s.period && s.period.includes('night')).length;
-                    val = (night / total) * 100;
-                }
+                // NEU: TREND LOGIK ENTSPRICHT SINGLE SOURCE OF TRUTH (03:00 Uhr Check)
+                // Wir prüfen für diesen spezifischen Tag 'd', ob um 03:00 Uhr Nylons getragen wurden.
+                const checkTime = new Date(d);
+                checkTime.setHours(3, 0, 0, 0);
+                const checkTs = checkTime.getTime();
+
+                const isWorn = sessions.some(s => {
+                     const start = s.startTime; // Ist bereits safeDate durch Loading oben
+                     const end = s.endTime; 
+                     
+                     if (!start) return false;
+                     // Zeit-Check
+                     if (checkTs >= start.getTime() && (!end || checkTs <= end.getTime())) {
+                         // Item-Check (Nylons)
+                         const sItemIds = s.itemIds || (s.itemId ? [s.itemId] : []);
+                         return sItemIds.some(id => {
+                             const item = items.find(i => i.id === id);
+                             if (!item) return false;
+                             const cat = (item.mainCategory || '').toLowerCase();
+                             const sub = (item.subCategory || '').toLowerCase();
+                             return cat.includes('nylon') || sub.includes('strumpfhose') || sub.includes('stockings');
+                         });
+                     }
+                     return false;
+                });
+                
+                // Binärer Wert für den Tag: 100% (Ja) oder 0% (Nein)
+                val = isWorn ? 100 : 0;
             }
             else if (metricId === 'resistance') {
                 val = daySessions.filter(s => s.type === 'punishment').length;
@@ -233,7 +252,6 @@ export default function Statistics() {
 
                 <Grid container spacing={2} sx={{ mb: 4 }}>
                     {metrics.map((m) => (
-                        // FIX: component={motion.div} entfernt und Animation direkt auf Card Container angewendet
                         <Grid item xs={6} sm={3} key={m.id}>
                             <motion.div variants={MOTION.listItem} style={{ height: '100%' }}>
                                 <Card 
