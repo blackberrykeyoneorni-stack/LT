@@ -5,7 +5,7 @@ import {
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useItems } from '../contexts/ItemContext';
-import { getAllSuspensions } from '../services/SuspensionService'; // NEU: Import
+import { getAllSuspensions } from '../services/SuspensionService'; 
 
 // UI & THEME
 import { 
@@ -13,8 +13,7 @@ import {
     ToggleButton, ToggleButtonGroup, Chip,
     Stack, Dialog, DialogTitle, DialogContent, DialogActions,
     Button, List, ListItem, ListItemText, Divider,
-    TextField, FormControl, InputLabel, Select, MenuItem,
-    useTheme
+    TextField, FormControl, InputLabel, Select, MenuItem
 } from '@mui/material';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DESIGN_TOKENS, PALETTE } from '../theme/obsidianDesign';
@@ -27,8 +26,7 @@ import ViewListIcon from '@mui/icons-material/ViewList';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import EventIcon from '@mui/icons-material/Event';
-import InfoIcon from '@mui/icons-material/Info';
-import BlockIcon from '@mui/icons-material/Block'; // NEU: Icon für Ausfall
+import BlockIcon from '@mui/icons-material/Block'; 
 
 // --- HILFSFUNKTIONEN ---
 
@@ -57,12 +55,10 @@ const formatDuration = (totalMinutes) => {
     return `${h}h ${m < 10 ? '0'+m : m}m`;
 };
 
-// NEU: Helper um zu prüfen, ob ein Datum in einer Suspension liegt
 const getSuspensionForDate = (date, suspensions) => {
     if (!suspensions || suspensions.length === 0) return null;
-    // Zeitanteile für Vergleich nullen
     const checkDate = new Date(date);
-    checkDate.setHours(12, 0, 0, 0); // Mittag um Zeitzonenprobleme zu minimieren
+    checkDate.setHours(12, 0, 0, 0); 
 
     return suspensions.find(s => {
         const start = new Date(s.startDate);
@@ -102,16 +98,15 @@ const calculateEffectiveMinutes = (sessions) => {
     return Math.floor(totalMs / 60000);
 };
 
-// --- DATA HOOK (ERWEITERT) ---
+// --- DATA HOOK ---
 const useCalendarData = (currentUser, items) => {
     const [sessions, setSessions] = useState([]);
-    const [suspensions, setSuspensions] = useState([]); // NEU: State für Ausfallzeiten
+    const [suspensions, setSuspensions] = useState([]); 
     const [loading, setLoading] = useState(true);
 
     const fetchData = async () => {
         setLoading(true);
         try {
-            // 1. Sessions laden
             const q = query(collection(db, `users/${currentUser.uid}/sessions`));
             const snap = await getDocs(q);
             
@@ -142,7 +137,6 @@ const useCalendarData = (currentUser, items) => {
             loadedSessions.sort((a, b) => a.date - b.date);
             setSessions(loadedSessions);
 
-            // 2. Suspensions laden (NEU)
             const loadedSuspensions = await getAllSuspensions(currentUser.uid);
             setSuspensions(loadedSuspensions);
 
@@ -202,7 +196,7 @@ const PlanSessionDialog = ({ open, onClose, date, items, onSave }) => {
                         >
                             {items.filter(i => i.status === 'active').map(item => (
                                 <MenuItem key={item.id} value={item.id}>
-                                    {item.name || item.brand} <Typography component="span" variant="caption" color="text.secondary" sx={{ml: 1}}>(ID: {item.id})</Typography>
+                                    {item.name || item.brand} <Typography component="span" variant="caption" color="text.secondary" sx={{ml: 1}}>({item.customId || item.id})</Typography>
                                 </MenuItem>
                             ))}
                         </Select>
@@ -236,14 +230,39 @@ const PlanSessionDialog = ({ open, onClose, date, items, onSave }) => {
     );
 };
 
-// 2. Detail-Dialog (ERWEITERT um Suspension Info)
+// 2. Detail-Dialog (Optimiert: Grouping & Colors)
 const DayDetailDialog = ({ open, onClose, date, sessions, suspensions, onOpenPlan }) => {
     if (!date) return null;
 
-    const daySessions = sessions.filter(s => isSameDay(s.date, date));
-    daySessions.sort((a, b) => a.date - b.date);
+    const rawDaySessions = sessions.filter(s => isSameDay(s.date, date));
+    rawDaySessions.sort((a, b) => a.date - b.date);
     
-    // Prüfen auf Suspension
+    // Grouping Logik: Fasse Sessions zusammen, die innerhalb von 60 Sekunden starten und den gleichen Typ haben
+    const groupedSessions = useMemo(() => {
+        const groups = [];
+        rawDaySessions.forEach(session => {
+            const existing = groups.find(g => 
+                Math.abs(g.date - session.date) < 60000 && 
+                g.type === session.type
+            );
+            if (existing) {
+                // Item hinzufügen, falls noch nicht vorhanden
+                session.items.forEach(item => {
+                    if (!existing.items.find(i => i.id === item.id)) {
+                        existing.items.push(item);
+                    }
+                });
+                // Dauer nehmen wir vom längsten oder ersten (hier: einfach beibehalten)
+            } else {
+                groups.push({
+                    ...session,
+                    items: [...session.items] // Clone items array
+                });
+            }
+        });
+        return groups;
+    }, [rawDaySessions]);
+
     const activeSuspension = getSuspensionForDate(date, suspensions);
 
     return (
@@ -253,7 +272,6 @@ const DayDetailDialog = ({ open, onClose, date, sessions, suspensions, onOpenPla
                     <Typography variant="h6">{date.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' })}</Typography>
                     <Typography variant="caption" color="text.secondary">Tagesprotokoll</Typography>
                 </Box>
-                {/* Plus-Button nur anzeigen, wenn KEINE Suspension aktiv ist */}
                 {!activeSuspension && (
                     <IconButton onClick={onOpenPlan} sx={{ color: PALETTE.primary.main }}>
                         <AddCircleOutlineIcon />
@@ -262,7 +280,6 @@ const DayDetailDialog = ({ open, onClose, date, sessions, suspensions, onOpenPla
             </DialogTitle>
             
             <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
-                {/* NEU: Suspension Hinweis */}
                 {activeSuspension && (
                     <Paper sx={{ 
                         p: 2, mb: 3, 
@@ -283,7 +300,7 @@ const DayDetailDialog = ({ open, onClose, date, sessions, suspensions, onOpenPla
                     </Paper>
                 )}
 
-                {daySessions.length === 0 ? (
+                {groupedSessions.length === 0 ? (
                     !activeSuspension && (
                         <Box sx={{ py: 4, textAlign: 'center', opacity: 0.5 }}>
                             <EventIcon sx={{ fontSize: 40, mb: 1 }} />
@@ -292,8 +309,8 @@ const DayDetailDialog = ({ open, onClose, date, sessions, suspensions, onOpenPla
                     )
                 ) : (
                     <List>
-                        {daySessions.map((session, index) => (
-                            <React.Fragment key={session.id}>
+                        {groupedSessions.map((session, index) => (
+                            <React.Fragment key={session.id + index}>
                                 {index > 0 && <Divider sx={{ borderColor: 'rgba(255,255,255,0.1)' }} />}
                                 <ListItem alignItems="flex-start" sx={{ px: 0, py: 2 }}>
                                     <Box sx={{ mr: 2, mt: 0.5, display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 60 }}>
@@ -321,8 +338,9 @@ const DayDetailDialog = ({ open, onClose, date, sessions, suspensions, onOpenPla
                                                     <Box key={item.id} sx={{ bgcolor: 'rgba(255,255,255,0.05)', p: 1, borderRadius: 1 }}>
                                                         <Typography variant="body2" color="text.primary">{item.name || item.brand}</Typography>
                                                         <Box sx={{ display: 'flex', gap: 2, mt: 0.5 }}>
+                                                            {/* HIER: Custom ID anzeigen statt technischer ID */}
                                                             <Typography variant="caption" color="text.secondary">
-                                                                ID: {item.id}
+                                                                ID: {item.customId || item.id}
                                                             </Typography>
                                                             <Typography variant="caption" color="text.secondary">
                                                                 Sub: {item.subCategory || '-'}
@@ -346,13 +364,12 @@ const DayDetailDialog = ({ open, onClose, date, sessions, suspensions, onOpenPla
     );
 };
 
-// 3. Wochen-Zeile (ERWEITERT um Suspension Anzeige)
+// 3. Wochen-Zeile (Farben angepasst)
 const WeekDayRow = ({ date, sessions, suspensions, isToday, onClick }) => {
     const daySessions = sessions.filter(s => isSameDay(s.date, date));
     const nylonMinutes = calculateEffectiveMinutes(daySessions.filter(s => s.hasNylon));
     const lingerieMinutes = calculateEffectiveMinutes(daySessions.filter(s => s.hasLingerie));
     
-    // Check auf Suspension
     const activeSuspension = getSuspensionForDate(date, suspensions);
 
     const dayName = date.toLocaleDateString('de-DE', { weekday: 'short' }).toUpperCase();
@@ -367,7 +384,6 @@ const WeekDayRow = ({ date, sessions, suspensions, isToday, onClick }) => {
                 display: 'flex', alignItems: 'center', gap: 2,
                 ...DESIGN_TOKENS.glassCard,
                 borderLeft: isToday ? `4px solid ${PALETTE.primary.main}` : (activeSuspension ? `4px solid ${PALETTE.accents.gold}` : '1px solid rgba(255,255,255,0.1)'),
-                // Wenn Suspension, leicht einfärben
                 bgcolor: activeSuspension ? 'rgba(255, 215, 0, 0.03)' : undefined,
                 opacity: isFuture && !activeSuspension ? 0.6 : 1,
                 cursor: 'pointer',
@@ -385,7 +401,6 @@ const WeekDayRow = ({ date, sessions, suspensions, isToday, onClick }) => {
 
             <Box sx={{ flex: 1 }}>
                 {activeSuspension ? (
-                    // NEU: Anzeige für Ausfallzeit
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         <BlockIcon sx={{ fontSize: 18, color: PALETTE.accents.gold }} />
                         <Typography variant="body2" sx={{ color: PALETTE.accents.gold, fontWeight: 'bold', letterSpacing: 1 }}>
@@ -396,7 +411,6 @@ const WeekDayRow = ({ date, sessions, suspensions, isToday, onClick }) => {
                         </Typography>
                     </Box>
                 ) : (
-                    // Standard Anzeige (Nylon / Lingerie / Leer)
                     <>
                         {(nylonMinutes === 0 && lingerieMinutes === 0) ? (
                             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -426,13 +440,14 @@ const WeekDayRow = ({ date, sessions, suspensions, isToday, onClick }) => {
                                 {lingerieMinutes > 0 && (
                                     <Box sx={{ 
                                         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                                        bgcolor: `${PALETTE.accents.red}15`, 
+                                        // HIER: Wechsel auf BLAU für bessere Unterscheidung
+                                        bgcolor: `${PALETTE.accents.blue}15`, 
                                         borderRadius: 1, px: 1.5, py: 0.5,
-                                        border: `1px solid ${PALETTE.accents.red}44`
+                                        border: `1px solid ${PALETTE.accents.blue}44`
                                     }}>
-                                        <Typography variant="caption" sx={{ color: PALETTE.accents.red, fontWeight: 'bold' }}>DESSOUS</Typography>
+                                        <Typography variant="caption" sx={{ color: PALETTE.accents.blue, fontWeight: 'bold' }}>DESSOUS</Typography>
                                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                            <AccessTimeIcon sx={{ fontSize: 14, color: PALETTE.accents.red }} />
+                                            <AccessTimeIcon sx={{ fontSize: 14, color: PALETTE.accents.blue }} />
                                             <Typography variant="body2" sx={{ color: PALETTE.text.primary, fontWeight: 600 }}>
                                                 {formatDuration(lingerieMinutes)}
                                             </Typography>
@@ -448,13 +463,12 @@ const WeekDayRow = ({ date, sessions, suspensions, isToday, onClick }) => {
     );
 };
 
-// 4. Monats-Zelle (ERWEITERT um Suspension Dot)
+// 4. Monats-Zelle (Farben angepasst)
 const MonthDayCell = ({ date, sessions, suspensions, isToday, onClick }) => {
     const daySessions = sessions.filter(s => isSameDay(s.date, date));
     const hasNylon = daySessions.some(s => s.hasNylon);
     const hasLingerie = daySessions.some(s => s.hasLingerie);
     
-    // Check auf Suspension
     const activeSuspension = getSuspensionForDate(date, suspensions);
 
     return (
@@ -463,7 +477,7 @@ const MonthDayCell = ({ date, sessions, suspensions, isToday, onClick }) => {
             sx={{ 
                 height: 80, p: 0.5, 
                 display: 'flex', flexDirection: 'column', justifyContent: 'flex-start',
-                position: 'relative', // Für absolute Positionierung des Dots
+                position: 'relative', 
                 bgcolor: isToday ? 'rgba(255,255,255,0.08)' : (activeSuspension ? 'rgba(255, 215, 0, 0.05)' : 'rgba(255,255,255,0.02)'),
                 border: isToday ? `1px solid ${PALETTE.primary.main}` : (activeSuspension ? `1px solid ${PALETTE.accents.gold}44` : '1px solid rgba(255,255,255,0.05)'),
                 borderRadius: 1,
@@ -475,7 +489,6 @@ const MonthDayCell = ({ date, sessions, suspensions, isToday, onClick }) => {
                 <Typography variant="caption" sx={{ color: isToday ? PALETTE.primary.main : 'text.secondary', fontWeight: 'bold' }}>
                     {date.getDate()}
                 </Typography>
-                {/* NEU: Goldener Punkt für Suspension */}
                 {activeSuspension && (
                     <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: PALETTE.accents.gold }} />
                 )}
@@ -484,7 +497,8 @@ const MonthDayCell = ({ date, sessions, suspensions, isToday, onClick }) => {
             {(hasNylon || hasLingerie) && (
                 <Stack spacing={0.5} mt={1} sx={{ width: '100%', alignItems: 'center' }}>
                     {hasNylon && <Box sx={{ width: '80%', height: 4, borderRadius: 2, bgcolor: PALETTE.accents.purple }} />}
-                    {hasLingerie && <Box sx={{ width: '80%', height: 4, borderRadius: 2, bgcolor: PALETTE.accents.red }} />}
+                    {/* HIER: Wechsel auf BLAU */}
+                    {hasLingerie && <Box sx={{ width: '80%', height: 4, borderRadius: 2, bgcolor: PALETTE.accents.blue }} />}
                 </Stack>
             )}
         </Paper>
@@ -499,12 +513,10 @@ export default function Calendar() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [direction, setDirection] = useState(0);
   
-  // Dialog States
   const [detailOpen, setDetailOpen] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
   const [selectedDay, setSelectedDay] = useState(null);
 
-  // Hook lädt nun auch suspensions
   const { sessions, suspensions, refreshSessions } = useCalendarData(currentUser, items);
 
   const handleDayClick = (date) => {
@@ -576,16 +588,11 @@ export default function Calendar() {
     <Box sx={DESIGN_TOKENS.bottomNavSpacer}>
         <Container maxWidth="md" sx={{ pt: 2, pb: 4, minHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
             
-            {/* HEADER */}
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-                <Box>
-                    <Typography variant="h4" sx={{ ...DESIGN_TOKENS.textGradient, fontWeight: 'bold' }}>
-                        Kalender
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                        Zeit-Tracking & Planung
-                    </Typography>
-                </Box>
+            {/* HEADER (ANGEPASST AN DASHBOARD STYLE) */}
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, px: 2 }}>
+                <Typography variant="h4" sx={DESIGN_TOKENS.textGradient}>
+                    Kalender
+                </Typography>
                 
                 <ToggleButtonGroup 
                     value={view} 
@@ -635,7 +642,7 @@ export default function Calendar() {
                                         key={idx} 
                                         date={date} 
                                         sessions={sessions} 
-                                        suspensions={suspensions} // Pass down suspensions
+                                        suspensions={suspensions} 
                                         isToday={isSameDay(date, today)} 
                                         onClick={handleDayClick}
                                     />
@@ -659,7 +666,7 @@ export default function Calendar() {
                                             key={idx} 
                                             date={date} 
                                             sessions={sessions} 
-                                            suspensions={suspensions} // Pass down suspensions
+                                            suspensions={suspensions} 
                                             isToday={isSameDay(date, today)} 
                                             onClick={handleDayClick}
                                         />
@@ -677,7 +684,7 @@ export default function Calendar() {
                 onClose={() => setDetailOpen(false)} 
                 date={selectedDay} 
                 sessions={sessions}
-                suspensions={suspensions} // Pass down suspensions
+                suspensions={suspensions} 
                 onOpenPlan={() => { setDetailOpen(false); setPlanOpen(true); }}
             />
 
