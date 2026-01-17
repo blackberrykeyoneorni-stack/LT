@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
-  collection, query, getDocs, doc, updateDoc, serverTimestamp, 
+  collection, doc, updateDoc, serverTimestamp, 
   addDoc, arrayUnion, writeBatch, getDoc 
 } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -39,7 +39,7 @@ import { DESIGN_TOKENS, PALETTE, MOTION } from '../theme/obsidianDesign';
 import { 
     Box, Typography, Dialog, DialogTitle, DialogContent, DialogActions, 
     Snackbar, Alert, FormGroup, FormControlLabel, Checkbox, TextField, 
-    Button, Container, Paper, Chip, LinearProgress, Divider, IconButton
+    Button, Container, Paper, Chip, LinearProgress, Divider 
 } from '@mui/material';
 import { Icons } from '../theme/appIcons';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
@@ -50,7 +50,19 @@ import TimerIcon from '@mui/icons-material/Timer';
 import LinkOffIcon from '@mui/icons-material/LinkOff';
 import AnalyticsIcon from '@mui/icons-material/Analytics';
 
-// --- HILFSFUNKTIONEN & KONSTANTEN ---
+// --- WICHTIG: Wiederhergestellte Konstante ---
+const REFLECTION_TAGS = [
+    "Sicher / Geborgen", 
+    "Erregt", 
+    "Gedemütigt", 
+    "Exponiert / Öffentlich", 
+    "Feminin", 
+    "Besitztum (Owned)", 
+    "Unwürdig", 
+    "Stolz"
+];
+
+// --- HILFSFUNKTIONEN ---
 const getLocalISODate = (date) => { 
     const offset = date.getTimezoneOffset() * 60000;
     return new Date(date.getTime() - offset).toISOString().split('T')[0];
@@ -75,10 +87,7 @@ const checkIsHoliday = (date) => {
     return false;
 };
 
-// FIX: Konstante wiederhergestellt
-const REFLECTION_TAGS = ["Sicher / Geborgen", "Erregt", "Gedemütigt", "Exponiert / Öffentlich", "Feminin", "Besitztum (Owned)", "Unwürdig", "Stolz"];
-
-// --- SUB-KOMPONENTE: INDEX DETAIL ---
+// --- SUB-KOMPONENTE ---
 const IndexDetailDialog = ({ open, onClose, details }) => {
     if (!details) return null;
     const renderMetricRow = (label, value, color, icon) => (
@@ -113,6 +122,7 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const { startBindingScan, isScanning: isNfcScanning } = useNFCGlobal();
   
+  // Hook Nutzung: loadActiveSessions ist nun verfügbar
   const { activeSessions, progress, loading: sessionsLoading, dailyTargetHours, startInstructionSession, stopSession, registerRelease: hookRegisterRelease, loadActiveSessions } = useSessionProgress(currentUser, items);
   
   const { femIndex, femIndexLoading, indexDetails } = useFemIndex(currentUser, items, activeSessions); 
@@ -120,10 +130,10 @@ export default function Dashboard() {
 
   const [now, setNow] = useState(Date.now());
   const [tzdActive, setTzdActive] = useState(false);
-
-  // States
   const [activeSuspension, setActiveSuspension] = useState(null);
   const [loadingSuspension, setLoadingSuspension] = useState(true);
+  
+  // UI States
   const [instructionOpen, setInstructionOpen] = useState(false);
   const [currentInstruction, setCurrentInstruction] = useState(null);
   const [instructionStatus, setInstructionStatus] = useState('idle');
@@ -158,10 +168,9 @@ export default function Dashboard() {
   const releaseTimerInterval = useRef(null);
   const [indexDialogOpen, setIndexDialogOpen] = useState(false);
   const [toast, setToast] = useState({ open: false, message: '', severity: 'success' });
-  const [loading, setLoading] = useState(false);
-
-  const isNight = currentPeriod ? currentPeriod.includes('night') : false;
   
+  // Derived State
+  const isNight = currentPeriod ? currentPeriod.includes('night') : false;
   const isInstructionActive = activeSessions.some(s => s.type === 'instruction');
   const isPunishmentRunning = activeSessions.some(s => s.type === 'punishment');
   const isDailyGoalMet = progress.isDailyGoalMet;
@@ -169,7 +178,7 @@ export default function Dashboard() {
   const showToast = (message, severity = 'success') => setToast({ open: true, message, severity });
   const handleCloseToast = () => setToast({ ...toast, open: false });
 
-  // 1. Initial Load (User Related)
+  // 1. Initial Load
   useEffect(() => {
     if (!currentUser) return;
     const initLoad = async () => {
@@ -196,7 +205,7 @@ export default function Dashboard() {
     return () => clearInterval(timer);
   }, [currentUser]); 
 
-  // 2. Items Related Load (Punishment Item)
+  // 2. Punishment Item Load
   useEffect(() => {
       if (items.length > 0) {
           setPunishmentItem(findPunishmentItem(items));
@@ -224,11 +233,10 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, [currentUser, items, activeSessions, itemsLoading, tzdActive, isInstructionActive]);
 
-  // 4. Period & Instruction Generation
+  // 4. Instruction / Period
   useEffect(() => {
     const newPeriod = calculatePeriodId();
     if (newPeriod !== currentPeriod) setCurrentPeriod(newPeriod);
-    
     const d = new Date(now);
     const day = d.getDay();
     const isWeekend = (day === 0 || day === 6);
@@ -261,7 +269,7 @@ export default function Dashboard() {
     }
   }, [items.length, sessionsLoading, currentPeriod, currentInstruction, instructionStatus, isFreeDay]);
 
-  // Handlers
+  // HANDLERS
   const handleStartRequest = async (itemsToStart) => { 
       if (tzdActive) { showToast("ZUGRIFF VERWEIGERT: Zeitloses Diktat aktiv.", "error"); return; }
       const targetItems = itemsToStart || currentInstruction?.items;
@@ -270,7 +278,7 @@ export default function Dashboard() {
           await startInstructionSession(payload); 
           setInstructionOpen(false); 
           
-          await loadActiveSessions(); // FIX: Update sofort erzwingen
+          if (typeof loadActiveSessions === 'function') await loadActiveSessions();
           
           showToast(`${targetItems.length} Sessions gestartet.`, "success");
       }
@@ -295,7 +303,9 @@ export default function Dashboard() {
           await addDoc(collection(db,`users/${currentUser.uid}/sessions`),{ itemId:punishmentItem.id, itemIds:[punishmentItem.id], type:'punishment', startTime:serverTimestamp(), endTime:null }); 
           await updateDoc(doc(db,`users/${currentUser.uid}/status/punishment`),{active:true,deferred:false}); 
           setPunishmentStatus(await getActivePunishment(currentUser.uid)); 
-          await loadActiveSessions(); // FIX: Update List
+          
+          if (typeof loadActiveSessions === 'function') await loadActiveSessions();
+
           setPunishmentScanOpen(false); 
       } 
   };
@@ -312,21 +322,20 @@ export default function Dashboard() {
   
   const handleConfirmStopSession = async () => { 
       if (!sessionToStop) return; 
-      setLoading(true); 
+      // Loading State hier ggf. lokal oder global
       try { 
           await stopSession(sessionToStop, { feelings: selectedFeelings, note: reflectionNote }); 
           if(sessionToStop.type === 'punishment') { 
               await clearPunishment(currentUser.uid); 
               setPunishmentStatus({ active: false, deferred: false, reason: null, durationMinutes: 0 });
           } 
-          await loadActiveSessions(); // FIX: Sofortiges Update der Liste
-      } catch(e){ showToast("Fehler", "error"); } finally { setReflectionOpen(false); setSessionToStop(null); setLoading(false); } 
+          if (typeof loadActiveSessions === 'function') await loadActiveSessions();
+      } catch(e){ showToast("Fehler", "error"); } finally { setReflectionOpen(false); setSessionToStop(null); } 
   };
 
   const handleStartAudit = async () => { const auditItems = await initializeAudit(currentUser.uid, items); setPendingAuditItems(auditItems); setCurrentAuditIndex(0); setAuditOpen(true); };
   const handleConfirmAuditItem = async () => { await confirmAuditItem(currentUser.uid, pendingAuditItems[currentAuditIndex].id, currentCondition, currentLocationCorrect); showToast(`${pendingAuditItems[currentAuditIndex].name} geprüft`, "success"); if(currentAuditIndex<pendingAuditItems.length-1) setCurrentAuditIndex(prev=>prev+1); else { setAuditOpen(false); setAuditDue(false); showToast("Audit abgeschlossen", "success"); } };
 
-  // RELEASE LOGIC
   const handleOpenRelease = () => { setReleaseStep('confirm'); setReleaseTimer(600); setReleaseIntensity(3); setReleaseDialogOpen(true); };
   const handleStartReleaseTimer = () => { setReleaseStep('timer'); if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current); releaseTimerInterval.current = setInterval(() => { setReleaseTimer(prev => { if(prev <= 1) { clearInterval(releaseTimerInterval.current); setReleaseStep('decision'); return 0; } return prev - 1; }); }, 1000); };
   const handleSkipTimer = () => { if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current); setReleaseStep('decision'); };
@@ -334,7 +343,6 @@ export default function Dashboard() {
 
   if (loadingSuspension) return <Box sx={{ p: 4, textAlign: 'center' }}>System Check...</Box>;
 
-  // SUSPENSION VIEW
   if (activeSuspension) {
       return (
         <Box sx={DESIGN_TOKENS.bottomNavSpacer}>
@@ -354,7 +362,6 @@ export default function Dashboard() {
       );
   }
 
-  // --- NORMAL VIEW ---
   return (
     <Box sx={DESIGN_TOKENS.bottomNavSpacer}>
       <TzdOverlay active={tzdActive} />
