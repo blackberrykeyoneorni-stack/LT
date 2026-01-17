@@ -8,13 +8,13 @@ import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useItems } from '../contexts/ItemContext';
 import { useNFCGlobal } from '../contexts/NFCContext';
-import { motion } from 'framer-motion'; // HINZUGEFÜGT: Fix für ReferenceError
+import { motion } from 'framer-motion'; 
 
 // Services
 import { checkActiveSuspension } from '../services/SuspensionService';
 import { isAuditDue, initializeAudit, confirmAuditItem } from '../services/AuditService';
 import { getActivePunishment, clearPunishment, findPunishmentItem, registerOathRefusal } from '../services/PunishmentService';
-import { loadMonthlyBudget, calculatePurchasePriority } from '../services/BudgetService';
+import { loadMonthlyBudget } from '../services/BudgetService';
 import { generateAndSaveInstruction, getLastInstruction } from '../services/InstructionService';
 import { checkForTZDTrigger, getTZDStatus } from '../services/TZDService';
 
@@ -50,7 +50,7 @@ import TimerIcon from '@mui/icons-material/Timer';
 import LinkOffIcon from '@mui/icons-material/LinkOff';
 import AnalyticsIcon from '@mui/icons-material/Analytics';
 
-// --- HILFSFUNKTIONEN ---
+// --- HILFSFUNKTIONEN & KONSTANTEN ---
 const getLocalISODate = (date) => { 
     const offset = date.getTimezoneOffset() * 60000;
     return new Date(date.getTime() - offset).toISOString().split('T')[0];
@@ -75,6 +75,7 @@ const checkIsHoliday = (date) => {
     return false;
 };
 
+// FIX: Konstante wiederhergestellt
 const REFLECTION_TAGS = ["Sicher / Geborgen", "Erregt", "Gedemütigt", "Exponiert / Öffentlich", "Feminin", "Besitztum (Owned)", "Unwürdig", "Stolz"];
 
 // --- SUB-KOMPONENTE: INDEX DETAIL ---
@@ -146,7 +147,6 @@ export default function Dashboard() {
   const [punishmentScanMode, setPunishmentScanMode] = useState(null);
   const [monthlyBudget, setMonthlyBudget] = useState(0);
   const [currentSpent, setCurrentSpent] = useState(0); 
-  const [purchasePriority, setPurchasePriority] = useState([]);
   const [maxInstructionItems, setMaxInstructionItems] = useState(1);
   const [currentPeriod, setCurrentPeriod] = useState(calculatePeriodId());
   const [isFreeDay, setIsFreeDay] = useState(false);
@@ -158,19 +158,20 @@ export default function Dashboard() {
   const releaseTimerInterval = useRef(null);
   const [indexDialogOpen, setIndexDialogOpen] = useState(false);
   const [toast, setToast] = useState({ open: false, message: '', severity: 'success' });
+  const [loading, setLoading] = useState(false);
 
   const isNight = currentPeriod ? currentPeriod.includes('night') : false;
   
-  // LOGIK FIX: Nur echte Instruktionen blockieren den Button
   const isInstructionActive = activeSessions.some(s => s.type === 'instruction');
+  const isPunishmentRunning = activeSessions.some(s => s.type === 'punishment');
   const isDailyGoalMet = progress.isDailyGoalMet;
 
   const showToast = (message, severity = 'success') => setToast({ open: true, message, severity });
   const handleCloseToast = () => setToast({ ...toast, open: false });
 
-  // 1. Initale Loads
+  // 1. Initial Load (User Related)
   useEffect(() => {
-    if (!currentUser || itemsLoading) return;
+    if (!currentUser) return;
     const initLoad = async () => {
         try {
             const pSnap = await getDoc(doc(db, `users/${currentUser.uid}/settings/preferences`));
@@ -178,7 +179,6 @@ export default function Dashboard() {
 
             const statusData = await getActivePunishment(currentUser.uid);
             setPunishmentStatus(statusData || { active: false });
-            setPunishmentItem(findPunishmentItem(items));
             
             setAuditDue(await isAuditDue(currentUser.uid));
             setMonthlyBudget(await loadMonthlyBudget(currentUser.uid));
@@ -194,22 +194,26 @@ export default function Dashboard() {
     initLoad();
     const timer = setInterval(() => setNow(Date.now()), 60000);
     return () => clearInterval(timer);
-  }, [currentUser, items, itemsLoading]);
+  }, [currentUser]); 
 
-  // 2. TZD Check
+  // 2. Items Related Load (Punishment Item)
+  useEffect(() => {
+      if (items.length > 0) {
+          setPunishmentItem(findPunishmentItem(items));
+      }
+  }, [items]);
+
+  // 3. TZD Check
   useEffect(() => {
     let interval;
     const checkTZD = async () => {
         if (!currentUser || itemsLoading) return;
         const status = await getTZDStatus(currentUser.uid);
         
-        // Status Update
         if (status.isActive) { 
             if (!tzdActive) setTzdActive(true); 
         } else { 
             if (tzdActive) setTzdActive(false); 
-            // Nur triggern, wenn noch NICHT aktiv und eine Instruktion läuft
-            // Fix: Verhindert Trigger beim Starten der App wenn keine Session läuft
             if (isInstructionActive) {
                 const triggered = await checkForTZDTrigger(currentUser.uid, activeSessions, items);
                 if (triggered) setTzdActive(true);
@@ -220,7 +224,7 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, [currentUser, items, activeSessions, itemsLoading, tzdActive, isInstructionActive]);
 
-  // 3. Period & Instruction Generation
+  // 4. Period & Instruction Generation
   useEffect(() => {
     const newPeriod = calculatePeriodId();
     if (newPeriod !== currentPeriod) setCurrentPeriod(newPeriod);
@@ -245,7 +249,6 @@ export default function Dashboard() {
                     if (instr && instr.periodId === currentPeriod) {
                         setCurrentInstruction(instr);
                     } else if (!isFreeDay || currentPeriod.includes('night')) {
-                        // Nur generieren wenn kein freier Tag oder es ist Nacht
                         const newInstr = await generateAndSaveInstruction(currentUser.uid, items, activeSessions, currentPeriod);
                         setCurrentInstruction(newInstr);
                     } else {
@@ -266,6 +269,9 @@ export default function Dashboard() {
           const payload = { ...currentInstruction, items: targetItems };
           await startInstructionSession(payload); 
           setInstructionOpen(false); 
+          
+          await loadActiveSessions(); // FIX: Update sofort erzwingen
+          
           showToast(`${targetItems.length} Sessions gestartet.`, "success");
       }
   };
@@ -284,7 +290,15 @@ export default function Dashboard() {
   
   const handleDeclineOath = async () => { await registerOathRefusal(currentUser.uid); setPunishmentStatus(await getActivePunishment(currentUser.uid)); setInstructionOpen(false); setIsHoldingOath(false); };
 
-  const executeStartPunishment = async () => { if(punishmentItem) { await addDoc(collection(db,`users/${currentUser.uid}/sessions`),{ itemId:punishmentItem.id, itemIds:[punishmentItem.id], type:'punishment', startTime:serverTimestamp(), endTime:null }); await updateDoc(doc(db,`users/${currentUser.uid}/status/punishment`),{active:true,deferred:false}); setPunishmentStatus(await getActivePunishment(currentUser.uid)); loadActiveSessions(); setPunishmentScanOpen(false); } };
+  const executeStartPunishment = async () => { 
+      if(punishmentItem) { 
+          await addDoc(collection(db,`users/${currentUser.uid}/sessions`),{ itemId:punishmentItem.id, itemIds:[punishmentItem.id], type:'punishment', startTime:serverTimestamp(), endTime:null }); 
+          await updateDoc(doc(db,`users/${currentUser.uid}/status/punishment`),{active:true,deferred:false}); 
+          setPunishmentStatus(await getActivePunishment(currentUser.uid)); 
+          await loadActiveSessions(); // FIX: Update List
+          setPunishmentScanOpen(false); 
+      } 
+  };
   const handlePunishmentScanTrigger = () => { startBindingScan((scannedId) => { if (punishmentItem && (scannedId === punishmentItem.nfcTagId || scannedId === punishmentItem.customId || scannedId === punishmentItem.id)) { if (punishmentScanMode === 'start') executeStartPunishment(); else if (punishmentScanMode === 'stop') { setPunishmentScanOpen(false); setSelectedFeelings([]); setReflectionNote(''); setReflectionOpen(true); } } else { showToast("Falscher Tag!", "error"); } }); };
 
   const handleRequestStopSession = (session) => { 
@@ -305,6 +319,7 @@ export default function Dashboard() {
               await clearPunishment(currentUser.uid); 
               setPunishmentStatus({ active: false, deferred: false, reason: null, durationMinutes: 0 });
           } 
+          await loadActiveSessions(); // FIX: Sofortiges Update der Liste
       } catch(e){ showToast("Fehler", "error"); } finally { setReflectionOpen(false); setSessionToStop(null); setLoading(false); } 
   };
 
@@ -362,6 +377,7 @@ export default function Dashboard() {
 
             <ActionButtons 
                 punishmentStatus={punishmentStatus} 
+                punishmentRunning={isPunishmentRunning}
                 auditDue={auditDue}
                 isFreeDay={isFreeDay}
                 freeDayReason={freeDayReason}
@@ -383,7 +399,7 @@ export default function Dashboard() {
                 items={items}
                 punishmentStatus={punishmentStatus}
                 onNavigateItem={(id) => navigate(`/item/${id}`)}
-                onStopSession={stopSession}
+                onStopSession={handleRequestStopSession} 
                 onOpenRelease={handleOpenRelease}
             />
 

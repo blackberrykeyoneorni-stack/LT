@@ -8,18 +8,15 @@ import DarkModeIcon from '@mui/icons-material/DarkMode';
 import LightModeIcon from '@mui/icons-material/LightMode';
 import LockIcon from '@mui/icons-material/Lock';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import TimerIcon from '@mui/icons-material/Timer'; // Neu für laufende Strafe
+import TimerIcon from '@mui/icons-material/Timer'; 
 import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
 import { isPunishmentWindowOpen } from '../../services/PunishmentService';
 import { motion } from 'framer-motion'; 
 
-// Helper für Datums-Check
-const isPunishmentRunning = (status) => {
-    return status?.active && status?.startTime; // Wenn startTime existiert, läuft sie bereits
-};
-
 export default function ActionButtons({ 
-  punishmentStatus, auditDue, isFreeDay, freeDayReason, 
+  punishmentStatus, 
+  punishmentRunning, // NEU: Prop vom Dashboard
+  auditDue, isFreeDay, freeDayReason, 
   currentInstruction, currentPeriod, isHoldingOath, 
   isInstructionActive, isDailyGoalMet,
   onStartPunishment, onStartAudit, onOpenInstruction 
@@ -34,13 +31,10 @@ export default function ActionButtons({
   const blockSessionRunning = isInstructionActive;
   const blockGoalReached = isDailyGoalMet && !isNight;
 
-  // Status prüfen
-  const punishmentRunning = isPunishmentRunning(punishmentStatus);
-
   return (
     <Box sx={{ width: '100%' }}>
       
-      {/* 1. STRAFE (Wird jetzt immer angezeigt, wenn aktiv, aber blockiert nicht mehr den Rest) */}
+      {/* 1. STRAFE */}
       {punishmentStatus.active && punishmentWindowOpen && (
         <Box sx={{ mb: 3 }}>
             {punishmentRunning ? (
@@ -82,7 +76,7 @@ export default function ActionButtons({
         </Box>
       )}
 
-      {/* 2. AUFGESCHOBENE STRAFE (Info) */}
+      {/* 2. AUFGESCHOBENE STRAFE */}
       {punishmentStatus.deferred && (
         <Box sx={{ mb: 3 }}>
            <Alert severity="warning" variant="filled" sx={{ py: 2, justifyContent: 'center', fontWeight: 'bold', bgcolor: `${PALETTE.accents.gold}22`, color: PALETTE.accents.gold, border: `1px solid ${PALETTE.accents.gold}` }}>
@@ -107,7 +101,7 @@ export default function ActionButtons({
         </Box>
       )}
 
-      {/* 4. ANWEISUNG / FREI / GESPERRT (Jetzt immer erreichbar) */}
+      {/* 4. ANWEISUNG / FREI / GESPERRT */}
       {(() => {
           let label = isNight ? "NACHTANWEISUNG ÖFFNEN" : "TAGESANWEISUNG ÖFFNEN";
           let icon = isNight ? <DarkModeIcon /> : <LightModeIcon />;
