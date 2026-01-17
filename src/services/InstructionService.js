@@ -70,7 +70,7 @@ const checkTodayPlan = async (uid, allItems) => {
     }
 };
 
-// Lädt die letzte generierte Instruction (FEHLTE VORHER)
+// Lädt die letzte generierte Instruction
 export const getLastInstruction = async (uid) => {
     try {
         const docRef = doc(db, `users/${uid}/status/dailyInstruction`);
@@ -96,25 +96,23 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
         const weights = prefs.categoryWeights || {}; 
 
         // 2. CHECK: GIBT ES EINEN PLAN FÜR HEUTE?
-        // Wenn ja, überspringen wir die Zufallslogik komplett.
         const plannedItems = await checkTodayPlan(uid, items);
         
         if (plannedItems && plannedItems.length > 0) {
             console.log("InstructionService: Führe geplanten Plan aus.");
             
-            // Titel generieren: Subkategorien bevorzugen (z.B. "Strumpfhose & Slip")
             const titleNames = plannedItems.map(i => i.subCategory || i.name || 'Item').join(' & ');
 
-            // Sofortige Rückgabe des Plans als Anweisung
             const instructionData = {
                 periodId,
                 generatedAt: serverTimestamp(),
                 isAccepted: false,
-                isPlanned: true, // Markierung für UI (optional)
-                itemName: titleNames, // NEU: Für den Dialog-Titel
+                isPlanned: true, 
+                itemName: titleNames,
+                // Bei geplanten Items greift die Zufalls-Falle nicht (kann optional geändert werden)
+                forcedRelease: { required: false, executed: false, method: null },
                 items: plannedItems.map(i => ({
                     id: i.id,
-                    // NEU: Bevorzuge Subkategorie als Namen, Fallback auf Item-Name
                     name: i.subCategory || i.name || 'Unbenanntes Item', 
                     brand: i.brand || '',
                     img: i.imageUrl || (i.images && i.images[0]) || null,
@@ -125,12 +123,9 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
             return instructionData;
         }
 
-        // --- AB HIER: FALLBACK AUF ZUFALL (wenn kein Plan existiert) ---
+        // --- AB HIER: FALLBACK AUF ZUFALL ---
 
-        // 3. Filter für verfügbare Items
-        // FIX: activeSessions auf Array prüfen
         const safeActiveSessions = Array.isArray(activeSessions) ? activeSessions : [];
-        // Erweiterter Check: Falls activeSessions komplexere Struktur hat (itemIds Array)
         const allActiveIds = new Set();
         safeActiveSessions.forEach(s => {
             if (s.itemId) allActiveIds.add(s.itemId);
@@ -139,7 +134,6 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
 
         const futureBlockedIds = await getFutureBlockedItemIds(uid, restingHours);
         
-        // ANPASSUNG: Perioden-Check (Tag/Nacht)
         const isNightInstruction = periodId && periodId.includes('night');
 
         const availableItems = items.filter(i => {
@@ -149,17 +143,13 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
             
             if (i.mainCategory === 'Accessoires' && i.subCategory === 'Buttplug') return false;
             
-            // Ausschluss reservierter Items für ZUKÜNFTIGE Tage
             if (futureBlockedIds.includes(i.id)) return false;
 
-            // NEU: Tragezeitraum-Check (Tagestrageanweisung vs Nachttrageanweisung)
-            const itemPeriod = i.suitablePeriod || 'Beide'; // Fallback auf 'Beide', falls nicht gesetzt
+            const itemPeriod = i.suitablePeriod || 'Beide'; 
             
             if (isNightInstruction) {
-                // Es ist Nacht: Schließe Items aus, die NUR für den Tag sind
                 if (itemPeriod === 'Tag') return false;
             } else {
-                // Es ist Tag: Schließe Items aus, die NUR für die Nacht sind
                 if (itemPeriod === 'Nacht') return false;
             }
 
@@ -196,17 +186,36 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
 
         if (selectedItems.length === 0) return null;
 
-        // Titel generieren: Subkategorien bevorzugen
+        // --- NEU: FORCED RELEASE LOGIK (DIE FALLE) ---
+        let forcedRelease = { required: false, executed: false, method: null };
+        
+        if (isNightInstruction) {
+            // 15% Wahrscheinlichkeit
+            if (Math.random() < 0.15) {
+                const rMethod = Math.random();
+                let method = 'hand'; // 34%
+                if (rMethod >= 0.34 && rMethod < 0.67) method = 'toy_vaginal'; // 33%
+                else if (rMethod >= 0.67) method = 'toy_anal'; // 33%
+
+                forcedRelease = {
+                    required: true,
+                    executed: false,
+                    method: method
+                };
+                console.log("InstructionService: Forced Release Triggered!", method);
+            }
+        }
+
         const titleNames = selectedItems.map(i => i.subCategory || i.name || 'Item').join(' & ');
 
         const instructionData = {
             periodId,
             generatedAt: serverTimestamp(),
             isAccepted: false,
-            itemName: titleNames, // NEU: Für den Dialog-Titel
+            itemName: titleNames,
+            forcedRelease, // Speichern der Falle
             items: selectedItems.map(i => ({
                 id: i.id,
-                // NEU: Bevorzuge Subkategorie als Namen
                 name: i.subCategory || i.name || 'Unbenanntes Item',
                 brand: i.brand || '',
                 img: i.imageUrl || (i.images && i.images[0]) || null,
@@ -223,5 +232,4 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
     }
 };
 
-// ALIAS für Abwärtskompatibilität mit Dashboard.jsx
 export const generateDailyInstruction = generateAndSaveInstruction;

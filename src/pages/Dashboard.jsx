@@ -13,10 +13,11 @@ import { motion } from 'framer-motion';
 // Services
 import { checkActiveSuspension } from '../services/SuspensionService';
 import { isAuditDue, initializeAudit, confirmAuditItem } from '../services/AuditService';
-import { getActivePunishment, clearPunishment, findPunishmentItem, registerOathRefusal } from '../services/PunishmentService';
+import { getActivePunishment, clearPunishment, findPunishmentItem, registerOathRefusal, registerPunishment } from '../services/PunishmentService';
 import { loadMonthlyBudget } from '../services/BudgetService';
 import { generateAndSaveInstruction, getLastInstruction } from '../services/InstructionService';
 import { checkForTZDTrigger, getTZDStatus } from '../services/TZDService';
+import { registerRelease as apiRegisterRelease } from '../services/ReleaseService'; // Direkt importieren für Overlay
 
 // Hooks
 import useSessionProgress from '../hooks/dashboard/useSessionProgress';
@@ -25,6 +26,7 @@ import { useKPIs } from '../hooks/useKPIs';
 
 // Components
 import TzdOverlay from '../components/dashboard/TzdOverlay'; 
+import ForcedReleaseOverlay from '../components/dashboard/ForcedReleaseOverlay'; // NEU
 import ProgressBar from '../components/dashboard/ProgressBar';
 import FemIndexBar from '../components/dashboard/FemIndexBar';
 import ActionButtons from '../components/dashboard/ActionButtons';
@@ -162,6 +164,10 @@ export default function Dashboard() {
   const [indexDialogOpen, setIndexDialogOpen] = useState(false);
   const [toast, setToast] = useState({ open: false, message: '', severity: 'success' });
   
+  // NEU: State für Forced Release Overlay (Die Falle)
+  const [forcedReleaseOpen, setForcedReleaseOpen] = useState(false);
+  const [forcedReleaseMethod, setForcedReleaseMethod] = useState(null);
+
   // Derived State
   const isNight = currentPeriod ? currentPeriod.includes('night') : false;
   const isInstructionActive = activeSessions.some(s => s.type === 'instruction');
@@ -252,6 +258,21 @@ export default function Dashboard() {
     }
   }, [items.length, sessionsLoading, currentPeriod, currentInstruction, instructionStatus, isFreeDay]);
 
+  // NEU: CHECK FOR FORCED RELEASE (PERSISTENCE)
+  // Dieser Effekt prüft auch beim Neuladen, ob eine Falle aktiv ist
+  useEffect(() => {
+      if (isInstructionActive && currentInstruction) {
+          const fr = currentInstruction.forcedRelease;
+          if (fr && fr.required === true && fr.executed === false) {
+              // FALLE ZUSCHNAPPEN LASSEN
+              if (!forcedReleaseOpen) {
+                  setForcedReleaseMethod(fr.method);
+                  setForcedReleaseOpen(true);
+              }
+          }
+      }
+  }, [isInstructionActive, currentInstruction, forcedReleaseOpen]);
+
   // HANDLERS
   const handleStartRequest = async (itemsToStart) => { 
       if (tzdActive) { showToast("ZUGRIFF VERWEIGERT: Zeitloses Diktat aktiv.", "error"); return; }
@@ -261,6 +282,12 @@ export default function Dashboard() {
           await startInstructionSession(payload); 
           setInstructionOpen(false); 
           showToast(`${targetItems.length} Sessions gestartet.`, "success");
+          
+          // DIREKTE PRÜFUNG NACH DEM START: Ist Forced Release nötig?
+          if (currentInstruction?.forcedRelease?.required && !currentInstruction.forcedRelease.executed) {
+              setForcedReleaseMethod(currentInstruction.forcedRelease.method);
+              setForcedReleaseOpen(true);
+          }
       }
   };
 
@@ -316,6 +343,58 @@ export default function Dashboard() {
   const handleSkipTimer = () => { if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current); setReleaseStep('decision'); };
   const handleReleaseDecision = async (outcome) => { try { await hookRegisterRelease(outcome, releaseIntensity); if (outcome === 'maintained') showToast("Disziplin bewiesen.", "success"); else showToast("Sessions beendet.", "warning"); } catch (e) { showToast("Fehler beim Release", "error"); } finally { setReleaseDialogOpen(false); if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current); } };
 
+  // NEU: Handler für Forced Release (Die Falle)
+  const handleConfirmForcedRelease = async () => {
+      try {
+          // 1. Release in Statistik eintragen
+          await apiRegisterRelease(currentUser.uid, 'maintained', 5); // Default 'maintained' als Erfolg
+          
+          // 2. Instruction updaten -> executed = true (damit Overlay nicht wiederkommt)
+          await updateDoc(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), {
+              "forcedRelease.executed": true
+          });
+          
+          // 3. UI Update
+          setCurrentInstruction(prev => ({
+              ...prev,
+              forcedRelease: { ...prev.forcedRelease, executed: true }
+          }));
+          setForcedReleaseOpen(false);
+          showToast("Protokoll erfüllt. Du darfst schlafen.", "success");
+
+      } catch (e) {
+          console.error("Error confirming forced release:", e);
+          showToast("Fehler beim Speichern.", "error");
+      }
+  };
+
+  const handleRefuseForcedRelease = async () => {
+      try {
+          // 1. Strafe registrieren
+          await registerPunishment(currentUser.uid, "Forced Release Protocol verweigert", 60);
+          
+          // 2. Punishment Status aktualisieren (UI)
+          const newStatus = await getActivePunishment(currentUser.uid);
+          setPunishmentStatus(newStatus);
+          
+          // 3. Instruction updaten -> executed = true (damit Overlay verschwindet, aber Strafe bleibt)
+          await updateDoc(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), {
+              "forcedRelease.executed": true
+          });
+
+          // 4. UI Update
+          setCurrentInstruction(prev => ({
+            ...prev,
+            forcedRelease: { ...prev.forcedRelease, executed: true }
+          }));
+          setForcedReleaseOpen(false);
+          showToast("Strafe registriert. Schlaf jetzt... wenn du kannst.", "warning");
+
+      } catch (e) {
+          console.error("Error refusing forced release:", e);
+      }
+  };
+
   if (loadingSuspension) return <Box sx={{ p: 4, textAlign: 'center' }}>System Check...</Box>;
 
   if (activeSuspension) {
@@ -340,6 +419,15 @@ export default function Dashboard() {
   return (
     <Box sx={DESIGN_TOKENS.bottomNavSpacer}>
       <TzdOverlay active={tzdActive} />
+      
+      {/* NEU: FORCED RELEASE OVERLAY (Modal) */}
+      <ForcedReleaseOverlay 
+          open={forcedReleaseOpen}
+          method={forcedReleaseMethod}
+          onConfirm={handleConfirmForcedRelease}
+          onRefuse={handleRefuseForcedRelease}
+      />
+
       <Container maxWidth="md" sx={{ pt: 2, pb: 4 }}>
         <motion.div variants={MOTION.page} initial="initial" animate="animate" exit="exit">
             
