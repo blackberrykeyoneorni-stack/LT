@@ -346,13 +346,27 @@ export default function Dashboard() {
   const handleSkipTimer = () => { if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current); setReleaseStep('decision'); };
   const handleReleaseDecision = async (outcome) => { try { await hookRegisterRelease(outcome, releaseIntensity); if (outcome === 'maintained') showToast("Disziplin bewiesen.", "success"); else showToast("Sessions beendet.", "warning"); } catch (e) { showToast("Fehler beim Release", "error"); } finally { setReleaseDialogOpen(false); if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current); } };
 
-  const handleConfirmForcedRelease = async () => {
+  // UPDATE: Purity Roulette Integration
+  const handleConfirmForcedRelease = async (outcome) => {
+      // outcome ist 'clean' oder 'ruined' (oder undefined/null bei Fehler, dann clean fallback)
+      const safeOutcome = outcome || 'clean';
       try {
-          await apiRegisterRelease(currentUser.uid, 'maintained', 5);
+          // Speichere den Release mit Outcome
+          await apiRegisterRelease(currentUser.uid, 'maintained', 5, safeOutcome);
+          
+          // Markiere Instruction als executed
           await updateDoc(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), { "forcedRelease.executed": true });
+          
+          // State Update
           setCurrentInstruction(prev => ({ ...prev, forcedRelease: { ...prev.forcedRelease, executed: true } }));
           setForcedReleaseOpen(false);
-          showToast("Protokoll erfüllt. Du darfst schlafen.", "success");
+          
+          // Feedback je nach Schicksal
+          if (safeOutcome === 'clean') {
+              showToast("Brav. Sauber und gehorsam.", "success");
+          } else {
+              showToast("Schmutzig... aber gehorsam. Status gespeichert.", "warning");
+          }
       } catch (e) {
           console.error("Error confirming forced release:", e);
           showToast("Fehler beim Speichern.", "error");

@@ -1,43 +1,55 @@
 import { db } from '../firebase';
-import { doc, setDoc, increment, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, doc, updateDoc, increment, getDoc, setDoc } from 'firebase/firestore';
 
-/**
- * Registriert einen Release-Vorgang (Höhepunkt oder Verweigert).
- * Diese Funktion wird vom TZD-Overlay und dem Release-Dialog genutzt.
- * * @param {string} userId - Die UID des Nutzers
- * @param {string} outcome - Ergebnis ('maintained', 'ruined', 'cum_kept', 'tzd_force_end')
- * @param {number} intensity - Intensität (1-10)
- */
-export const registerRelease = async (userId, outcome, intensity) => {
-    if (!userId) {
-        console.warn("ReleaseService: User ID fehlt, speichere unter 'unknown'");
-        return; // Oder Fehler werfen, verhindert aber Absturz
-    }
-
-    // Statistiken aktualisieren
+// Speichert einen Release in der Historie und aktualisiert Statistiken
+// outcome: 'clean' (consumed), 'ruined' (textile), 'waste' (tissue/other - fallback)
+export const registerRelease = async (uid, resultType, intensity, outcome = 'clean') => {
     try {
-        const statsRef = doc(db, `users/${userId}/stats/releaseStats`);
-        
-        const isOrgasm = outcome !== 'maintained';
-        const keptOn = outcome === 'cum_kept';
+        // 1. Session Log Eintrag
+        await addDoc(collection(db, `users/${uid}/history`), {
+            type: 'release',
+            result: resultType, // 'maintained' or 'ruined' (session context)
+            outcome: outcome,   // 'clean' vs 'ruined' (physical context)
+            intensity: intensity,
+            timestamp: serverTimestamp()
+        });
 
-        await setDoc(statsRef, {
-            totalReleases: increment(isOrgasm ? 1 : 0),
-            keptOn: increment(keptOn ? 1 : 0),
-            lastRelease: serverTimestamp(),
-            lastOutcome: outcome
-        }, { merge: true });
+        // 2. Statistiken Update
+        const statsRef = doc(db, `users/${uid}/stats/releaseStats`);
+        const statsSnap = await getDoc(statsRef);
 
-        console.log(`Release registriert: ${outcome} für ${userId}`);
+        if (statsSnap.exists()) {
+            const updates = {
+                totalReleases: increment(1),
+                lastRelease: serverTimestamp()
+            };
+            
+            if (resultType === 'maintained') {
+                updates.keptOn = increment(1);
+            } else {
+                updates.failed = increment(1);
+            }
+
+            // Outcome Tracking
+            if (outcome === 'clean') updates.cleanReleases = increment(1);
+            if (outcome === 'ruined') updates.ruinedItems = increment(1);
+
+            await updateDoc(statsRef, updates);
+        } else {
+            // Initiale Erstellung falls nicht vorhanden
+            await setDoc(statsRef, {
+                totalReleases: 1,
+                keptOn: resultType === 'maintained' ? 1 : 0,
+                failed: resultType !== 'maintained' ? 1 : 0,
+                cleanReleases: outcome === 'clean' ? 1 : 0,
+                ruinedItems: outcome === 'ruined' ? 1 : 0,
+                lastRelease: serverTimestamp()
+            });
+        }
+
         return true;
     } catch (e) {
-        console.error("Fehler im ReleaseService:", e);
+        console.error("Error registering release:", e);
         throw e;
     }
 };
-
-// ALIAS: Für Abwärtskompatibilität
-export const registerReleaseSuccess = registerRelease;
-
-// ALIAS: Für useSessionProgress Hook (Fix für Build Error)
-export const checkReleaseOutcome = registerRelease;
