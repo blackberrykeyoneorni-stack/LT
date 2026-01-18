@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { collection, query, getDocs, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { useKPIs } from '../hooks/useKPIs'; // Single Source of Truth
+import { useKPIs } from '../hooks/useKPIs'; 
 import { 
     Box, Typography, Grid, Paper, Card, CardContent, CircularProgress, 
     Container, Dialog, DialogTitle, DialogContent, IconButton, Chip, Divider 
@@ -23,6 +23,7 @@ import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import PsychologyIcon from '@mui/icons-material/Psychology'; 
 import TimerIcon from '@mui/icons-material/Timer';
 import SecurityIcon from '@mui/icons-material/Security';
+import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty'; // NEU für Gap
 
 // --- HELPER: Safe Date Parsing ---
 const safeDate = (val) => {
@@ -35,6 +36,57 @@ const safeDate = (val) => {
     }
     const d = new Date(val);
     return isNaN(d.getTime()) ? null : d;
+};
+
+// Hilfsfunktion: Berechnet die effektiven Trage-Minuten (Union) für einen Tag (dupliziert aus useKPIs für Trend-Berechnung im Frontend)
+const calculateDailyNylonWearMinutes = (targetDate, sessions, items) => {
+    const startOfDay = new Date(targetDate);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(targetDate);
+    endOfDay.setHours(23, 59, 59, 999);
+    
+    const relevantSessions = sessions.filter(s => {
+        const sStart = safeDate(s.startTime);
+        const sEnd = safeDate(s.endTime); 
+        if (!sStart) return false;
+        if (sStart > endOfDay) return false;
+        if (sEnd && sEnd < startOfDay) return false;
+        
+        const sItemIds = s.itemIds || (s.itemId ? [s.itemId] : []);
+        return sItemIds.some(id => {
+            const item = items.find(i => i.id === id);
+            if (!item) return false;
+            const cat = (item.mainCategory || '').toLowerCase();
+            const sub = (item.subCategory || '').toLowerCase();
+            return cat.includes('nylon') || sub.includes('strumpfhose') || sub.includes('stockings');
+        });
+    });
+
+    const intervals = relevantSessions.map(s => {
+        const sStart = safeDate(s.startTime);
+        const sEnd = safeDate(s.endTime) || new Date(); 
+        const start = Math.max(sStart.getTime(), startOfDay.getTime());
+        const end = Math.min(sEnd.getTime(), endOfDay.getTime());
+        return { start, end };
+    }).filter(i => i.end > i.start);
+
+    if (intervals.length === 0) return 0;
+
+    intervals.sort((a, b) => a.start - b.start);
+    const merged = [];
+    let current = intervals[0];
+    for (let i = 1; i < intervals.length; i++) {
+        if (intervals[i].start < current.end) {
+            current.end = Math.max(current.end, intervals[i].end);
+        } else {
+            merged.push(current);
+            current = intervals[i];
+        }
+    }
+    merged.push(current);
+
+    const totalMs = merged.reduce((acc, i) => acc + (i.end - i.start), 0);
+    return Math.floor(totalMs / 60000);
 };
 
 export default function Statistics() {
@@ -110,20 +162,17 @@ export default function Statistics() {
                 val = mins / 60; 
             } 
             else if (metricId === 'nocturnal') {
-                // NEU: TREND LOGIK ENTSPRICHT SINGLE SOURCE OF TRUTH (03:00 Uhr Check)
-                // Wir prüfen für diesen spezifischen Tag 'd', ob um 03:00 Uhr Nylons getragen wurden.
                 const checkTime = new Date(d);
                 checkTime.setHours(3, 0, 0, 0);
                 const checkTs = checkTime.getTime();
 
                 const isWorn = sessions.some(s => {
-                     const start = s.startTime; // Ist bereits safeDate durch Loading oben
+                     const start = s.startTime; 
                      const end = s.endTime; 
                      
                      if (!start) return false;
                      // Zeit-Check
                      if (checkTs >= start.getTime() && (!end || checkTs <= end.getTime())) {
-                         // Item-Check (Nylons)
                          const sItemIds = s.itemIds || (s.itemId ? [s.itemId] : []);
                          return sItemIds.some(id => {
                              const item = items.find(i => i.id === id);
@@ -135,9 +184,14 @@ export default function Statistics() {
                      }
                      return false;
                 });
-                
-                // Binärer Wert für den Tag: 100% (Ja) oder 0% (Nein)
                 val = isWorn ? 100 : 0;
+            }
+            else if (metricId === 'nylonGap') { // NEU: Gap Trend
+                // 1440 Min - Effektive Tragezeit (Union) in Minuten
+                const wornMins = calculateDailyNylonWearMinutes(d, sessions, items);
+                const gapMins = 1440 - wornMins;
+                // Trend Anzeige in Stunden (dezimal)
+                val = Math.max(0, gapMins) / 60;
             }
             else if (metricId === 'resistance') {
                 val = daySessions.filter(s => s.type === 'punishment').length;
@@ -191,7 +245,7 @@ export default function Statistics() {
     };
 
     const handleCardClick = (metricId, title) => { 
-        if (['exposure', 'nocturnal', 'resistance', 'enclosure', 'compliance', 'voluntarism', 'endurance'].includes(metricId)) {
+        if (['exposure', 'nocturnal', 'nylonGap', 'resistance', 'enclosure', 'compliance', 'voluntarism', 'endurance'].includes(metricId)) {
             calculateTrend(metricId);
             setSelectedMetric({id: metricId, title}); 
         } else {
@@ -222,6 +276,7 @@ export default function Statistics() {
     const getUnit = (metricId) => {
         if (metricId === 'exposure') return ' h'; 
         if (metricId === 'endurance') return ' h';
+        if (metricId === 'nylonGap') return ' h'; // Trend Einheit
         if (metricId === 'nocturnal') return ' %';
         if (metricId === 'compliance') return ' m';
         return '';
@@ -232,6 +287,8 @@ export default function Statistics() {
     const metrics = [
         { id: 'enclosure', title: 'Enclosure', val: `${coreMetrics.enclosure}%`, sub: 'Nylon-Quote', icon: Icons.Layers, color: PALETTE.accents.pink },
         { id: 'nocturnal', title: 'Nocturnal', val: `${coreMetrics.nocturnal}%`, sub: 'Nacht-Quote', icon: Icons.Night, color: PALETTE.accents.purple },
+        // NEUE KACHEL
+        { id: 'nylonGap', title: 'Nylon Gap', val: coreMetrics.nylonGap, sub: 'Ø Lücke/Tag', icon: HourglassEmptyIcon, color: '#00e5ff' }, // Cyan Signalfarbe
         { id: 'cpnh', title: 'CPNH', val: `${coreMetrics.cpnh}€`, sub: 'Cost/Hour', icon: TrendingUpIcon, color: PALETTE.accents.green },
         { id: 'compliance', title: 'Compliance Lag', val: `${coreMetrics.complianceLag}m`, sub: 'Ø Verzögerung', icon: TimerIcon, color: PALETTE.accents.red },
         { id: 'exposure', title: 'Exposure', val: `${coreMetrics.exposure}%`, sub: 'Tragezeit-Ratio', icon: AccessTimeIcon, color: PALETTE.primary.main },
@@ -343,8 +400,8 @@ export default function Statistics() {
                             <AreaChart data={trendData}>
                                 <defs>
                                     <linearGradient id="colorVal" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor={PALETTE.accents.pink} stopOpacity={0.8}/>
-                                        <stop offset="95%" stopColor={PALETTE.accents.pink} stopOpacity={0}/>
+                                        <stop offset="5%" stopColor={selectedMetric?.id === 'nylonGap' ? '#00e5ff' : PALETTE.accents.pink} stopOpacity={0.8}/>
+                                        <stop offset="95%" stopColor={selectedMetric?.id === 'nylonGap' ? '#00e5ff' : PALETTE.accents.pink} stopOpacity={0}/>
                                     </linearGradient>
                                 </defs>
                                 <CartesianGrid strokeDasharray="3 3" stroke={CHART_THEME.grid.line.stroke} vertical={false} />
@@ -373,7 +430,7 @@ export default function Statistics() {
                                 <Area 
                                     type="monotone" 
                                     dataKey="value" 
-                                    stroke={PALETTE.accents.pink} 
+                                    stroke={selectedMetric?.id === 'nylonGap' ? '#00e5ff' : PALETTE.accents.pink} 
                                     fillOpacity={1} 
                                     fill="url(#colorVal)" 
                                     animationDuration={1000} 

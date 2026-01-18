@@ -33,6 +33,66 @@ const calculateGapScore = (items, currentSessions) => {
     return (remaining / 36) * 100;
 };
 
+// Hilfsfunktion: Berechnet die effektiven Trage-Minuten (Nylons) für einen spezifischen Tag (Union der Zeitintervalle)
+const calculateDailyNylonWearMinutes = (targetDate, sessions, items) => {
+    const startOfDay = new Date(targetDate);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(targetDate);
+    endOfDay.setHours(23, 59, 59, 999);
+    
+    // 1. Relevante Sessions filtern (Überlappung mit Tag + Nylon Inhalt)
+    const relevantSessions = sessions.filter(s => {
+        const sStart = safeDate(s.startTime);
+        const sEnd = safeDate(s.endTime); // null/undefined bedeutet aktiv
+        
+        if (!sStart) return false;
+        if (sStart > endOfDay) return false;
+        if (sEnd && sEnd < startOfDay) return false;
+        
+        // Item Check
+        const sItemIds = s.itemIds || (s.itemId ? [s.itemId] : []);
+        return sItemIds.some(id => {
+            const item = items.find(i => i.id === id);
+            if (!item) return false;
+            const cat = (item.mainCategory || '').toLowerCase();
+            const sub = (item.subCategory || '').toLowerCase();
+            return cat.includes('nylon') || sub.includes('strumpfhose') || sub.includes('stockings');
+        });
+    });
+
+    // 2. Intervalle bilden & auf Tagesgrenzen beschneiden
+    const intervals = relevantSessions.map(s => {
+        const sStart = safeDate(s.startTime);
+        const sEnd = safeDate(s.endTime) || new Date(); // Wenn aktiv, bis "jetzt" (wird durch min(endOfDay) gecappt)
+        
+        const start = Math.max(sStart.getTime(), startOfDay.getTime());
+        const end = Math.min(sEnd.getTime(), endOfDay.getTime());
+        
+        return { start, end };
+    }).filter(i => i.end > i.start);
+
+    if (intervals.length === 0) return 0;
+
+    // 3. Intervalle verschmelzen (Union)
+    intervals.sort((a, b) => a.start - b.start);
+    const merged = [];
+    let current = intervals[0];
+
+    for (let i = 1; i < intervals.length; i++) {
+        if (intervals[i].start < current.end) {
+            current.end = Math.max(current.end, intervals[i].end);
+        } else {
+            merged.push(current);
+            current = intervals[i];
+        }
+    }
+    merged.push(current);
+
+    // 4. Summe berechnen
+    const totalMs = merged.reduce((acc, i) => acc + (i.end - i.start), 0);
+    return Math.floor(totalMs / 60000);
+};
+
 export const useKPIs = (items = [], activeSessions = [], historySessions = []) => {
     const { currentUser } = useAuth();
     const [releaseStats, setReleaseStats] = useState({ totalReleases: 0, keptOn: 0 });
@@ -68,7 +128,7 @@ export const useKPIs = (items = [], activeSessions = [], historySessions = []) =
             };
             loadHistory();
         }
-    }, [currentUser, historySessions]); // Re-run nur wenn historySessions sich ändert (z.B. beim Wechsel zu Stats)
+    }, [currentUser, historySessions]);
 
     // Heartbeat
     useEffect(() => {
@@ -78,7 +138,6 @@ export const useKPIs = (items = [], activeSessions = [], historySessions = []) =
 
     return useMemo(() => {
         const safeItems = Array.isArray(items) ? items : [];
-        // Nutze übergebene Historie oder die intern geladene
         const safeHistory = (historySessions && historySessions.length > 0) ? historySessions : internalHistory;
 
         // --- 1. BASIS DATEN ---
@@ -92,7 +151,6 @@ export const useKPIs = (items = [], activeSessions = [], historySessions = []) =
         const totalValue = activeItems.reduce((acc, i) => acc + (parseFloat(i.cost) || 0), 0);
         const totalCostAll = safeItems.reduce((acc, i) => acc + (parseFloat(i.cost) || 0), 0);
         
-        // CPW Berechnung
         const totalWears = safeItems.reduce((acc, i) => acc + (i.wearCount || 0), 0);
         const avgCPWVal = totalWears > 0 ? (totalCostAll / totalWears) : 0;
 
@@ -103,30 +161,24 @@ export const useKPIs = (items = [], activeSessions = [], historySessions = []) =
         const nylons = activeItems.filter(i => (i.mainCategory || '').toLowerCase().includes('nylon'));
         const enclosureVal = activeItems.length > 0 ? Math.round((nylons.length / activeItems.length) * 100) : 0;
 
-        // B. Nocturnal (SINGLE SOURCE OF TRUTH LOGIK)
-        // Startdatum: 15.12.2025, Uhrzeit: 03:00 Uhr
-        // Zählt Nächte, in denen zu diesem Zeitpunkt eine Session mit Nylons aktiv war.
-        const startDate = new Date(2025, 11, 15, 3, 0, 0); // Monat ist 0-basiert (11 = Dez)
+        // B. Nocturnal (Single Source of Truth: 15.12.2025, 03:00 Uhr Check)
+        const startDateMetric = new Date(2025, 11, 15, 3, 0, 0); 
         const now = new Date();
         let totalNights = 0;
         let wornNights = 0;
 
-        if (now > startDate) {
-             let checkDate = new Date(startDate);
+        if (now > startDateMetric) {
+             let checkDate = new Date(startDateMetric);
              while (checkDate <= now) {
                  totalNights++;
                  const checkTime = checkDate.getTime();
                  
-                 // Prüfen: War zu checkTime eine Session aktiv, die Nylons beinhaltet?
                  const isWearingNylon = safeHistory.some(s => {
                      const start = safeDate(s.startTime);
-                     const end = safeDate(s.endTime); // undefined/null = läuft noch
-                     
+                     const end = safeDate(s.endTime);
                      if (!start) return false;
-                     
                      // Zeit-Check: Überlappt 03:00 Uhr?
                      if (checkTime >= start.getTime() && (!end || checkTime <= end.getTime())) {
-                         // Item-Check: Ist es Nylon?
                          const sItemIds = s.itemIds || (s.itemId ? [s.itemId] : []);
                          return sItemIds.some(id => {
                              const item = safeItems.find(i => i.id === id);
@@ -140,26 +192,54 @@ export const useKPIs = (items = [], activeSessions = [], historySessions = []) =
                  });
 
                  if (isWearingNylon) wornNights++;
-                 
-                 // Einen Tag weiter
                  checkDate.setDate(checkDate.getDate() + 1);
              }
         }
-        
         const nocturnalVal = totalNights > 0 ? Math.round((wornNights / totalNights) * 100) : 0;
 
-        // C. CPNH
+        // C. Nylon Gap (NEU)
+        // Durchschnittliche tägliche Zeit OHNE Nylons seit 15.12.2025 (ohne heute)
+        const gapStartDate = new Date(2025, 11, 15); // 15. Dez 2025
+        let totalGapMinutesSum = 0;
+        let gapDaysCount = 0;
+        
+        // Wir iterieren bis GESTERN (heute exklusive)
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        yesterday.setHours(23, 59, 59, 999);
+
+        if (yesterday >= gapStartDate) {
+            let loopDate = new Date(gapStartDate);
+            while (loopDate <= yesterday) {
+                const wornMins = calculateDailyNylonWearMinutes(loopDate, safeHistory, safeItems);
+                const gapMins = 1440 - wornMins; // 24h * 60m = 1440
+                totalGapMinutesSum += Math.max(0, gapMins);
+                gapDaysCount++;
+                loopDate.setDate(loopDate.getDate() + 1);
+            }
+        }
+
+        let nylonGapFormatted = "0h 0m";
+        if (gapDaysCount > 0) {
+            const avgGapMins = totalGapMinutesSum / gapDaysCount;
+            const h = Math.floor(avgGapMins / 60);
+            const m = Math.round(avgGapMins % 60);
+            nylonGapFormatted = `${h}h ${m}m`;
+        }
+
+
+        // D. CPNH
         const totalMinutes = safeItems.reduce((acc, i) => acc + (i.totalMinutes || 0), 0);
         const totalHours = totalMinutes / 60;
         const cpnhVal = totalHours > 0 ? (totalCostAll / totalHours).toFixed(2) : "0.00";
 
-        // D. Compliance Lag
+        // E. Compliance Lag
         const instructionSessions = safeHistory.filter(s => s.type === 'instruction');
         const sessionsWithLag = instructionSessions.filter(s => typeof s.complianceLagMinutes === 'number');
         const totalLag = sessionsWithLag.reduce((acc, s) => acc + s.complianceLagMinutes, 0);
         const complianceLagVal = sessionsWithLag.length > 0 ? Math.round(totalLag / sessionsWithLag.length) : 0;
 
-        // E. Exposure (Fix: sichere Dates)
+        // F. Exposure
         let exposureVal = 0;
         if (safeHistory.length > 0) {
             const sortedStart = [...safeHistory].sort((a,b) => {
@@ -181,23 +261,23 @@ export const useKPIs = (items = [], activeSessions = [], historySessions = []) =
             exposureVal = totalTimeSinceStart > 0 ? Math.round((totalSessionDuration / totalTimeSinceStart) * 100) : 0;
         }
 
-        // F. Resistance
+        // G. Resistance
         const punishmentCount = safeHistory.filter(s => s.type === 'punishment').length;
         const resistanceVal = safeHistory.length > 0 ? Math.round((punishmentCount / safeHistory.length) * 100) : 0;
 
-        // G. Vibe
+        // H. Vibe
         const tags = {};
         safeItems.forEach(i => {
             if(Array.isArray(i.vibeTags)) i.vibeTags.forEach(t => tags[t] = (tags[t] || 0) + 1);
         });
         const vibeVal = Object.keys(tags).sort((a,b) => tags[b] - tags[a])[0] || "Neutral";
 
-        // H. Voluntarismus
+        // I. Voluntarismus
         const volSessions = safeHistory.filter(s => s.type === 'voluntary').length;
         const instrSessions = safeHistory.filter(s => s.type === 'instruction').length;
         const voluntarismVal = instrSessions === 0 ? (volSessions > 0 ? volSessions.toFixed(2) : "0.00") : (volSessions / instrSessions).toFixed(2);
 
-        // I. Endurance (Fix: sichere Dates)
+        // J. Endurance
         let totalEnduranceMs = 0;
         let enduranceCount = 0;
         safeHistory.forEach(s => {
@@ -215,12 +295,10 @@ export const useKPIs = (items = [], activeSessions = [], historySessions = []) =
 
         // --- 3. FEM-INDEX ---
         const gapScore = calculateGapScore(safeItems, activeSessions);
-        
         const nylonIndexVal = nylons.length > 0 
             ? (nylons.reduce((acc, i) => acc + (i.totalMinutes || 0), 0) / nylons.length) / 60 
             : 0;
         
-        // WICHTIG: Hier verwenden wir jetzt den zentral berechneten nocturnalVal für die Anzeige
         const nocturnalScore = nocturnalVal; 
 
         const totalReleases = releaseStats.totalReleases || 0;
@@ -248,6 +326,7 @@ export const useKPIs = (items = [], activeSessions = [], historySessions = []) =
             coreMetrics: {
                 enclosure: enclosureVal,
                 nocturnal: nocturnalVal,
+                nylonGap: nylonGapFormatted, // NEU
                 cpnh: cpnhVal,
                 complianceLag: complianceLagVal,
                 exposure: exposureVal,
