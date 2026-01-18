@@ -23,7 +23,7 @@ export default function ForcedReleaseOverlay({ open, method, onConfirm, onRefuse
     } else if (method === 'toy_anal') {
         methodLabel = "Toy (Anal)";
         MethodIcon = SmartToyIcon;
-        description = "benutze die Arschfotze deines Masturbators.";
+        description = "Benutze die Arschfotze deines Masturbators.";
     }
 
     return (

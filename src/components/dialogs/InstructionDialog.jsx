@@ -238,7 +238,7 @@ export default function InstructionDialog({
                     </Typography>
                     
                     <Typography variant="body1" color="text.secondary" sx={{ mt: 2, px: 2, fontStyle: 'italic' }}>
-                        "Es ist zwar Wochenende, aber wenn du willst, suche ich dir eine sexy, schwarze glänzende Strumpfhose raus, die du dann tragen wirst."
+                        Es ist zwar Wochenende, aber du stehst doch darauf, dir eine sexy, schwarze, glänzende Strumpfhose anzuziehen. Ich suche dir gerne eine raus.
                     </Typography>
 
                     <Box sx={{ mt: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
