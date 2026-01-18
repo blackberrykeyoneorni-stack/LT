@@ -44,8 +44,8 @@ import {
     Button, Container, Paper, Chip, LinearProgress, Divider 
 } from '@mui/material';
 import { Icons } from '../theme/appIcons';
-import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import LocalLaundryServiceIcon from '@mui/icons-material/LocalLaundryService';
+import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import NightlightRoundIcon from '@mui/icons-material/NightlightRound';
 import TimerIcon from '@mui/icons-material/Timer';
@@ -120,10 +120,10 @@ export default function Dashboard() {
   // Hook liefert jetzt Live-Daten via onSnapshot
   const { activeSessions, progress, loading: sessionsLoading, dailyTargetHours, startInstructionSession, stopSession, registerRelease: hookRegisterRelease } = useSessionProgress(currentUser, items);
   
-  // 1. ZUERST KPI BERECHNEN (holt intern Nocturnal History)
+  // 1. ZUERST KPI BERECHNEN
   const kpis = useKPIs(items, activeSessions); 
 
-  // 2. DANN FEM-INDEX BERECHNEN (nutzt externen Nocturnal Score)
+  // 2. DANN FEM-INDEX BERECHNEN
   const { femIndex, femIndexLoading, indexDetails } = useFemIndex(currentUser, items, activeSessions, kpis.coreMetrics.nocturnal); 
 
   const [now, setNow] = useState(Date.now());
@@ -176,6 +176,9 @@ export default function Dashboard() {
   const isInstructionActive = activeSessions.some(s => s.type === 'instruction');
   const isPunishmentRunning = activeSessions.some(s => s.type === 'punishment');
   const isDailyGoalMet = progress.isDailyGoalMet;
+  
+  // Berechnetes Budget für Chip
+  const budgetBalance = monthlyBudget - currentSpent;
 
   const showToast = (message, severity = 'success') => setToast({ open: true, message, severity });
   const handleCloseToast = () => setToast({ ...toast, open: false });
@@ -391,6 +394,8 @@ export default function Dashboard() {
       );
   }
 
+  const laundryCount = items.filter(i => i.status === 'washing').length;
+
   return (
     <Box sx={DESIGN_TOKENS.bottomNavSpacer}>
       <TzdOverlay active={tzdActive} />
@@ -409,6 +414,7 @@ export default function Dashboard() {
                 <Typography variant="h4" sx={DESIGN_TOKENS.textGradient}>Dashboard</Typography>
             </Box>
 
+            {/* 1. PROGRESS BAR */}
             <ProgressBar 
                 currentMinutes={progress.currentContinuousMinutes} 
                 targetHours={dailyTargetHours} 
@@ -416,9 +422,10 @@ export default function Dashboard() {
                 progressData={progress}
             />
 
+            {/* 2. FEM INDEX BAR */}
             <FemIndexBar femIndex={femIndex || 0} loading={femIndexLoading} />
-            <InfoTiles kpis={kpis} />
 
+            {/* 3. ACTION BUTTONS (HAUPTAKTIONEN) */}
             <ActionButtons 
                 punishmentStatus={punishmentStatus} 
                 punishmentRunning={isPunishmentRunning}
@@ -438,6 +445,7 @@ export default function Dashboard() {
                 onStartAudit={handleStartAudit}
             />
 
+            {/* 4. ACTIVE SESSIONS */}
             <ActiveSessionsList 
                 activeSessions={activeSessions} 
                 items={items}
@@ -447,25 +455,45 @@ export default function Dashboard() {
                 onOpenRelease={handleOpenRelease}
             />
 
+            <Divider sx={{ my: 4, borderColor: 'rgba(255,255,255,0.1)' }}>
+                <Typography variant="caption" color="text.secondary">METRIKEN & VERWALTUNG</Typography>
+            </Divider>
+
+            {/* 5. INFO TILES */}
+            <InfoTiles kpis={kpis} />
+
+            {/* 6. BUTTON FÜR WÄSCHE */}
             <Button
               variant="contained" fullWidth size="large" onClick={() => setLaundryOpen(true)}
               sx={{ 
-                  mb: 2, py: 2, bgcolor: 'rgba(255,255,255,0.05)', color: 'text.primary', boxShadow: 'none', justifyContent: 'space-between', px: 3,
+                  mb: 2, mt: 3, py: 2, bgcolor: 'rgba(255,255,255,0.05)', color: 'text.primary', boxShadow: 'none', justifyContent: 'space-between', px: 3,
                   '&:hover': { bgcolor: 'rgba(255,255,255,0.1)', boxShadow: 'none' }
               }}
             >
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}><LocalLaundryServiceIcon /><Typography variant="button" sx={{ fontWeight: 'bold' }}>Wäschekorb</Typography></Box>
-              <Chip label={`${items.filter(i => i.status === 'washing').length} Stk.`} size="small" sx={{ bgcolor: 'rgba(255,255,255,0.1)', color: 'text.primary', fontWeight: 'bold', borderRadius: '4px' }} />
+              <Chip label={`${laundryCount} Stk.`} size="small" sx={{ bgcolor: 'rgba(255,255,255,0.1)', color: 'text.primary', fontWeight: 'bold', borderRadius: '4px' }} />
             </Button>
 
+            {/* 7. BUTTON FÜR BUDGET */}
             <Button
               variant="contained" fullWidth size="large" onClick={() => navigate('/budget')}
               sx={{ 
-                  mb: 4, py: 2, bgcolor: 'rgba(255,255,255,0.05)', color: 'text.primary', boxShadow: 'none', justifyContent: 'flex-start', px: 3,
+                  mb: 4, py: 2, bgcolor: 'rgba(255,255,255,0.05)', color: 'text.primary', boxShadow: 'none', justifyContent: 'space-between', px: 3,
                   '&:hover': { bgcolor: 'rgba(255,255,255,0.1)', boxShadow: 'none' }
               }}
             >
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}><AccountBalanceWalletIcon /><Typography variant="button" sx={{ fontWeight: 'bold' }}>Budget & Finanzen</Typography></Box>
+              <Chip 
+                  label={`${budgetBalance.toFixed(2)}€`} 
+                  size="small" 
+                  sx={{ 
+                      bgcolor: budgetBalance < 0 ? `${PALETTE.accents.red}22` : 'rgba(255,255,255,0.1)', 
+                      color: budgetBalance < 0 ? PALETTE.accents.red : PALETTE.accents.green,
+                      fontWeight: 'bold', 
+                      borderRadius: '4px',
+                      border: `1px solid ${budgetBalance < 0 ? PALETTE.accents.red : 'transparent'}`
+                  }} 
+              />
             </Button>
 
         </motion.div>

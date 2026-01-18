@@ -93,7 +93,7 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
         
         const maxItems = prefs.maxInstructionItems || 1;
         const restingHours = prefs.nylonRestingHours || 24;
-        const weights = prefs.categoryWeights || {}; 
+        const userWeights = prefs.categoryWeights || {}; // Manuelle Gewichtungen aus Settings
 
         // 2. CHECK: GIBT ES EINEN PLAN FÜR HEUTE?
         const plannedItems = await checkTodayPlan(uid, items);
@@ -109,7 +109,6 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                 isAccepted: false,
                 isPlanned: true, 
                 itemName: titleNames,
-                // Bei geplanten Items greift die Zufalls-Falle nicht (kann optional geändert werden)
                 forcedRelease: { required: false, executed: false, method: null },
                 items: plannedItems.map(i => ({
                     id: i.id,
@@ -123,7 +122,7 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
             return instructionData;
         }
 
-        // --- AB HIER: FALLBACK AUF ZUFALL ---
+        // --- AB HIER: SMART HYBRID SELECTION (WURZEL-DÄMPFUNG) ---
 
         const safeActiveSessions = Array.isArray(activeSessions) ? activeSessions : [];
         const allActiveIds = new Set();
@@ -136,11 +135,13 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
         
         const isNightInstruction = periodId && periodId.includes('night');
 
+        // 3. Filterung der verfügbaren Items
         const availableItems = items.filter(i => {
             if (i.status !== 'active') return false; 
             if (allActiveIds.has(i.id)) return false; 
             if (isItemInRecovery(i, restingHours)) return false; 
             
+            // Bestehender Filter für Accessoires/Buttplugs wie gewünscht beibehalten
             if (i.mainCategory === 'Accessoires' && i.subCategory === 'Buttplug') return false;
             
             if (futureBlockedIds.includes(i.id)) return false;
@@ -158,35 +159,66 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
         
         if (availableItems.length === 0) return null;
 
-        // 4. GEWICHTETE AUSWAHL
-        let weightedPool = [];
+        // 4. SMART HYBRID SELECTOR
+        // Schritt A: Gruppieren nach Subkategorie (oder Mainkategorie als Fallback)
+        const groups = {};
         availableItems.forEach(item => {
-            const sub = item.subCategory || 'Sonstiges';
-            const main = item.mainCategory || 'Uncategorized';
-            const weight = parseInt(weights[sub] || weights[main] || 1);
-            for (let i = 0; i < weight; i++) {
-                weightedPool.push(item);
-            }
+            const key = item.subCategory || item.mainCategory || 'Sonstiges';
+            if (!groups[key]) groups[key] = [];
+            groups[key].push(item);
         });
 
+        let availableGroupKeys = Object.keys(groups);
         const selectedItems = [];
-        let candidatesPool = [...weightedPool];
 
         for (let k = 0; k < maxItems; k++) {
-            if (candidatesPool.length === 0) break;
-            const randomIndex = Math.floor(Math.random() * candidatesPool.length);
-            const selectedItem = candidatesPool[randomIndex];
-            selectedItems.push(selectedItem);
-            candidatesPool = candidatesPool.filter(candidate => {
-                if (candidate.id === selectedItem.id) return false;
-                if (selectedItem.subCategory && candidate.subCategory && candidate.subCategory === selectedItem.subCategory) return false;
-                return true;
+            if (availableGroupKeys.length === 0) break;
+
+            // Schritt B: Gewichtung berechnen (Wurzel-Dämpfung + User Settings)
+            let totalWeight = 0;
+            const weightedGroups = availableGroupKeys.map(key => {
+                const count = groups[key].length;
+                // Wurzel-Dämpfung: Große Sammlungen zählen mehr, aber nicht linear
+                const rootScore = Math.sqrt(count); 
+                // Manuelle Gewichtung aus Einstellungen (Multiplikator)
+                const manualWeight = parseInt(userWeights[key] || 1);
+                
+                const finalScore = rootScore * manualWeight;
+                totalWeight += finalScore;
+                
+                return { key, score: finalScore };
             });
+
+            // Schritt C: Roulette-Wheel Selection der Kategorie
+            let randomValue = Math.random() * totalWeight;
+            let chosenCategoryKey = null;
+            
+            for (const group of weightedGroups) {
+                randomValue -= group.score;
+                if (randomValue <= 0) {
+                    chosenCategoryKey = group.key;
+                    break;
+                }
+            }
+            // Fallback bei Rundungsfehlern
+            if (!chosenCategoryKey && weightedGroups.length > 0) {
+                chosenCategoryKey = weightedGroups[weightedGroups.length - 1].key;
+            }
+
+            // Schritt D: Zufälliges Item aus der gewählten Kategorie
+            const itemsInGroup = groups[chosenCategoryKey];
+            const randomItemIndex = Math.floor(Math.random() * itemsInGroup.length);
+            const selectedItem = itemsInGroup[randomItemIndex];
+
+            selectedItems.push(selectedItem);
+
+            // Kategorie entfernen, um Vielfalt zu erzwingen (wie bisherige Logik)
+            availableGroupKeys = availableGroupKeys.filter(key => key !== chosenCategoryKey);
         }
 
         if (selectedItems.length === 0) return null;
 
-        // --- NEU: FORCED RELEASE LOGIK (DIE FALLE) ---
+        // --- FORCED RELEASE LOGIK (DIE FALLE) - UNVERÄNDERT ---
         let forcedRelease = { required: false, executed: false, method: null };
         
         if (isNightInstruction) {
@@ -213,7 +245,7 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
             generatedAt: serverTimestamp(),
             isAccepted: false,
             itemName: titleNames,
-            forcedRelease, // Speichern der Falle
+            forcedRelease, 
             items: selectedItems.map(i => ({
                 id: i.id,
                 name: i.subCategory || i.name || 'Unbenanntes Item',
