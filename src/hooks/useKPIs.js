@@ -233,9 +233,11 @@ export const useKPIs = (items = [], activeSessions = [], historySessions = []) =
         const totalHours = totalMinutes / 60;
         const cpnhVal = totalHours > 0 ? (totalCostAll / totalHours).toFixed(2) : "0.00";
 
-        // E. Compliance Lag
+        // E. Compliance Lag (FIX: Filtert jetzt auch NaN aus)
         const instructionSessions = safeHistory.filter(s => s.type === 'instruction');
-        const sessionsWithLag = instructionSessions.filter(s => typeof s.complianceLagMinutes === 'number');
+        const sessionsWithLag = instructionSessions.filter(s => 
+            typeof s.complianceLagMinutes === 'number' && !isNaN(s.complianceLagMinutes)
+        );
         const totalLag = sessionsWithLag.reduce((acc, s) => acc + s.complianceLagMinutes, 0);
         const complianceLagVal = sessionsWithLag.length > 0 ? Math.round(totalLag / sessionsWithLag.length) : 0;
 
@@ -326,7 +328,7 @@ export const useKPIs = (items = [], activeSessions = [], historySessions = []) =
             coreMetrics: {
                 enclosure: enclosureVal,
                 nocturnal: nocturnalVal,
-                nylonGap: nylonGapFormatted, // NEU
+                nylonGap: nylonGapFormatted, 
                 cpnh: cpnhVal,
                 complianceLag: complianceLagVal,
                 exposure: exposureVal,

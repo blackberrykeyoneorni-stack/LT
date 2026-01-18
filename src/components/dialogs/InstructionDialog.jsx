@@ -16,6 +16,7 @@ import CelebrationIcon from '@mui/icons-material/Celebration';
 import NfcIcon from '@mui/icons-material/Nfc';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ReportProblemIcon from '@mui/icons-material/ReportProblem';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'; // Für die Verführung
 
 import { useNFCGlobal } from '../../contexts/NFCContext';
 import { useAuth } from '../../contexts/AuthContext';
@@ -35,6 +36,9 @@ export default function InstructionDialog({
   const { currentUser } = useAuth();
   const [verifiedItems, setVerifiedItems] = useState([]);
   
+  // Weekend Seduction State
+  const [suggestedItem, setSuggestedItem] = useState(null);
+
   // Hardcore Logic States
   const [hardcoreDialogOpen, setHardcoreDialogOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState(null);
@@ -57,6 +61,11 @@ export default function InstructionDialog({
     };
     loadPrefs();
   }, [currentUser, open]);
+
+  // Reset Suggestion on Open
+  useEffect(() => {
+      if (open) setSuggestedItem(null);
+  }, [open]);
 
   const triggerHardcoreCheck = (actionToExecute) => {
       if (!isNight || !hcPrefs.enabled) { actionToExecute(); return; }
@@ -96,6 +105,42 @@ export default function InstructionDialog({
       setPendingAction(null);
   };
 
+  // --- WEEKEND LOGIC ---
+  const handleWeekendAccept = () => {
+      // Filter nach Strumpfhosen
+      const candidates = items.filter(i => 
+          i.status === 'active' && 
+          (i.subCategory || '').toLowerCase().includes('strumpfhose')
+      );
+
+      if (candidates.length === 0) {
+          if (showToast) showToast("Keine passenden Items gefunden.", "warning");
+          return;
+      }
+
+      const randomItem = candidates[Math.floor(Math.random() * candidates.length)];
+      setSuggestedItem(randomItem);
+  };
+
+  const handleStartSuggestion = async () => {
+      if (!suggestedItem) return;
+      try {
+          // Start Voluntary Session
+          await startSessionService(currentUser.uid, {
+              itemId: suggestedItem.id,
+              items: [suggestedItem],
+              type: 'voluntary', // Wichtig: Voluntary statt Instruction
+              startedViaSuggestion: true
+          });
+          onClose();
+          if (showToast) showToast("Viel Spaß.", "success");
+      } catch (e) {
+          console.error("Start suggestion error:", e);
+          if (showToast) showToast("Fehler beim Starten.", "error");
+      }
+  };
+
+  // --- REGULAR INSTRUCTION LOGIC ---
   const handleVerifyItem = (fullItem) => {
       if (!fullItem) return;
       const executeVerify = () => {
@@ -131,33 +176,99 @@ export default function InstructionDialog({
   const remainingCount = totalItems - verifiedCount;
   const allDone = totalItems > 0 && remainingCount === 0;
 
-  // SICHERHEIT: Extrahiere nur das SX Objekt, vermeide direkte Objekt-Übergabe
-  // Falls DESIGN_TOKENS noch nicht geladen sind, nutze Fallback
   const dialogPaperStyle = DESIGN_TOKENS.dialog?.paper?.sx || { borderRadius: '28px', bgcolor: '#1e1e1e' };
 
   const renderContent = () => {
     if (loadingStatus === 'loading') {
         return <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 4 }}><CircularProgress color="primary" /></Box>;
     }
+    
+    // --- KEINE ANWEISUNG (ODER WOCHENENDE) ---
     if (!instruction) {
+        if (isFreeDay) {
+            // A) VORSCHLAG WURDE GENERIERT
+            if (suggestedItem) {
+                return (
+                    <Box sx={{ textAlign: 'center', py: 2 }}>
+                        <Typography variant="overline" color="primary" sx={{ letterSpacing: 2, display: 'block', mb: 2 }}>
+                            DEINE WAHL
+                        </Typography>
+                        
+                        <Avatar 
+                            src={suggestedItem.imageUrl || suggestedItem.image} 
+                            variant="rounded"
+                            sx={{ width: 150, height: 150, mx: 'auto', mb: 3, border: `1px solid ${PALETTE.primary.main}` }}
+                        />
+                        
+                        <Typography variant="h5" fontWeight="bold" gutterBottom>
+                            {suggestedItem.name || suggestedItem.brand}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                            {suggestedItem.customId} • {suggestedItem.subCategory}
+                        </Typography>
+
+                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                            <Button 
+                                variant="contained" 
+                                size="large" 
+                                fullWidth
+                                onClick={handleStartSuggestion}
+                                startIcon={<AutoAwesomeIcon />}
+                                sx={{ ...DESIGN_TOKENS.buttonGradient }}
+                            >
+                                Anziehen & Genießen
+                            </Button>
+                            <Button color="inherit" onClick={onClose}>Doch nicht (Schließen)</Button>
+                        </Box>
+                    </Box>
+                );
+            }
+
+            // B) WOCHENEND-PROMPT (LOCKRUF)
+            return (
+                <Box sx={{ textAlign: 'center', py: 3 }}>
+                    <Box sx={{ mb: 2 }}>
+                        {freeDayReason === 'Holiday' ? 
+                            <CelebrationIcon sx={{ fontSize: 50, color: PALETTE.accents.gold }} /> : 
+                            <WeekendIcon sx={{ fontSize: 50, color: PALETTE.accents.green }} />
+                        }
+                    </Box>
+                    <Typography variant="h6" gutterBottom>
+                        {freeDayReason === 'Holiday' ? 'Feiertag' : 'Wochenende'}
+                    </Typography>
+                    
+                    <Typography variant="body1" color="text.secondary" sx={{ mt: 2, px: 2, fontStyle: 'italic' }}>
+                        "Es ist zwar Wochenende, aber wenn du willst, suche ich dir eine sexy, schwarze glänzende Strumpfhose raus, die du dann tragen wirst."
+                    </Typography>
+
+                    <Box sx={{ mt: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        <Button 
+                            variant="outlined" 
+                            color="primary" 
+                            fullWidth
+                            onClick={handleWeekendAccept}
+                            startIcon={<AutoAwesomeIcon />}
+                        >
+                            Ja, bitte
+                        </Button>
+                        <Button color="inherit" onClick={onClose}>Nein, danke</Button>
+                    </Box>
+                </Box>
+            );
+        }
+
+        // C) NORMALER TAG OHNE ANWEISUNG
         return (
             <Box sx={{ textAlign: 'center', py: 3 }}>
-                {isFreeDay ? (
-                    <>
-                        <Box sx={{ mb: 2 }}>{freeDayReason === 'Holiday' ? <CelebrationIcon sx={{ fontSize: 50, color: PALETTE.accents.gold }} /> : <WeekendIcon sx={{ fontSize: 50, color: PALETTE.accents.green }} />}</Box>
-                        <Typography variant="h6">{freeDayReason === 'Holiday' ? 'Feiertag' : 'Wochenende'}</Typography>
-                    </>
-                ) : (
-                    <>
-                        <Box sx={{ bgcolor: 'rgba(255,255,255,0.05)', width: 60, height: 60, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', mx: 'auto', mb: 2 }}>
-                           {isNight ? <NightlightRoundIcon sx={{ color: PALETTE.accents.purple, fontSize: 30 }} /> : <WbSunnyIcon sx={{ color: PALETTE.accents.gold, fontSize: 30 }} />}
-                        </Box>
-                        <Typography variant="h6">Keine Anweisung</Typography>
-                    </>
-                )}
+                <Box sx={{ bgcolor: 'rgba(255,255,255,0.05)', width: 60, height: 60, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', mx: 'auto', mb: 2 }}>
+                   {isNight ? <NightlightRoundIcon sx={{ color: PALETTE.accents.purple, fontSize: 30 }} /> : <WbSunnyIcon sx={{ color: PALETTE.accents.gold, fontSize: 30 }} />}
+                </Box>
+                <Typography variant="h6">Keine Anweisung</Typography>
             </Box>
         );
     }
+
+    // --- ANWEISUNG VORHANDEN (ABER NICHT AKZEPTIERT) ---
     if (!instruction.isAccepted) {
         return (
             <Box sx={{ textAlign: 'center' }}>
@@ -184,7 +295,8 @@ export default function InstructionDialog({
             </Box>
         );
     }
-    // Accepted List
+    
+    // --- ANWEISUNG AKZEPTIERT (ITEM LISTE) ---
     if (instruction.isAccepted) {
         return (
             <List>
@@ -214,17 +326,19 @@ export default function InstructionDialog({
     }
   };
 
+  // Helper für Dialog Actions: Nur anzeigen, wenn NICHT im "Weekend Suggestion" Mode (da dieser eigene Buttons hat)
+  // oder wenn normale Instruction akzeptiert ist
+  const showStandardActions = !suggestedItem && (!instruction || instruction.isAccepted) && !(isFreeDay && !instruction);
+
   return (
     <>
       <Dialog 
           open={open} 
-          onClose={!instruction?.isAccepted ? onClose : undefined} 
+          onClose={!instruction?.isAccepted && !suggestedItem ? onClose : undefined} 
           maxWidth="xs" fullWidth 
-          // FIX: Wir übergeben ein explizites SX Objekt, keine Referenz auf das gesamte Token-Objekt
           PaperProps={{ sx: dialogPaperStyle }}
       >
         <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
-            {/* FIX: Animation erfolgt innerhalb des Dialogs, nicht AUF dem Dialog */}
             <motion.div 
                 initial={{ opacity: 0, scale: 0.95 }} 
                 animate={{ opacity: 1, scale: 1 }} 
@@ -233,7 +347,8 @@ export default function InstructionDialog({
                 {renderContent()}
             </motion.div>
         </DialogContent>
-        {(!instruction || instruction.isAccepted) && (
+        
+        {showStandardActions && (
             <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}>
                 {instruction?.isAccepted && (
                     <Button variant="contained" fullWidth onClick={handleSmartStart} color={allDone ? "success" : "primary"} sx={{ mb: 1, py: 1.5 }}>

@@ -48,7 +48,7 @@ export default function ActiveSessionsList({
                                 }} 
                                 onClick={() => onNavigateItem(item.id)}
                               >
-                                {item.name || item.brand}
+                                {item.name || item.brand} {item.subCategory ? `(${item.subCategory})` : ''}
                               </Typography>
                               <Stack direction="row" spacing={1} alignItems="center">
                                   <Chip 
