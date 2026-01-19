@@ -23,8 +23,6 @@ const SHAME_SENTENCES = [
     "Du brauchst keinen Lippenstift. Der Glanz auf deinen Beinen schreit jedem entgegen: 'Ich bin willig, nimm mich.'",
     "Spürst du, wie das Nylon deine Männlichkeit wegfrisst? Übrig bleibt nur weiches Fleisch für meine Unterhaltung.",
     "Es gibt keinen Weg zurück. Das Nylon hat sich in deine Seele gebrannt. Du gehörst jetzt der Straße... und mir.",
-
-    // Block 2: Endstation Sissy (NEU)
     "Damenwäscheträger. Das ist kein Fetisch, das ist deine Diagnose. Unheilbar, erbärmlich und für jeden sichtbar.",
     "Jeder Schritt in diesen Strümpfen treibt dir den Mann aus dem Leib. Übrig bleibt eine geile Sissy, die benutzt werden will.",
     "Dein Schwanz ist überflüssig. In dieser Wäsche zählt nur dein Arsch und wie gut er das Nylon präsentiert.",
@@ -38,7 +36,13 @@ const SHAME_SENTENCES = [
     "Du wirst geil, wenn man dich beleidigt? Natürlich tust du das. Das ist der Pawlowsche Reflex einer trainierten Sissy-Hure. Sabber für mich.",
     "Fühlst du den Zwickel in deiner Spalte? Er schneidet dir tief ins Fleisch: 'Ich bin ein wertloser Damenwäscheträger. Benutz mich.'",
     "Vergiss deine Träume. Deine Zukunft ist 15 DEN dünn und riecht nach Benutzung. Du wirst darin leben, bis du vergisst, dass du je ein Mann warst.",
-    "Wenn ich mit dir fertig bin, wirst du nicht mehr wissen, wo das Nylon aufhört und die Sissy-Hure anfängt. Du verschmilzt mit deiner Bestimmung."
+    "Wenn ich mit dir fertig bin, wirst du nicht mehr wissen, wo das Nylon aufhört und die Sissy-Hure anfängt. Du verschmilzt mit deiner Bestimmung",
+    "Spitze und Nylon auf der Haut ist kein Luxus. Es ist das Brandzeichen einer Sissy-Hure, die durch ihre Verfügbarkeit definiert ist.",
+    "Du bist am Ziel. Ganz unten, eine Nylon-Matratze. Spreiz deine Beine und warte, bis jemand seinen Druck bei dir ablässt.",
+    "Sperma und Verachtung. Das ist das einzige Gleitmittel, das eine Nylon-Sissy wie du verdient. Und du wirst winselnd darum betteln.",
+    "Dein Arschloch zuckt gierig gegen den Stoff. Das ist der einzige Impuls, der dir geblieben ist. Du bist eine offene Einladung zur Benutzung.",
+    "Ein Mann in Seidenstrümpfen und Damenwäsche ist lächerlich. Aber eine Sissy in Nylon ist nützlich. Sei nützlich, sei glatt, sei bereit.",
+    "Du liebst den Geruch von Sperma und Nylon? Natürlich tust du das. Es ist der Duft deiner wahren Bestimmung.",
 ];
 
 // Pulsierende Animation für das Icon
@@ -130,7 +134,7 @@ export default function TzdOverlay({ active }) {
     };
 
     const handleBailout = async () => {
-        if(!currentUser || !window.confirm("ACHTUNG: Dies gilt als Verweigerung und zieht sofortige Bestrafung nach sich. Fortfahren?")) return;
+        if(!currentUser || !window.confirm("ACHTUNG: Dies gilt als Verweigerung und zieht eine Bestrafung nach sich. Fortfahren?")) return;
         setLoading(true);
         await emergencyBailout(currentUser.uid);
         window.location.reload();
