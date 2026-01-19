@@ -2,8 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   collection, doc, updateDoc, serverTimestamp, 
-  addDoc, arrayUnion, writeBatch, getDoc 
-} from 'firebase/firestore';
+  addDoc, arrayUnion, writeBatch, getDoc, onSnapshot 
+} from 'firebase/firestore'; // onSnapshot hinzugefügt
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useItems } from '../contexts/ItemContext';
@@ -120,7 +120,7 @@ export default function Dashboard() {
   // Hook liefert jetzt Live-Daten via onSnapshot
   const { activeSessions, progress, loading: sessionsLoading, dailyTargetHours, startInstructionSession, stopSession, registerRelease: hookRegisterRelease } = useSessionProgress(currentUser, items);
   
-  // 1. ZUERST KPI BERECHNEN
+  // 1. ZUERST KPI BERECHNEN (Jetzt mit Cached Hook)
   const kpis = useKPIs(items, activeSessions); 
 
   // 2. DANN FEM-INDEX BERECHNEN
@@ -128,6 +128,8 @@ export default function Dashboard() {
 
   const [now, setNow] = useState(Date.now());
   const [tzdActive, setTzdActive] = useState(false);
+  const [tzdStartTime, setTzdStartTime] = useState(null); // NEU: Startzeit für Overlay
+  
   const [activeSuspension, setActiveSuspension] = useState(null);
   const [loadingSuspension, setLoadingSuspension] = useState(true);
   
@@ -167,7 +169,6 @@ export default function Dashboard() {
   const [indexDialogOpen, setIndexDialogOpen] = useState(false);
   const [toast, setToast] = useState({ open: false, message: '', severity: 'success' });
   
-  // NEU: State für Forced Release Overlay
   const [forcedReleaseOpen, setForcedReleaseOpen] = useState(false);
   const [forcedReleaseMethod, setForcedReleaseMethod] = useState(null);
 
@@ -177,7 +178,6 @@ export default function Dashboard() {
   const isPunishmentRunning = activeSessions.some(s => s.type === 'punishment');
   const isDailyGoalMet = progress.isDailyGoalMet;
   
-  // Berechnetes Budget für Chip
   const budgetBalance = monthlyBudget - currentSpent;
 
   const showToast = (message, severity = 'success') => setToast({ open: true, message, severity });
@@ -215,14 +215,31 @@ export default function Dashboard() {
       if (items.length > 0) setPunishmentItem(findPunishmentItem(items));
   }, [items]);
 
-  // 3. TZD Check
+  // 3. TZD Check (UPDATED: Übergibt Startzeit)
   useEffect(() => {
     let interval;
     const checkTZD = async () => {
         if (!currentUser || itemsLoading) return;
         const status = await getTZDStatus(currentUser.uid);
-        if (status.isActive) { if (!tzdActive) setTzdActive(true); } 
-        else { if (tzdActive) setTzdActive(false); if (isInstructionActive) { const triggered = await checkForTZDTrigger(currentUser.uid, activeSessions, items); if (triggered) setTzdActive(true); } }
+        if (status.isActive) { 
+            if (!tzdActive) {
+                setTzdActive(true);
+                // Startzeit speichern für Overlay
+                if(status.startTime) setTzdStartTime(status.startTime);
+            }
+        } else { 
+            if (tzdActive) {
+                setTzdActive(false); 
+                setTzdStartTime(null);
+            }
+            if (isInstructionActive) { 
+                const triggered = await checkForTZDTrigger(currentUser.uid, activeSessions, items); 
+                if (triggered) {
+                    setTzdActive(true);
+                    setTzdStartTime(new Date()); // Fallback für sofortigen Start
+                }
+            } 
+        }
     };
     if (currentUser && !itemsLoading) { checkTZD(); interval = setInterval(checkTZD, 300000); }
     return () => clearInterval(interval);
@@ -277,7 +294,7 @@ export default function Dashboard() {
       }
   }, [isInstructionActive, currentInstruction, forcedReleaseOpen]);
 
-  // HANDLERS
+  // HANDLERS (Unverändert, aber nötig für vollständige Datei)
   const handleStartRequest = async (itemsToStart) => { 
       if (tzdActive) { showToast("ZUGRIFF VERWEIGERT: Zeitloses Diktat aktiv.", "error"); return; }
       const targetItems = itemsToStart || currentInstruction?.items;
@@ -346,27 +363,15 @@ export default function Dashboard() {
   const handleSkipTimer = () => { if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current); setReleaseStep('decision'); };
   const handleReleaseDecision = async (outcome) => { try { await hookRegisterRelease(outcome, releaseIntensity); if (outcome === 'maintained') showToast("Disziplin bewiesen.", "success"); else showToast("Sessions beendet.", "warning"); } catch (e) { showToast("Fehler beim Release", "error"); } finally { setReleaseDialogOpen(false); if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current); } };
 
-  // UPDATE: Purity Roulette Integration
   const handleConfirmForcedRelease = async (outcome) => {
-      // outcome ist 'clean' oder 'ruined' (oder undefined/null bei Fehler, dann clean fallback)
       const safeOutcome = outcome || 'clean';
       try {
-          // Speichere den Release mit Outcome
           await apiRegisterRelease(currentUser.uid, 'maintained', 5, safeOutcome);
-          
-          // Markiere Instruction als executed
           await updateDoc(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), { "forcedRelease.executed": true });
-          
-          // State Update
           setCurrentInstruction(prev => ({ ...prev, forcedRelease: { ...prev.forcedRelease, executed: true } }));
           setForcedReleaseOpen(false);
-          
-          // Feedback je nach Schicksal
-          if (safeOutcome === 'clean') {
-              showToast("Brav. Sauber und gehorsam.", "success");
-          } else {
-              showToast("Schmutzig... aber gehorsam. Status gespeichert.", "warning");
-          }
+          if (safeOutcome === 'clean') showToast("Brav. Sauber und gehorsam.", "success");
+          else showToast("Schmutzig... aber gehorsam. Status gespeichert.", "warning");
       } catch (e) {
           console.error("Error confirming forced release:", e);
           showToast("Fehler beim Speichern.", "error");
@@ -412,7 +417,7 @@ export default function Dashboard() {
 
   return (
     <Box sx={DESIGN_TOKENS.bottomNavSpacer}>
-      <TzdOverlay active={tzdActive} />
+      <TzdOverlay active={tzdActive} startTime={tzdStartTime} />
       
       <ForcedReleaseOverlay 
           open={forcedReleaseOpen}
