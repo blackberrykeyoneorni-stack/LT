@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { 
   collection, doc, updateDoc, serverTimestamp, 
   addDoc, arrayUnion, writeBatch, getDoc, onSnapshot 
-} from 'firebase/firestore'; // onSnapshot hinzugefügt
+} from 'firebase/firestore'; 
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useItems } from '../contexts/ItemContext';
@@ -51,6 +51,7 @@ import NightlightRoundIcon from '@mui/icons-material/NightlightRound';
 import TimerIcon from '@mui/icons-material/Timer';
 import LinkOffIcon from '@mui/icons-material/LinkOff';
 import AnalyticsIcon from '@mui/icons-material/Analytics';
+import LockIcon from '@mui/icons-material/Lock'; // NEU: Für den Gatekeeper Screen
 
 const REFLECTION_TAGS = [
     "Sicher / Geborgen", "Erregt", "Gedemütigt", "Exponiert / Öffentlich", 
@@ -128,7 +129,8 @@ export default function Dashboard() {
 
   const [now, setNow] = useState(Date.now());
   const [tzdActive, setTzdActive] = useState(false);
-  const [tzdStartTime, setTzdStartTime] = useState(null); // NEU: Startzeit für Overlay
+  const [tzdStartTime, setTzdStartTime] = useState(null); 
+  const [isCheckingProtocol, setIsCheckingProtocol] = useState(true); // NEU: Gatekeeper State
   
   const [activeSuspension, setActiveSuspension] = useState(null);
   const [loadingSuspension, setLoadingSuspension] = useState(true);
@@ -215,33 +217,46 @@ export default function Dashboard() {
       if (items.length > 0) setPunishmentItem(findPunishmentItem(items));
   }, [items]);
 
-  // 3. TZD Check (UPDATED: Übergibt Startzeit)
+  // 3. TZD Check (UPDATED: MIT GATEKEEPER)
   useEffect(() => {
     let interval;
     const checkTZD = async () => {
         if (!currentUser || itemsLoading) return;
-        const status = await getTZDStatus(currentUser.uid);
-        if (status.isActive) { 
-            if (!tzdActive) {
-                setTzdActive(true);
-                // Startzeit speichern für Overlay
-                if(status.startTime) setTzdStartTime(status.startTime);
-            }
-        } else { 
-            if (tzdActive) {
-                setTzdActive(false); 
-                setTzdStartTime(null);
-            }
-            if (isInstructionActive) { 
-                const triggered = await checkForTZDTrigger(currentUser.uid, activeSessions, items); 
-                if (triggered) {
+        
+        try {
+            const status = await getTZDStatus(currentUser.uid);
+            
+            if (status.isActive) { 
+                if (!tzdActive) {
                     setTzdActive(true);
-                    setTzdStartTime(new Date()); // Fallback für sofortigen Start
+                    if(status.startTime) setTzdStartTime(status.startTime);
                 }
-            } 
+            } else { 
+                // Kein aktives TZD, prüfen ob eines getriggert werden soll
+                if (tzdActive) {
+                    setTzdActive(false); 
+                    setTzdStartTime(null);
+                }
+                if (isInstructionActive) { 
+                    const triggered = await checkForTZDTrigger(currentUser.uid, activeSessions, items); 
+                    if (triggered) {
+                        setTzdActive(true);
+                        setTzdStartTime(new Date()); // Fallback für sofortigen Start
+                    }
+                } 
+            }
+        } catch (e) {
+            console.error("TZD Check Error", e);
+        } finally {
+            // WICHTIG: Visier öffnen, sobald der Check durch ist
+            setIsCheckingProtocol(false);
         }
     };
-    if (currentUser && !itemsLoading) { checkTZD(); interval = setInterval(checkTZD, 300000); }
+
+    if (currentUser && !itemsLoading) { 
+        checkTZD(); 
+        interval = setInterval(checkTZD, 300000); 
+    }
     return () => clearInterval(interval);
   }, [currentUser, items, activeSessions, itemsLoading, tzdActive, isInstructionActive]);
 
@@ -294,7 +309,7 @@ export default function Dashboard() {
       }
   }, [isInstructionActive, currentInstruction, forcedReleaseOpen]);
 
-  // HANDLERS (Unverändert, aber nötig für vollständige Datei)
+  // HANDLERS
   const handleStartRequest = async (itemsToStart) => { 
       if (tzdActive) { showToast("ZUGRIFF VERWEIGERT: Zeitloses Diktat aktiv.", "error"); return; }
       const targetItems = itemsToStart || currentInstruction?.items;
@@ -393,6 +408,31 @@ export default function Dashboard() {
   };
 
   if (loadingSuspension) return <Box sx={{ p: 4, textAlign: 'center' }}>System Check...</Box>;
+
+  // --- NEU: GATEKEEPER BLOCK ---
+  // Wenn wir noch prüfen, zeigen wir NICHTS außer schwarz/Schloss
+  if (isCheckingProtocol) {
+      return (
+          <Box sx={{ 
+              height: '100vh', 
+              width: '100vw', 
+              bgcolor: '#000', 
+              display: 'flex', 
+              flexDirection: 'column',
+              alignItems: 'center', 
+              justifyContent: 'center',
+              zIndex: 9999,
+              position: 'fixed',
+              top: 0, left: 0
+          }}>
+              <LockIcon sx={{ fontSize: 60, color: PALETTE.accents.red, mb: 2 }} />
+              <Typography variant="overline" sx={{ color: 'text.secondary', letterSpacing: 4, animation: 'pulse 1.5s infinite' }}>
+                  SYSTEM INTERLOCK...
+              </Typography>
+          </Box>
+      );
+  }
+  // --- ENDE GATEKEEPER ---
 
   if (activeSuspension) {
       return (

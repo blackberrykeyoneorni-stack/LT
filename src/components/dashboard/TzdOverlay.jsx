@@ -13,11 +13,11 @@ import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
 
 // --- DIE WAHRHEITEN DER HERRIN ---
 const SHAME_SENTENCES = [
-    "Sieh an dir herab. Das Nylon auf deiner Haut ist kein Stoff. Es ist das Preisschild einer billigen Straßenschlampe.",
+    "Sieh an dir herab. Das Nylon auf deiner Haut ist kein Stoff. Es ist das Preisschild einer billigen Sissy-Nutte.",
     "Ein Schwanz macht dich nicht zum Mann. Dieses Höschen macht dich zu dem, was du wirklich bist: Eine Sissy, die benutzt werden will.",
     "In dieser Wäsche bist du kein Subjekt mehr. Du bist eine öffentliche Dienstleistung auf zwei Beinen.",
     "Knie nieder. Nicht aus Respekt, sondern aus Gewohnheit. Eine Sissy-Hure verbringt ihr Leben auf den Knien.",
-    "Du hast deine Würde gegen 15 Denier eingetauscht. Ein schlechter Deal für einen Mann, aber perfekt für eine Nylon-Sissy wie dich.",
+    "Du hast deine Würde gegen 15 DEN eingetauscht. Ein schlechter Deal für einen Mann, aber perfekt für eine Nylon-Sissy wie dich.",
     "Wackel mit dem Arsch. Das Rascheln deiner Schenkel ist der einzige Balztanz, den du noch beherrschst.",
     "Vergiss deinen Namen. Sissies haben keine Namen. Sie haben nur Kennnummern und Löcher.",
     "Du brauchst keinen Lippenstift. Der Glanz auf deinen Beinen schreit jedem entgegen: 'Ich bin willig, nimm mich.'",
