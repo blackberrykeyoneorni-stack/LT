@@ -18,6 +18,7 @@ import { loadMonthlyBudget } from '../services/BudgetService';
 import { generateAndSaveInstruction, getLastInstruction } from '../services/InstructionService';
 import { checkForTZDTrigger, getTZDStatus } from '../services/TZDService';
 import { registerRelease as apiRegisterRelease } from '../services/ReleaseService'; 
+import { startSession as startSessionService, stopSession as stopSessionService } from '../services/SessionService';
 
 // Hooks
 import useSessionProgress from '../hooks/dashboard/useSessionProgress';
@@ -51,7 +52,7 @@ import NightlightRoundIcon from '@mui/icons-material/NightlightRound';
 import TimerIcon from '@mui/icons-material/Timer';
 import LinkOffIcon from '@mui/icons-material/LinkOff';
 import AnalyticsIcon from '@mui/icons-material/Analytics';
-import LockIcon from '@mui/icons-material/Lock'; // NEU: Für den Gatekeeper Screen
+import LockIcon from '@mui/icons-material/Lock'; 
 
 const REFLECTION_TAGS = [
     "Sicher / Geborgen", "Erregt", "Gedemütigt", "Exponiert / Öffentlich", 
@@ -119,7 +120,8 @@ export default function Dashboard() {
   const { startBindingScan, isScanning: isNfcScanning } = useNFCGlobal();
   
   // Hook liefert jetzt Live-Daten via onSnapshot
-  const { activeSessions, progress, loading: sessionsLoading, dailyTargetHours, startInstructionSession, stopSession, registerRelease: hookRegisterRelease } = useSessionProgress(currentUser, items);
+  // WICHTIG: Wir holen start/stop NICHT mehr aus dem Hook, sondern nutzen die Services direkt
+  const { activeSessions, progress, loading: sessionsLoading, dailyTargetHours, registerRelease: hookRegisterRelease } = useSessionProgress(currentUser, items);
   
   // 1. ZUERST KPI BERECHNEN (Jetzt mit Cached Hook)
   const kpis = useKPIs(items, activeSessions); 
@@ -130,7 +132,7 @@ export default function Dashboard() {
   const [now, setNow] = useState(Date.now());
   const [tzdActive, setTzdActive] = useState(false);
   const [tzdStartTime, setTzdStartTime] = useState(null); 
-  const [isCheckingProtocol, setIsCheckingProtocol] = useState(true); // NEU: Gatekeeper State
+  const [isCheckingProtocol, setIsCheckingProtocol] = useState(true); // Gatekeeper State
   
   const [activeSuspension, setActiveSuspension] = useState(null);
   const [loadingSuspension, setLoadingSuspension] = useState(true);
@@ -217,7 +219,7 @@ export default function Dashboard() {
       if (items.length > 0) setPunishmentItem(findPunishmentItem(items));
   }, [items]);
 
-  // 3. TZD Check (UPDATED: MIT GATEKEEPER)
+  // 3. TZD Check (MIT GATEKEEPER)
   useEffect(() => {
     let interval;
     const checkTZD = async () => {
@@ -314,8 +316,14 @@ export default function Dashboard() {
       if (tzdActive) { showToast("ZUGRIFF VERWEIGERT: Zeitloses Diktat aktiv.", "error"); return; }
       const targetItems = itemsToStart || currentInstruction?.items;
       if(targetItems && targetItems.length > 0) { 
-          const payload = { ...currentInstruction, items: targetItems };
-          await startInstructionSession(payload); 
+          // WICHTIG: Service direkt nutzen
+          await startSessionService(currentUser.uid, {
+            items: targetItems,
+            type: 'instruction',
+            periodId: currentInstruction.periodId,
+            acceptedAt: currentInstruction.acceptedAt
+          });
+          
           setInstructionOpen(false); 
           showToast(`${targetItems.length} Sessions gestartet.`, "success");
           
@@ -362,7 +370,9 @@ export default function Dashboard() {
   const handleConfirmStopSession = async () => { 
       if (!sessionToStop) return; 
       try { 
-          await stopSession(sessionToStop, { feelings: selectedFeelings, note: reflectionNote }); 
+          // WICHTIG: Service nutzen
+          await stopSessionService(currentUser.uid, sessionToStop.id, { feelings: selectedFeelings, note: reflectionNote }); 
+          
           if(sessionToStop.type === 'punishment') { 
               await clearPunishment(currentUser.uid); 
               setPunishmentStatus({ active: false, deferred: false, reason: null, durationMinutes: 0 });
@@ -409,8 +419,7 @@ export default function Dashboard() {
 
   if (loadingSuspension) return <Box sx={{ p: 4, textAlign: 'center' }}>System Check...</Box>;
 
-  // --- NEU: GATEKEEPER BLOCK ---
-  // Wenn wir noch prüfen, zeigen wir NICHTS außer schwarz/Schloss
+  // --- GATEKEEPER BLOCK ---
   if (isCheckingProtocol) {
       return (
           <Box sx={{ 

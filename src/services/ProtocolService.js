@@ -1,11 +1,131 @@
 // src/services/ProtocolService.js
 import { db } from '../firebase';
-import { doc, setDoc, onSnapshot } from 'firebase/firestore';
+import { doc, setDoc, onSnapshot, getDoc, collection, query, where, getDocs, orderBy } from 'firebase/firestore';
 import { DEFAULT_PROTOCOL_RULES } from '../config/defaultRules';
 
+// --- NEU: ALGORITHMUS FÜR WOCHENZIEL ---
+
+// Helper: TZD Berechnung (Linear + Wurzeldämpfung)
+export const calculateTZDEffectiveHours = (durationMinutes) => {
+    const durationHours = durationMinutes / 60;
+    
+    // 1. Lineare Verteilung (6h=100%, 36h=40%)
+    // Formel: Faktor = 1.12 - 0.02 * t
+    const factor = 1.12 - (0.02 * durationHours);
+    
+    // Effektive Stunden nach linearer Gewichtung
+    const linearHours = durationHours * factor;
+    
+    // 2. Wurzeldämpfung (nur auf das TZD Ergebnis, wie gewünscht)
+    // Verhindert, dass extrem lange TZD Sessions den Durchschnitt sprengen
+    const dampenedHours = Math.sqrt(linearHours);
+
+    return dampenedHours;
+};
+
+/**
+ * Berechnet das vorgeschlagene Ziel für die nächste Woche (Preview).
+ */
+export const getProjectedGoal = async (userId) => {
+    try {
+        // 1. Aktuelles Ziel laden
+        const settingsRef = doc(db, `users/${userId}/settings/protocol`);
+        const settingsSnap = await getDoc(settingsRef);
+        const currentGoal = settingsSnap.exists() ? (settingsSnap.data().currentDailyGoal || 4) : 4;
+
+        // 2. Zeitraum definieren (Seit letztem Montag)
+        const now = new Date();
+        const dayOfWeek = now.getDay(); // 0=So, 1=Mo...
+        const diffToMonday = (dayOfWeek + 6) % 7;
+        const monday = new Date(now);
+        monday.setDate(now.getDate() - diffToMonday);
+        monday.setHours(0, 0, 0, 0);
+
+        // 3. Sessions laden
+        const q = query(
+            collection(db, `users/${userId}/sessions`),
+            where('type', '==', 'instruction'),
+            where('startTime', '>=', monday),
+            orderBy('startTime', 'desc')
+        );
+
+        const querySnapshot = await getDocs(q);
+        const validSessions = [];
+
+        querySnapshot.forEach(doc => {
+            const data = doc.data();
+            
+            // FILTER: Nur Tag-Sessions (kein 'night' im Period-String)
+            const isNight = data.period && data.period.toLowerCase().includes('night');
+            if (isNight) return;
+
+            // FILTER: Nacht-Compliance Check (aus SessionService Step 2)
+            // Wenn nightSuccess explizit false ist, zählt der Tag 0.
+            if (data.nightSuccess === false) return;
+
+            // BERECHNUNG
+            let effectiveHours = 0;
+            
+            if (data.tzdExecuted && data.tzdDurationMinutes) {
+                // TZD Logik: Linear + Wurzel
+                effectiveHours = calculateTZDEffectiveHours(data.tzdDurationMinutes);
+            } else {
+                // Reguläre Instruction: Volle Zeit
+                let durationMinutes = 0;
+                if (data.endTime) {
+                    durationMinutes = (data.endTime.toDate() - data.startTime.toDate()) / 60000;
+                } else {
+                    // Falls Session noch läuft (Live-Preview)
+                    durationMinutes = (new Date() - data.startTime.toDate()) / 60000;
+                }
+                effectiveHours = durationMinutes / 60;
+            }
+
+            validSessions.push(effectiveHours);
+        });
+
+        // 4. Durchschnitt berechnen (Summe / 5)
+        const sumHours = validSessions.reduce((a, b) => a + b, 0);
+        const average = sumHours / 5;
+
+        // 5. Ratchet Update (Ohne Dämpfung, Ziel steigt sofort auf Durchschnitt)
+        let nextGoal = currentGoal;
+        if (average > currentGoal) {
+            nextGoal = average;
+        }
+
+        return {
+            currentGoal: parseFloat(currentGoal.toFixed(2)),
+            projectedAverage: parseFloat(average.toFixed(2)),
+            nextGoal: parseFloat(nextGoal.toFixed(2)),
+            validSessionCount: validSessions.length
+        };
+
+    } catch (e) {
+        console.error("Fehler bei Goal Calculation:", e);
+        return null;
+    }
+};
+
+/**
+ * Fixiert das neue Ziel (Montag früh auszuführen)
+ */
+export const commitNewWeeklyGoal = async (userId) => {
+    const projection = await getProjectedGoal(userId);
+    if (!projection) return;
+
+    await setDoc(doc(db, `users/${userId}/settings/protocol`), {
+        currentDailyGoal: projection.nextGoal,
+        lastGoalUpdate: new Date()
+    }, { merge: true });
+
+    return projection.nextGoal;
+};
+
+
+// --- BESTEHENDE KLASSE (UNVERÄNDERT, NUR EXPORTS ERWEITERT) ---
 class ProtocolService {
     constructor() {
-        // Deep Copy der Defaults als Startwert
         this.rules = JSON.parse(JSON.stringify(DEFAULT_PROTOCOL_RULES));
         this.unsubscribe = null;
     }
@@ -19,13 +139,11 @@ class ProtocolService {
             if (snapshot.exists()) {
                 const data = snapshot.data();
                 
-                // Deep Merge für Robustheit (falls Felder in DB fehlen)
                 this.rules = {
                     time: { ...DEFAULT_PROTOCOL_RULES.time, ...(data.time || {}) },
                     tzd: { 
                         ...DEFAULT_PROTOCOL_RULES.tzd, 
                         ...(data.tzd || {}),
-                        // Array explizit überschreiben falls vorhanden
                         durationMatrix: data.tzd?.durationMatrix || DEFAULT_PROTOCOL_RULES.tzd.durationMatrix
                     },
                     purity: { ...DEFAULT_PROTOCOL_RULES.purity, ...(data.purity || {}) },
@@ -38,6 +156,9 @@ class ProtocolService {
                         }
                     },
                     punishment: { ...DEFAULT_PROTOCOL_RULES.punishment, ...(data.punishment || {}) },
+                    
+                    // NEU: Ziel im State halten
+                    currentDailyGoal: data.currentDailyGoal || 4
                 };
                 console.log("Protocol Rules updated:", this.rules);
             } else {
@@ -52,7 +173,6 @@ class ProtocolService {
 
     getRules() { return this.rules; }
     
-    // Helfer für TZD Matrix Berechnung (baut Cumulative Array für den Algorithmus)
     getTZDCumulativeMatrix() {
         const matrix = this.rules.tzd.durationMatrix || [];
         let cumulative = 0;

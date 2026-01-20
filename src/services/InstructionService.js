@@ -1,5 +1,5 @@
 import { db } from '../firebase';
-import { collection, addDoc, serverTimestamp, query, where, getDocs, doc, setDoc, getDoc } from 'firebase/firestore';
+import { collection, serverTimestamp, query, where, getDocs, doc, setDoc, getDoc, orderBy } from 'firebase/firestore';
 
 // Helper: Berechnet ob Item ruhen muss (STRIKT NUR NYLONS)
 const isItemInRecovery = (item, restingHours = 24) => {
@@ -82,6 +82,83 @@ export const getLastInstruction = async (uid) => {
     } catch (e) {
         console.error("Error fetching last instruction:", e);
         return null;
+    }
+};
+
+// --- SCHRITT 1: NACHT-VALIDIERUNG (CHECKPOINTS) ---
+export const verifyNightCompliance = async (userId, referenceDate = new Date()) => {
+    // referenceDate ist standardmäßig "Jetzt" (der aktuelle Tag).
+    // Die zu prüfenden Checkpoints liegen am Morgen dieses Tages (01:30 - 06:00).
+    // Beispiel: Wir sind am Dienstag um 08:00 Uhr. Wir prüfen Dienstag Morgen.
+    
+    try {
+        const year = referenceDate.getFullYear();
+        const month = referenceDate.getMonth();
+        const day = referenceDate.getDate();
+
+        // Checkpoints definieren (lokale Zeit)
+        const checkpoints = [
+            new Date(year, month, day, 1, 30, 0), // 01:30 Uhr
+            new Date(year, month, day, 3, 0, 0),  // 03:00 Uhr
+            new Date(year, month, day, 4, 30, 0), // 04:30 Uhr
+            new Date(year, month, day, 6, 0, 0)   // 06:00 Uhr
+        ];
+
+        // Suchfenster für Sessions: Von Gestern 20:00 bis Heute 08:00
+        const searchStart = new Date(year, month, day - 1, 20, 0, 0);
+        const searchEnd = new Date(year, month, day, 8, 0, 0);
+
+        const q = query(
+            collection(db, `users/${userId}/sessions`),
+            where('type', '==', 'instruction'),
+            where('startTime', '>=', searchStart),
+            orderBy('startTime', 'asc')
+        );
+
+        const sessionsSnap = await getDocs(q);
+        const sessions = [];
+        const now = new Date();
+
+        sessionsSnap.forEach(doc => {
+            const data = doc.data();
+            sessions.push({
+                start: data.startTime.toDate(),
+                // Wenn kein endTime (läuft noch), nehmen wir "jetzt"
+                end: data.endTime ? data.endTime.toDate() : now,
+                ...data
+            });
+        });
+
+        let allCheckpointsCovered = true;
+        const missedCheckpoints = [];
+
+        // Jeden Checkpoint prüfen
+        checkpoints.forEach(cp => {
+            // Eine Session ist gültig, wenn sie VOR/AM Checkpoint startete und NACH/AM Checkpoint endete
+            const isCovered = sessions.some(s => s.start <= cp && s.end >= cp);
+            
+            if (!isCovered) {
+                allCheckpointsCovered = false;
+                missedCheckpoints.push(cp.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}));
+            }
+        });
+
+        // Ergebnis persistieren (für ProgressBar & Tag-Validierung)
+        const dateKey = referenceDate.toISOString().split('T')[0]; // YYYY-MM-DD
+        await setDoc(doc(db, `users/${userId}/status/nightCompliance`), {
+            date: dateKey,
+            success: allCheckpointsCovered,
+            missedCheckpoints,
+            lastChecked: serverTimestamp()
+        }, { merge: true });
+
+        console.log(`Night Compliance Check für ${dateKey}: ${allCheckpointsCovered ? 'ERFOLG' : 'FEHLSCHLAG'}`, missedCheckpoints);
+
+        return allCheckpointsCovered;
+
+    } catch (e) {
+        console.error("Fehler bei verifyNightCompliance:", e);
+        return false;
     }
 };
 

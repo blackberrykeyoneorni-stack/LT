@@ -1,5 +1,5 @@
 import { db } from '../firebase';
-import { doc, updateDoc, serverTimestamp, setDoc, getDoc, increment } from 'firebase/firestore';
+import { doc, updateDoc, serverTimestamp, setDoc, getDoc, increment, query, collection, where, getDocs } from 'firebase/firestore';
 import { safeDate } from '../utils/dateUtils';
 import { registerPunishment } from './PunishmentService';
 
@@ -88,7 +88,6 @@ export const checkForTZDTrigger = async (userId, activeSessions, items) => {
 
     // 4. Wahrscheinlichkeit
     const roll = Math.random();
-    // Debug: console.log(`TZD Roll: ${roll} vs ${TRIGGER_CHANCE}`);
     
     if (roll < TRIGGER_CHANCE) {
         await startTZD(userId, relevantItems);
@@ -103,8 +102,6 @@ export const checkForTZDTrigger = async (userId, activeSessions, items) => {
  */
 export const startTZD = async (userId, targetItems) => {
     const targetDuration = determineSecretDuration();
-    
-    // Safety check falls targetItems kein Array ist (z.B. einzelnes Item übergeben)
     const itemsArray = Array.isArray(targetItems) ? targetItems : [targetItems];
 
     const tzdData = {
@@ -117,13 +114,12 @@ export const startTZD = async (userId, targetItems) => {
             customId: i.customId || 'N/A',
             brand: i.brand
         })),
-        // Fallback für Overlay (nimmt das erste Item für Anzeige)
         itemId: itemsArray[0]?.id, 
         itemName: itemsArray[0]?.name,
         
         accumulatedMinutes: 0,
         lastCheckIn: serverTimestamp(),
-        stage: 'briefing', // Startet im Briefing Modus
+        stage: 'briefing',
         isFailed: false
     };
 
@@ -148,12 +144,10 @@ export const getTZDStatus = async (userId) => {
     } catch (e) { return { isActive: false }; }
 };
 
-// Wird vom Overlay aufgerufen (Timer Tick)
 export const performCheckIn = async (userId, statusData) => {
     if (!statusData || !statusData.isActive) return null;
 
     const now = new Date();
-    // Falls startTime noch null ist (Briefing Phase), nutze jetzigen Zeitpunkt
     const start = safeDate(statusData.startTime) || now;
     
     const elapsedMinutes = Math.floor((now - start) / 60000);
@@ -171,29 +165,52 @@ export const performCheckIn = async (userId, statusData) => {
     }
 };
 
-// --- EREIGNIS-HANDLER (EXPORTS FÜR OVERLAY) ---
+// --- EREIGNIS-HANDLER ---
 
-// 1. Briefing bestätigen (Startet den Timer wirklich)
 export const confirmTZDBriefing = async (userId) => {
     await updateDoc(doc(db, `users/${userId}/status/tzd`), { 
         stage: 'running',
-        startTime: serverTimestamp() // Reset Startzeit auf Bestätigung
+        startTime: serverTimestamp() 
     });
 };
 
-// 2. Reguläres Beenden
 export const terminateTZD = async (userId, success = true) => {
     const endTime = serverTimestamp();
     const status = await getTZDStatus(userId);
     
-    // Status deaktivieren
+    // A) TZD Status deaktivieren
     await updateDoc(doc(db, `users/${userId}/status/tzd`), { 
         isActive: false, 
         endTime: endTime, 
         result: success ? 'completed' : 'failed' 
     });
 
-    // Stats auf Item buchen (Optional, falls gewünscht)
+    // B) NEU: Vermerk in der LAUFENDEN Instruction-Session
+    // Wir suchen die aktive Instruction-Session und schreiben den TZD-Erfolg hinein.
+    if (success) {
+        try {
+            const q = query(
+                collection(db, `users/${userId}/sessions`),
+                where('type', '==', 'instruction'),
+                where('endTime', '==', null) // Nur aktive Sessions
+            );
+            const querySnapshot = await getDocs(q);
+            
+            if (!querySnapshot.empty) {
+                // Wir nehmen an, es gibt nur eine aktive Instruction
+                const activeSessionDoc = querySnapshot.docs[0];
+                await updateDoc(activeSessionDoc.ref, {
+                    tzdExecuted: true,
+                    tzdDurationMinutes: status.accumulatedMinutes || status.targetDurationMinutes || 0
+                });
+                console.log("TZD Erfolg in Session vermerkt:", activeSessionDoc.id);
+            }
+        } catch (e) {
+            console.error("Fehler beim Vermerken des TZD in der Session:", e);
+        }
+    }
+
+    // C) Item Stats Update
     if (success && status && status.itemId) {
         await updateDoc(doc(db, `users/${userId}/items`, status.itemId), { 
             wearCount: increment(1),
@@ -203,11 +220,7 @@ export const terminateTZD = async (userId, success = true) => {
     }
 };
 
-// 3. Notfall Abbruch
 export const emergencyBailout = async (userId) => {
-    // 1. Strafe registrieren
     await registerPunishment(userId, "NOT-ABBRUCH: Zeitloses Diktat verweigert", 90);
-    
-    // 2. TZD beenden (Failed)
     await terminateTZD(userId, false);
 };
