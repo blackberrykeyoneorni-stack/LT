@@ -6,7 +6,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { DEFAULT_PROTOCOL_RULES } from '../../config/defaultRules';
 import SaveIcon from '@mui/icons-material/Save';
 import RestoreIcon from '@mui/icons-material/Restore';
-import { PALETTE } from '../../theme/obsidianDesign';
+import { PALETTE, DESIGN_TOKENS } from '../../theme/obsidianDesign';
 
 export default function ProtocolSettings() {
     const { currentUser } = useAuth();
@@ -19,9 +19,14 @@ export default function ProtocolSettings() {
             const ref = doc(db, `users/${currentUser.uid}/settings/protocol`);
             const snap = await getDoc(ref);
             if (snap.exists()) {
-                setRules(snap.data()); // Wir laden direkt das, was da ist
+                const data = snap.data();
+                // Migration: Sicherstellen, dass currentDailyGoal existiert
+                if (data.currentDailyGoal === undefined) {
+                    data.currentDailyGoal = 4;
+                }
+                setRules(data);
             } else {
-                setRules(DEFAULT_PROTOCOL_RULES);
+                setRules({ ...DEFAULT_PROTOCOL_RULES, currentDailyGoal: 4 });
             }
         };
         load();
@@ -34,6 +39,15 @@ export default function ProtocolSettings() {
                 ...prev[section],
                 [key]: value
             }
+        }));
+        setHasChanges(true);
+    };
+
+    // NEU: Handler für Root-Level Properties (wie currentDailyGoal)
+    const handleRootChange = (key, value) => {
+        setRules(prev => ({
+            ...prev,
+            [key]: value
         }));
         setHasChanges(true);
     };
@@ -58,7 +72,7 @@ export default function ProtocolSettings() {
 
     const handleReset = () => {
         if(window.confirm("Alle Regeln auf Standard zurücksetzen?")) {
-            setRules(DEFAULT_PROTOCOL_RULES);
+            setRules({ ...DEFAULT_PROTOCOL_RULES, currentDailyGoal: 4 });
             setHasChanges(true);
         }
     };
@@ -68,6 +82,34 @@ export default function ProtocolSettings() {
     return (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
             
+            {/* NEU: BASIS-TRAGEZEIT EINSTELLUNG */}
+            <Paper sx={{ p: 3, bgcolor: 'rgba(255,255,255,0.05)', borderLeft: `4px solid ${PALETTE.accents.green}` }}>
+                <Typography variant="h6" sx={{ color: PALETTE.accents.green }} gutterBottom>Tragezeit-Ziel (Basis)</Typography>
+                <Typography variant="caption" sx={{ display: 'block', mb: 2, color: 'text.secondary' }}>
+                    Definiert die geforderte Tragezeit, bis der Algorithmus (Ratchet) übernimmt.
+                </Typography>
+                
+                <Box sx={{ px: 2 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <Typography variant="body2">Tägliches Ziel</Typography>
+                        <Typography sx={{ color: PALETTE.accents.green }} fontWeight="bold">
+                            {rules.currentDailyGoal ? rules.currentDailyGoal.toFixed(1) : '4.0'} Stunden
+                        </Typography>
+                    </Box>
+                    <Slider 
+                        value={rules.currentDailyGoal || 4} 
+                        min={1} max={12} step={0.5}
+                        onChange={(_, v) => handleRootChange('currentDailyGoal', v)}
+                        sx={{ color: PALETTE.accents.green }}
+                        marks={[
+                            { value: 4, label: '4h' },
+                            { value: 8, label: '8h' },
+                            { value: 12, label: '12h' }
+                        ]}
+                    />
+                </Box>
+            </Paper>
+
             {/* TZD SEKTION */}
             <Paper sx={{ p: 3, bgcolor: 'rgba(255,255,255,0.05)', borderLeft: `4px solid ${PALETTE.accents.red}` }}>
                 <Typography variant="h6" color="primary" gutterBottom>Zeitloses Diktat (TZD)</Typography>
