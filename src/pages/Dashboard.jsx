@@ -120,10 +120,9 @@ export default function Dashboard() {
   const { startBindingScan, isScanning: isNfcScanning } = useNFCGlobal();
   
   // Hook liefert jetzt Live-Daten via onSnapshot
-  // WICHTIG: Wir holen start/stop NICHT mehr aus dem Hook, sondern nutzen die Services direkt
   const { activeSessions, progress, loading: sessionsLoading, dailyTargetHours, registerRelease: hookRegisterRelease } = useSessionProgress(currentUser, items);
   
-  // 1. ZUERST KPI BERECHNEN (Jetzt mit Cached Hook)
+  // 1. ZUERST KPI BERECHNEN
   const kpis = useKPIs(items, activeSessions); 
 
   // 2. DANN FEM-INDEX BERECHNEN
@@ -132,7 +131,7 @@ export default function Dashboard() {
   const [now, setNow] = useState(Date.now());
   const [tzdActive, setTzdActive] = useState(false);
   const [tzdStartTime, setTzdStartTime] = useState(null); 
-  const [isCheckingProtocol, setIsCheckingProtocol] = useState(true); // Gatekeeper State
+  const [isCheckingProtocol, setIsCheckingProtocol] = useState(true); 
   
   const [activeSuspension, setActiveSuspension] = useState(null);
   const [loadingSuspension, setLoadingSuspension] = useState(true);
@@ -196,6 +195,7 @@ export default function Dashboard() {
             if(pSnap.exists()) setMaxInstructionItems(pSnap.data().maxInstructionItems || 1);
 
             const statusData = await getActivePunishment(currentUser.uid);
+            // FIX: Fallback, falls getActivePunishment null zurückgibt
             setPunishmentStatus(statusData || { active: false });
             
             setAuditDue(await isAuditDue(currentUser.uid));
@@ -219,7 +219,7 @@ export default function Dashboard() {
       if (items.length > 0) setPunishmentItem(findPunishmentItem(items));
   }, [items]);
 
-  // 3. TZD Check (MIT GATEKEEPER)
+  // 3. TZD Check
   useEffect(() => {
     let interval;
     const checkTZD = async () => {
@@ -234,7 +234,6 @@ export default function Dashboard() {
                     if(status.startTime) setTzdStartTime(status.startTime);
                 }
             } else { 
-                // Kein aktives TZD, prüfen ob eines getriggert werden soll
                 if (tzdActive) {
                     setTzdActive(false); 
                     setTzdStartTime(null);
@@ -243,14 +242,13 @@ export default function Dashboard() {
                     const triggered = await checkForTZDTrigger(currentUser.uid, activeSessions, items); 
                     if (triggered) {
                         setTzdActive(true);
-                        setTzdStartTime(new Date()); // Fallback für sofortigen Start
+                        setTzdStartTime(new Date()); 
                     }
                 } 
             }
         } catch (e) {
             console.error("TZD Check Error", e);
         } finally {
-            // WICHTIG: Visier öffnen, sobald der Check durch ist
             setIsCheckingProtocol(false);
         }
     };
@@ -316,7 +314,6 @@ export default function Dashboard() {
       if (tzdActive) { showToast("ZUGRIFF VERWEIGERT: Zeitloses Diktat aktiv.", "error"); return; }
       const targetItems = itemsToStart || currentInstruction?.items;
       if(targetItems && targetItems.length > 0) { 
-          // WICHTIG: Service direkt nutzen
           await startSessionService(currentUser.uid, {
             items: targetItems,
             type: 'instruction',
@@ -346,13 +343,22 @@ export default function Dashboard() {
       setIsHoldingOath(false); 
   };
   
-  const handleDeclineOath = async () => { await registerOathRefusal(currentUser.uid); setPunishmentStatus(await getActivePunishment(currentUser.uid)); setInstructionOpen(false); setIsHoldingOath(false); };
+  const handleDeclineOath = async () => { 
+      await registerOathRefusal(currentUser.uid); 
+      const newPunishment = await getActivePunishment(currentUser.uid);
+      // FIX: Fallback, falls getActivePunishment null ist
+      setPunishmentStatus(newPunishment || { active: false }); 
+      setInstructionOpen(false); 
+      setIsHoldingOath(false); 
+  };
 
   const executeStartPunishment = async () => { 
       if(punishmentItem) { 
           await addDoc(collection(db,`users/${currentUser.uid}/sessions`),{ itemId:punishmentItem.id, itemIds:[punishmentItem.id], type:'punishment', startTime:serverTimestamp(), endTime:null }); 
           await updateDoc(doc(db,`users/${currentUser.uid}/status/punishment`),{active:true,deferred:false}); 
-          setPunishmentStatus(await getActivePunishment(currentUser.uid)); 
+          const newStatus = await getActivePunishment(currentUser.uid);
+          // FIX: Fallback
+          setPunishmentStatus(newStatus || { active: false }); 
           setPunishmentScanOpen(false); 
       } 
   };
@@ -370,7 +376,6 @@ export default function Dashboard() {
   const handleConfirmStopSession = async () => { 
       if (!sessionToStop) return; 
       try { 
-          // WICHTIG: Service nutzen
           await stopSessionService(currentUser.uid, sessionToStop.id, { feelings: selectedFeelings, note: reflectionNote }); 
           
           if(sessionToStop.type === 'punishment') { 
@@ -407,7 +412,9 @@ export default function Dashboard() {
       try {
           await registerPunishment(currentUser.uid, "Forced Release Protocol verweigert", 60);
           const newStatus = await getActivePunishment(currentUser.uid);
-          setPunishmentStatus(newStatus);
+          // FIX: Fallback
+          setPunishmentStatus(newStatus || { active: false });
+          
           await updateDoc(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), { "forcedRelease.executed": true });
           setCurrentInstruction(prev => ({ ...prev, forcedRelease: { ...prev.forcedRelease, executed: true } }));
           setForcedReleaseOpen(false);
@@ -441,7 +448,6 @@ export default function Dashboard() {
           </Box>
       );
   }
-  // --- ENDE GATEKEEPER ---
 
   if (activeSuspension) {
       return (
@@ -493,7 +499,7 @@ export default function Dashboard() {
             {/* 2. FEM INDEX BAR */}
             <FemIndexBar femIndex={femIndex || 0} loading={femIndexLoading} />
 
-            {/* 3. ACTION BUTTONS (HAUPTAKTIONEN) */}
+            {/* 3. ACTION BUTTONS */}
             <ActionButtons 
                 punishmentStatus={punishmentStatus} 
                 punishmentRunning={isPunishmentRunning}

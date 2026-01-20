@@ -1,119 +1,65 @@
 import React from 'react';
-import { Box, Typography, LinearProgress, Paper, Stack } from '@mui/material';
-import { motion } from 'framer-motion';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import { Box, Typography, LinearProgress, Paper } from '@mui/material';
 import NightlightRoundIcon from '@mui/icons-material/NightlightRound';
-import LockIcon from '@mui/icons-material/Lock';
-import AccessTimeIcon from '@mui/icons-material/AccessTime';
-import { PALETTE, DESIGN_TOKENS } from '../../theme/obsidianDesign';
+import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
 
 export default function ProgressBar({ currentMinutes, targetHours, isGoalMetToday, progressData }) {
-    // Wenn es nach 23:00 Uhr ist und das Ziel erreicht wurde, bleibt es grün (UI Logic via Parent oder hier)
-    // Die Anforderung: "Bis 23:00 Uhr so bleiben". 
-    // Wir nehmen an, der Reset passiert um Mitternacht oder morgens via Logik.
     
     const targetMinutes = targetHours * 60;
+    // Balken darf max 100% sein, aber Text zeigt echte Werte
+    const progressPercent = Math.min(100, Math.max(0, (currentMinutes / targetMinutes) * 100));
     
-    // Berechnung für den Balken (max 100% visuell)
-    const percentage = Math.min(100, (currentMinutes / targetMinutes) * 100);
-    
-    // Farbe: Grün wenn Ziel erreicht, sonst Primary (Lila/Blau)
+    // Logik für Farben und Icons
     const barColor = isGoalMetToday ? PALETTE.accents.green : PALETTE.primary.main;
-    const glowColor = isGoalMetToday ? 'rgba(0, 255, 157, 0.4)' : 'rgba(187, 134, 252, 0.3)';
+    const nightSuccess = progressData?.nightCompliance === true;
 
-    // Zeit-Formatierung (h min)
     const formatTime = (totalMins) => {
         const h = Math.floor(totalMins / 60);
         const m = Math.floor(totalMins % 60);
         return `${h}h ${m}m`;
     };
 
-    const nightSuccess = progressData?.nightCompliance === true;
-
     return (
-        <Paper 
-            elevation={0}
-            sx={{ 
-                p: 3, 
-                mb: 4, 
-                borderRadius: '24px',
-                background: `linear-gradient(145deg, rgba(30,30,30,0.8) 0%, rgba(20,20,20,0.9) 100%)`,
-                border: `1px solid rgba(255,255,255,0.08)`,
-                position: 'relative',
-                overflow: 'hidden'
-            }}
-        >
-            {/* Header: Titel und Nacht-Status */}
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="h6" sx={{ fontWeight: 'bold', letterSpacing: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <LockIcon fontSize="small" sx={{ color: barColor }} />
-                    TAGESZIEL
+        <Box sx={{ mb: 4, width: '100%' }}>
+            {/* Header Zeile: Titel und Zeit */}
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', mb: 1 }}>
+                <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
+                    Tagesziel
                 </Typography>
-                
-                {/* Nacht-Status Anzeige */}
-                <Stack direction="row" spacing={1} alignItems="center" sx={{ 
-                    bgcolor: 'rgba(0,0,0,0.3)', 
-                    px: 1.5, py: 0.5, 
-                    borderRadius: '12px',
-                    border: `1px solid ${nightSuccess ? PALETTE.accents.gold : 'rgba(255,255,255,0.1)'}`
-                }}>
-                    <NightlightRoundIcon sx={{ 
-                        fontSize: 16, 
-                        color: nightSuccess ? PALETTE.accents.gold : 'text.disabled' 
-                    }} />
-                    <Typography variant="caption" sx={{ 
-                        color: nightSuccess ? PALETTE.accents.gold : 'text.disabled',
-                        fontWeight: 'bold',
-                        textTransform: 'uppercase'
-                    }}>
-                        {nightSuccess ? "Nacht erfüllt" : "Nacht offen"}
-                    </Typography>
-                </Stack>
-            </Box>
-
-            {/* Große Zeit-Anzeige */}
-            <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mb: 1 }}>
-                <Typography variant="h3" sx={{ fontWeight: 'bold', color: '#fff' }}>
-                    {formatTime(currentMinutes)}
-                </Typography>
-                <Typography variant="h6" sx={{ color: 'text.secondary', fontWeight: 300 }}>
-                    / {targetHours}h
+                <Typography variant="h6" sx={{ color: isGoalMetToday ? PALETTE.accents.green : 'text.secondary' }}>
+                    {formatTime(currentMinutes)} <Typography component="span" variant="body2" color="text.secondary">/ {targetHours}h</Typography>
                 </Typography>
             </Box>
 
-            {/* Status Text (Dynamisch) */}
-            <Typography variant="body2" sx={{ color: barColor, mb: 2, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 1 }}>
-                {isGoalMetToday ? "ZIEL ERREICHT - OVERACHIEVEMENT AKTIV" : "IN PROGRESS"}
-            </Typography>
-
-            {/* Der Balken */}
-            <Box sx={{ position: 'relative', height: 12, borderRadius: 6, bgcolor: 'rgba(255,255,255,0.1)', overflow: 'hidden' }}>
-                <motion.div 
-                    initial={{ width: 0 }}
-                    animate={{ width: `${percentage}%` }}
-                    transition={{ duration: 1, ease: "easeOut" }}
-                    style={{
-                        height: '100%',
+            {/* Der Balken - Schlicht und flach */}
+            <LinearProgress 
+                variant="determinate" 
+                value={progressPercent} 
+                sx={{ 
+                    height: 10, 
+                    borderRadius: 5,
+                    bgcolor: 'rgba(255,255,255,0.1)',
+                    '& .MuiLinearProgress-bar': {
                         backgroundColor: barColor,
-                        borderRadius: 6,
-                        boxShadow: `0 0 15px ${glowColor}`
-                    }}
-                />
-                
-                {/* Animierter Glanz-Effekt wenn aktiv */}
-                {percentage > 0 && (
-                    <motion.div
-                        animate={{ x: ['-100%', '200%'] }}
-                        transition={{ repeat: Infinity, duration: 2, ease: "linear" }}
-                        style={{
-                            position: 'absolute',
-                            top: 0, left: 0, bottom: 0, width: '40%',
-                            background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent)',
-                            zIndex: 1
-                        }}
-                    />
-                )}
+                        borderRadius: 5
+                    }
+                }}
+            />
+
+            {/* Status Zeile: Mond Anzeige */}
+            <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 1, alignItems: 'center', gap: 1 }}>
+                <NightlightRoundIcon sx={{ 
+                    fontSize: 18, 
+                    color: nightSuccess ? PALETTE.accents.gold : 'text.disabled' 
+                }} />
+                <Typography variant="caption" sx={{ 
+                    color: nightSuccess ? PALETTE.accents.gold : 'text.disabled',
+                    fontWeight: nightSuccess ? 'bold' : 'normal',
+                    textTransform: 'uppercase'
+                }}>
+                    {nightSuccess ? "Nacht erfüllt" : "Nacht offen"}
+                </Typography>
             </Box>
-        </Paper>
+        </Box>
     );
 }
