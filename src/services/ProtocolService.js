@@ -1,201 +1,201 @@
-import React, { useState, useEffect } from 'react';
-import { Box, Typography, Slider, Switch, FormControlLabel, Paper, Button, Grid, Divider } from '@mui/material';
-import { doc, updateDoc, getDoc } from 'firebase/firestore';
-import { db } from '../../firebase';
-import { useAuth } from '../../contexts/AuthContext';
-import { DEFAULT_PROTOCOL_RULES } from '../../config/defaultRules';
-import SaveIcon from '@mui/icons-material/Save';
-import RestoreIcon from '@mui/icons-material/Restore';
-import { PALETTE, DESIGN_TOKENS } from '../../theme/obsidianDesign';
+import { db } from '../firebase';
+import { doc, setDoc, onSnapshot, getDoc, collection, query, where, getDocs, orderBy } from 'firebase/firestore';
+import { DEFAULT_PROTOCOL_RULES } from '../config/defaultRules';
 
-export default function ProtocolSettings() {
-    const { currentUser } = useAuth();
-    const [rules, setRules] = useState(null);
-    const [hasChanges, setHasChanges] = useState(false);
+// --- ALGORITHMUS FÜR WOCHENZIEL & TZD ---
 
-    useEffect(() => {
-        if (!currentUser) return;
-        const load = async () => {
-            const ref = doc(db, `users/${currentUser.uid}/settings/protocol`);
-            const snap = await getDoc(ref);
-            if (snap.exists()) {
-                const data = snap.data();
-                // Sicherstellen, dass currentDailyGoal existiert (Migration für bestehende User)
-                if (data.currentDailyGoal === undefined) {
-                    data.currentDailyGoal = 4;
-                }
-                setRules(data);
-            } else {
-                setRules({ ...DEFAULT_PROTOCOL_RULES, currentDailyGoal: 4 });
-            }
-        };
-        load();
-    }, [currentUser]);
+// Helper: TZD Berechnung (Linear + Wurzeldämpfung)
+export const calculateTZDEffectiveHours = (durationMinutes) => {
+    const durationHours = durationMinutes / 60;
+    
+    // 1. Lineare Verteilung (6h=100%, 36h=40%)
+    // Formel: Faktor = 1.12 - 0.02 * t
+    const factor = 1.12 - (0.02 * durationHours);
+    
+    // Effektive Stunden nach linearer Gewichtung
+    const linearHours = durationHours * factor;
+    
+    // 2. Wurzeldämpfung (nur auf das TZD Ergebnis, wie gewünscht)
+    // Verhindert, dass extrem lange TZD Sessions den Durchschnitt sprengen
+    const dampenedHours = Math.sqrt(linearHours);
 
-    const handleChange = (section, key, value) => {
-        setRules(prev => ({
-            ...prev,
-            [section]: {
-                ...prev[section],
-                [key]: value
-            }
-        }));
-        setHasChanges(true);
-    };
+    return dampenedHours;
+};
 
-    // NEU: Handler für Werte auf oberster Ebene (wie currentDailyGoal)
-    const handleRootChange = (key, value) => {
-        setRules(prev => ({
-            ...prev,
-            [key]: value
-        }));
-        setHasChanges(true);
-    };
+/**
+ * Berechnet das vorgeschlagene Ziel für die nächste Woche (Preview).
+ */
+export const getProjectedGoal = async (userId) => {
+    try {
+        // 1. Aktuelles Ziel laden
+        const settingsRef = doc(db, `users/${userId}/settings/protocol`);
+        const settingsSnap = await getDoc(settingsRef);
+        const currentGoal = settingsSnap.exists() ? (settingsSnap.data().currentDailyGoal || 4) : 4;
 
-    // Spezieller Handler für die TZD Matrix Gewichte
-    const handleMatrixChange = (index, newWeight) => {
-        const newMatrix = [...rules.tzd.durationMatrix];
-        newMatrix[index].weight = newWeight;
-        handleChange('tzd', 'durationMatrix', newMatrix);
-    };
+        // 2. Zeitraum definieren (Seit letztem Montag)
+        const now = new Date();
+        const dayOfWeek = now.getDay(); // 0=So, 1=Mo...
+        const diffToMonday = (dayOfWeek + 6) % 7;
+        const monday = new Date(now);
+        monday.setDate(now.getDate() - diffToMonday);
+        monday.setHours(0, 0, 0, 0);
 
-    const handleSave = async () => {
-        try {
-            await updateDoc(doc(db, `users/${currentUser.uid}/settings/protocol`), rules);
-            setHasChanges(false);
-            alert("Protokoll-Regeln aktualisiert.");
-        } catch (e) {
-            console.error(e);
-            alert("Fehler beim Speichern.");
-        }
-    };
+        // 3. Sessions laden
+        const q = query(
+            collection(db, `users/${userId}/sessions`),
+            where('type', '==', 'instruction'),
+            where('startTime', '>=', monday),
+            orderBy('startTime', 'desc')
+        );
 
-    const handleReset = () => {
-        if(window.confirm("Alle Regeln auf Standard zurücksetzen?")) {
-            setRules({ ...DEFAULT_PROTOCOL_RULES, currentDailyGoal: 4 });
-            setHasChanges(true);
-        }
-    };
+        const querySnapshot = await getDocs(q);
+        const validSessions = [];
 
-    if (!rules) return <Typography>Lade Konfiguration...</Typography>;
-
-    return (
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+        querySnapshot.forEach(doc => {
+            const data = doc.data();
             
-            {/* NEU: ZIEL SEKTION (BASIS) */}
-            <Paper sx={{ p: 3, bgcolor: 'rgba(255,255,255,0.05)', borderLeft: `4px solid ${PALETTE.accents.green}` }}>
-                <Typography variant="h6" sx={{ color: PALETTE.accents.green }} gutterBottom>Tragezeit-Ziel (Basis)</Typography>
-                <Typography variant="caption" sx={{ display: 'block', mb: 2, color: 'text.secondary' }}>
-                    Definiert die geforderte Tragezeit, solange der Algorithmus (Ratchet) noch keine neuen Werte ermittelt hat.
-                </Typography>
+            // FILTER: Nur Tag-Sessions (kein 'night' im Period-String)
+            const isNight = data.period && data.period.toLowerCase().includes('night');
+            if (isNight) return;
+
+            // FILTER: Nacht-Compliance Check
+            // Wenn nightSuccess explizit false ist, zählt der Tag 0.
+            if (data.nightSuccess === false) return;
+
+            // BERECHNUNG
+            let effectiveHours = 0;
+            
+            if (data.tzdExecuted && data.tzdDurationMinutes) {
+                // TZD Logik: Linear + Wurzel
+                effectiveHours = calculateTZDEffectiveHours(data.tzdDurationMinutes);
+            } else {
+                // Reguläre Instruction: Volle Zeit
+                let durationMinutes = 0;
+                if (data.endTime) {
+                    durationMinutes = (data.endTime.toDate() - data.startTime.toDate()) / 60000;
+                } else {
+                    // Falls Session noch läuft (Live-Preview)
+                    durationMinutes = (new Date() - data.startTime.toDate()) / 60000;
+                }
+                effectiveHours = durationMinutes / 60;
+            }
+
+            validSessions.push(effectiveHours);
+        });
+
+        // 4. Durchschnitt berechnen (Summe / 5)
+        const sumHours = validSessions.reduce((a, b) => a + b, 0);
+        const average = sumHours / 5;
+
+        // 5. Ratchet Update (Ohne Dämpfung, Ziel steigt sofort auf Durchschnitt)
+        let nextGoal = currentGoal;
+        if (average > currentGoal) {
+            nextGoal = average;
+        }
+
+        return {
+            currentGoal: parseFloat(currentGoal.toFixed(2)),
+            projectedAverage: parseFloat(average.toFixed(2)),
+            nextGoal: parseFloat(nextGoal.toFixed(2)),
+            validSessionCount: validSessions.length
+        };
+
+    } catch (e) {
+        console.error("Fehler bei Goal Calculation:", e);
+        return null;
+    }
+};
+
+/**
+ * Fixiert das neue Ziel (Montag früh auszuführen)
+ */
+export const commitNewWeeklyGoal = async (userId) => {
+    const projection = await getProjectedGoal(userId);
+    if (!projection) return;
+
+    await setDoc(doc(db, `users/${userId}/settings/protocol`), {
+        currentDailyGoal: projection.nextGoal,
+        lastGoalUpdate: new Date()
+    }, { merge: true });
+
+    return projection.nextGoal;
+};
+
+
+// --- PROTOCOL SERVICE CLASS ---
+class ProtocolService {
+    constructor() {
+        this.rules = JSON.parse(JSON.stringify(DEFAULT_PROTOCOL_RULES));
+        this.unsubscribe = null;
+    }
+
+    init(userId) {
+        if (!userId) return;
+
+        const rulesRef = doc(db, `users/${userId}/settings/protocol`);
+
+        this.unsubscribe = onSnapshot(rulesRef, (snapshot) => {
+            if (snapshot.exists()) {
+                const data = snapshot.data();
                 
-                <Box sx={{ px: 2 }}>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <Typography variant="body2">Tägliches Ziel</Typography>
-                        <Typography sx={{ color: PALETTE.accents.green }} fontWeight="bold">
-                            {rules.currentDailyGoal ? rules.currentDailyGoal.toFixed(1) : '4.0'} Stunden
-                        </Typography>
-                    </Box>
-                    <Slider 
-                        value={rules.currentDailyGoal || 4} 
-                        min={1} max={12} step={0.5}
-                        onChange={(_, v) => handleRootChange('currentDailyGoal', v)}
-                        sx={{ color: PALETTE.accents.green }}
-                        marks={[
-                            { value: 4, label: '4h' },
-                            { value: 8, label: '8h' },
-                            { value: 12, label: '12h' }
-                        ]}
-                    />
-                </Box>
-            </Paper>
+                this.rules = {
+                    time: { ...DEFAULT_PROTOCOL_RULES.time, ...(data.time || {}) },
+                    tzd: { 
+                        ...DEFAULT_PROTOCOL_RULES.tzd, 
+                        ...(data.tzd || {}),
+                        durationMatrix: data.tzd?.durationMatrix || DEFAULT_PROTOCOL_RULES.tzd.durationMatrix
+                    },
+                    purity: { ...DEFAULT_PROTOCOL_RULES.purity, ...(data.purity || {}) },
+                    instruction: { 
+                        ...DEFAULT_PROTOCOL_RULES.instruction, 
+                        ...(data.instruction || {}),
+                        forcedReleaseMethods: {
+                            ...DEFAULT_PROTOCOL_RULES.instruction.forcedReleaseMethods,
+                            ...(data.instruction?.forcedReleaseMethods || {})
+                        }
+                    },
+                    punishment: { ...DEFAULT_PROTOCOL_RULES.punishment, ...(data.punishment || {}) },
+                    
+                    // WICHTIG: Hier wird das Ziel geladen
+                    currentDailyGoal: data.currentDailyGoal || 4
+                };
+                console.log("Protocol Rules loaded via Service:", this.rules);
+            } else {
+                console.log("No protocol rules found. Creating defaults.");
+                // Wenn das Dokument fehlt, erstellen wir es mit den Defaults + 4h Ziel
+                const initialData = {
+                    ...DEFAULT_PROTOCOL_RULES,
+                    currentDailyGoal: 4
+                };
+                setDoc(rulesRef, initialData, { merge: true });
+                this.rules = JSON.parse(JSON.stringify(initialData));
+            }
+        }, (error) => {
+            console.error("Error listening to protocol rules:", error);
+        });
+    }
 
-            {/* TZD SEKTION */}
-            <Paper sx={{ p: 3, bgcolor: 'rgba(255,255,255,0.05)', borderLeft: `4px solid ${PALETTE.accents.red}` }}>
-                <Typography variant="h6" color="primary" gutterBottom>Zeitloses Diktat (TZD)</Typography>
-                
-                {/* Trigger */}
-                <Box sx={{ px: 2, mb: 3 }}>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <Typography variant="body2">Trigger Wahrscheinlichkeit</Typography>
-                        <Typography color="primary" fontWeight="bold">{(rules.tzd.triggerChance * 100).toFixed(1)}%</Typography>
-                    </Box>
-                    <Slider 
-                        value={rules.tzd.triggerChance} min={0} max={0.5} step={0.01}
-                        onChange={(_, v) => handleChange('tzd', 'triggerChance', v)}
-                    />
-                </Box>
+    getRules() { return this.rules; }
+    
+    getTZDCumulativeMatrix() {
+        const matrix = this.rules.tzd.durationMatrix || [];
+        let cumulative = 0;
+        return matrix.map(zone => {
+            cumulative += zone.weight;
+            return { 
+                min: zone.minHours, 
+                max: zone.maxHours, 
+                cumulative: cumulative 
+            };
+        });
+    }
 
-                {/* Matrix Visualisierung */}
-                <Typography variant="subtitle2" gutterBottom sx={{ mt: 2, color: 'text.secondary' }}>Dauer-Matrix (Wahrscheinlichkeiten)</Typography>
-                {rules.tzd.durationMatrix.map((zone, idx) => (
-                    <Box key={zone.id} sx={{ mb: 2, px: 2, borderLeft: '2px solid #555', pl: 2 }}>
-                        <Grid container justifyContent="space-between">
-                            <Grid item><Typography variant="body2" fontWeight="bold">{zone.label}</Typography></Grid>
-                            <Grid item><Typography variant="caption">{zone.minHours}-{zone.maxHours} Std</Typography></Grid>
-                        </Grid>
-                        <Slider 
-                            value={zone.weight} min={0} max={1} step={0.05}
-                            onChange={(_, v) => handleMatrixChange(idx, v)}
-                            valueLabelDisplay="auto"
-                            valueLabelFormat={v => `${(v*100).toFixed(0)}%`}
-                            sx={{ color: idx === 2 ? PALETTE.accents.red : (idx === 1 ? PALETTE.primary.main : PALETTE.accents.green) }}
-                        />
-                    </Box>
-                ))}
-            </Paper>
-
-            {/* INSTRUCTION (HIDDEN LOGIC) */}
-            <Paper sx={{ p: 3, bgcolor: 'rgba(255,255,255,0.05)', borderLeft: `4px solid ${PALETTE.accents.purple}` }}>
-                <Typography variant="h6" sx={{ color: PALETTE.accents.purple }} gutterBottom>Forced Release (Algorithmus)</Typography>
-                <Typography variant="caption" sx={{ display: 'block', mb: 2, color: 'text.secondary' }}>
-                    Steuert die versteckten Wahrscheinlichkeiten für erzwungene Höhepunkte (ignoriert User-Präferenzen).
-                </Typography>
-                
-                <Box sx={{ px: 2 }}>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <Typography>Trigger Chance (Nachts)</Typography>
-                        <Typography sx={{ color: PALETTE.accents.purple }} fontWeight="bold">{(rules.instruction.forcedReleaseTriggerChance * 100).toFixed(0)}%</Typography>
-                    </Box>
-                    <Slider 
-                        value={rules.instruction.forcedReleaseTriggerChance} 
-                        min={0} max={1} step={0.01}
-                        onChange={(_, v) => handleChange('instruction', 'forcedReleaseTriggerChance', v)}
-                        sx={{ color: PALETTE.accents.purple }}
-                    />
-                </Box>
-            </Paper>
-
-            {/* TIME */}
-            <Paper sx={{ p: 3, bgcolor: 'rgba(255,255,255,0.05)', borderLeft: `4px solid ${PALETTE.accents.blue}` }}>
-                <Typography variant="h6" sx={{ color: PALETTE.accents.blue }} gutterBottom>Zeit-Definitionen</Typography>
-                <Box sx={{ px: 2, display: 'flex', gap: 4 }}>
-                    <Box sx={{ flex: 1 }}>
-                        <Typography variant="caption">Start Tag</Typography>
-                        <Slider 
-                            value={rules.time.dayStartHour} min={4} max={10} step={1}
-                            onChange={(_, v) => handleChange('time', 'dayStartHour', v)}
-                            marks valueLabelDisplay="auto"
-                        />
-                    </Box>
-                    <Box sx={{ flex: 1 }}>
-                        <Typography variant="caption">Start Nacht</Typography>
-                        <Slider 
-                            value={rules.time.nightStartHour} min={18} max={24} step={1}
-                            onChange={(_, v) => handleChange('time', 'nightStartHour', v)}
-                            marks valueLabelDisplay="auto"
-                        />
-                    </Box>
-                </Box>
-            </Paper>
-
-            {/* ACTIONS */}
-            <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end', mt: 2, pb: 4 }}>
-                <Button startIcon={<RestoreIcon />} color="error" onClick={handleReset}>Reset</Button>
-                <Button variant="contained" startIcon={<SaveIcon />} disabled={!hasChanges} onClick={handleSave} sx={DESIGN_TOKENS.buttonGradient}>
-                    Speichern
-                </Button>
-            </Box>
-        </Box>
-    );
+    detach() {
+        if (this.unsubscribe) {
+            this.unsubscribe();
+            this.unsubscribe = null;
+        }
+    }
 }
+
+export const protocolService = new ProtocolService();
