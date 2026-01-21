@@ -72,12 +72,18 @@ const calculateStatsForPeriod = async (userId, startDate, endDate, currentGoal) 
 
     // 4. Durchschnitt berechnen (Summe / 5) - Gemäß User-Regel
     const sumHours = validSessions.reduce((a, b) => a + b, 0);
-    const average = sumHours / 5;
+    // Safety Check: Division durch 0 vermeiden
+    const average = validSessions.length > 0 ? (sumHours / 5) : 0;
 
     // 5. Ratchet Logic
     let nextGoal = currentGoal;
     if (average > currentGoal) {
         nextGoal = average;
+    }
+
+    // NEU: Absolute Obergrenze (Hard Cap) von 6 Stunden
+    if (nextGoal > 6) {
+        nextGoal = 6;
     }
 
     return {

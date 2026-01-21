@@ -63,7 +63,7 @@ export default function Settings() {
   const [weightValue, setWeightValue] = useState(2);
 
   // Preferences
-  const [dailyTargetHours, setDailyTargetHours] = useState(3); 
+  const [dailyTargetHours, setDailyTargetHours] = useState(4); // Default angepasst
   const [nylonRestingHours, setNylonRestingHours] = useState(24); 
   const [maxInstructionItems, setMaxInstructionItems] = useState(1); 
   const [previousTarget, setPreviousTarget] = useState(null);
@@ -98,7 +98,8 @@ export default function Settings() {
   const loadAll = async () => {
       try {
           const userId = currentUser.uid;
-          const [bSnap, mSnap, catSnap, locSnap, locIdxSnap, prefSnap, arSnap, rlSnap, rcSnap, vtSnap] = await Promise.all([
+          // ARCHITEKTUR-KORREKTUR: Wir laden auch das 'protocol' Dokument, da dort der echte Wert für das Dashboard liegt.
+          const [bSnap, mSnap, catSnap, locSnap, locIdxSnap, prefSnap, arSnap, rlSnap, rcSnap, vtSnap, protoSnap] = await Promise.all([
               getDoc(doc(db, `users/${userId}/settings/brands`)),
               getDoc(doc(db, `users/${userId}/settings/materials`)),
               getDoc(doc(db, `users/${userId}/settings/categories`)),
@@ -109,6 +110,7 @@ export default function Settings() {
               getDoc(doc(db, `users/${userId}/settings/runLocations`)),
               getDoc(doc(db, `users/${userId}/settings/runCauses`)),
               getDoc(doc(db, `users/${userId}/settings/vibeTags`)),
+              getDoc(doc(db, `users/${userId}/settings/protocol`)) // NEU
           ]);
 
           if (bSnap.exists()) setBrands(bSnap.data().list || []);
@@ -119,13 +121,23 @@ export default function Settings() {
           
           if (prefSnap.exists()) {
               const d = prefSnap.data();
-              setDailyTargetHours(d.dailyTargetHours || 3);
+              // Wir laden hier zunächst die alten Prefs...
               setNylonRestingHours(d.nylonRestingHours || 24);
               setMaxInstructionItems(d.maxInstructionItems || 1);
               setSissyProtocolEnabled(d.sissyProtocolEnabled || false);
               setNightReleaseProbability(d.nightReleaseProbability || 15);
               setCategoryWeights(d.categoryWeights || {});
               setPreviousTarget(d.previousDailyTarget || null);
+              
+              // Fallback: Wenn kein Protocol existiert, nimm den alten Wert
+              if (!protoSnap.exists() && d.dailyTargetHours) {
+                  setDailyTargetHours(d.dailyTargetHours);
+              }
+          }
+
+          // ...aber wenn ein Protocol-Wert existiert, hat dieser Vorrang (Single Source of Truth)
+          if (protoSnap.exists() && protoSnap.data().currentDailyGoal !== undefined) {
+              setDailyTargetHours(protoSnap.data().currentDailyGoal);
           }
 
           // Forensik Defaults laden falls leer
@@ -200,11 +212,23 @@ export default function Settings() {
   // --- ACTIONS: GENERAL SAVE ---
   const savePreferences = async () => {
       try {
+          // 1. Speichere in ALTE Struktur (für Backward Compatibility)
           await setDoc(doc(db, `users/${currentUser.uid}/settings/preferences`), {
               dailyTargetHours, nylonRestingHours, maxInstructionItems, sissyProtocolEnabled, nightReleaseProbability, categoryWeights
           }, { merge: true });
+
+          // 2. Speichere in NEUE Struktur (für Dashboard & ProtocolService)
+          // Das behebt den "Split-Brain" Fehler: Wir schreiben nun auch dorthin, wo das Dashboard liest.
+          await setDoc(doc(db, `users/${currentUser.uid}/settings/protocol`), {
+              currentDailyGoal: dailyTargetHours,
+              lastGoalUpdate: serverTimestamp() // Wichtig: Damit der Wochen-Algorithmus weiß, dass es manuell geändert wurde
+          }, { merge: true });
+
           showToast("Gespeichert", "success");
-      } catch (e) { showToast("Fehler", "error"); }
+      } catch (e) { 
+          console.error(e);
+          showToast("Fehler beim Speichern", "error"); 
+      }
   };
 
   // --- ACTIONS: CATEGORIES ---

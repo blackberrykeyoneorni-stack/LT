@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { collection, query, where, onSnapshot, doc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { DEFAULT_PROTOCOL_RULES } from '../../config/defaultRules';
 import { checkAndRunWeeklyUpdate } from '../../services/ProtocolService';
@@ -9,13 +9,12 @@ export default function useSessionProgress(currentUser, items) {
     const [loading, setLoading] = useState(true);
     const [nightCompliance, setNightCompliance] = useState(null);
     
-    // Startwert aus den Defaults (Fallback), wird aber durch Firestore überschrieben
+    // Startwert 4 (Fallback)
     const [dailyTargetHours, setDailyTargetHours] = useState(DEFAULT_PROTOCOL_RULES.currentDailyGoal || 4); 
     
     const [completedTodayMinutes, setCompletedTodayMinutes] = useState(0);
 
     // 0. AUTOMATISCHER WOCHEN-CHECK
-    // Prüft beim Laden, ob heute Montag (oder später) ist und ein Update fällig ist.
     useEffect(() => {
         if (!currentUser) return;
         const runUpdate = async () => {
@@ -24,25 +23,32 @@ export default function useSessionProgress(currentUser, items) {
         runUpdate();
     }, [currentUser]);
 
-    // 1. Protokoll-Regeln laden (DAS ZIEL)
+    // 1. ZIEL LADEN (MIT LEGACY FALLBACK)
     useEffect(() => {
         if (!currentUser) return;
         
-        // Wir hören direkt auf das Dokument, wo der Wert gespeichert wird
+        // Listener auf das NEUE Protokoll-System
         const settingsRef = doc(db, `users/${currentUser.uid}/settings/protocol`);
         
-        const unsub = onSnapshot(settingsRef, (docSnap) => {
-            if (docSnap.exists()) {
-                const data = docSnap.data();
-                // Wenn ein Wert da ist, nehmen wir ihn. Sonst Fallback auf 4.
-                if (data.currentDailyGoal !== undefined) {
-                    setDailyTargetHours(data.currentDailyGoal);
-                } else {
+        const unsub = onSnapshot(settingsRef, async (docSnap) => {
+            // A) Neuer Wert gefunden? -> Nimm diesen
+            if (docSnap.exists() && docSnap.data().currentDailyGoal !== undefined) {
+                setDailyTargetHours(docSnap.data().currentDailyGoal);
+            } else {
+                // B) Kein neuer Wert? -> Prüfe ALTE Settings (Legacy Fallback)
+                try {
+                    const prefSnap = await getDoc(doc(db, `users/${currentUser.uid}/settings/preferences`));
+                    if (prefSnap.exists() && prefSnap.data().dailyTargetHours) {
+                        console.log("Using Legacy Target from Preferences (Migration):", prefSnap.data().dailyTargetHours);
+                        setDailyTargetHours(prefSnap.data().dailyTargetHours);
+                    } else {
+                        // C) Weder neu noch alt -> Standard 4
+                        setDailyTargetHours(4);
+                    }
+                } catch (e) {
+                    console.error("Error fetching legacy preferences:", e);
                     setDailyTargetHours(4);
                 }
-            } else {
-                // Dokument existiert noch nicht -> Default
-                setDailyTargetHours(DEFAULT_PROTOCOL_RULES.currentDailyGoal || 4);
             }
         }, (error) => {
             console.error("Fehler beim Laden des Tagesziels:", error);
@@ -108,7 +114,6 @@ export default function useSessionProgress(currentUser, items) {
                 
                 // FILTER: Nacht-Sessions ignorieren!
                 // Das Tagesziel (ProgressBar) bildet nur die Day-Session ab.
-                // Die Nacht-Session wird separat via nightCompliance getrackt.
                 const isNight = data.period && data.period.toLowerCase().includes('night');
 
                 if (!isNight && data.endTime) {
