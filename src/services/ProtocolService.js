@@ -81,9 +81,9 @@ const calculateStatsForPeriod = async (userId, startDate, endDate, currentGoal) 
         nextGoal = average;
     }
 
-    // NEU: Absolute Obergrenze (Hard Cap) von 6 Stunden
-    if (nextGoal > 6) {
-        nextGoal = 6;
+    // NEU: Absolute Obergrenze (Hard Cap) von 12 Stunden
+    if (nextGoal > 12) {
+        nextGoal = 12;
     }
 
     return {

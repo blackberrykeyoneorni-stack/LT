@@ -31,15 +31,15 @@ export default function useSessionProgress(currentUser, items) {
         const settingsRef = doc(db, `users/${currentUser.uid}/settings/protocol`);
         
         const unsub = onSnapshot(settingsRef, async (docSnap) => {
-            // A) Neuer Wert gefunden? -> Nimm diesen
             if (docSnap.exists() && docSnap.data().currentDailyGoal !== undefined) {
+                // A) Neuer Wert gefunden -> Nimm diesen
                 setDailyTargetHours(docSnap.data().currentDailyGoal);
             } else {
                 // B) Kein neuer Wert? -> Prüfe ALTE Settings (Legacy Fallback)
                 try {
                     const prefSnap = await getDoc(doc(db, `users/${currentUser.uid}/settings/preferences`));
                     if (prefSnap.exists() && prefSnap.data().dailyTargetHours) {
-                        console.log("Using Legacy Target from Preferences (Migration):", prefSnap.data().dailyTargetHours);
+                        console.log("Using Legacy Target from Preferences:", prefSnap.data().dailyTargetHours);
                         setDailyTargetHours(prefSnap.data().dailyTargetHours);
                     } else {
                         // C) Weder neu noch alt -> Standard 4
@@ -57,22 +57,47 @@ export default function useSessionProgress(currentUser, items) {
         return () => unsub();
     }, [currentUser]);
 
-    // 2. Nacht-Compliance laden
+    // 2. NACHT-COMPLIANCE LADEN (VIA SESSION END-TIME)
+    // Wir schauen: Gibt es eine Instruction-Session, die HEUTE beendet wurde und "night" war?
     useEffect(() => {
         if (!currentUser) return;
-        const unsub = onSnapshot(doc(db, `users/${currentUser.uid}/status/nightCompliance`), (docSnap) => {
-            if (docSnap.exists()) {
-                const data = docSnap.data();
-                const todayKey = new Date().toISOString().split('T')[0];
-                if (data.date === todayKey) {
-                    setNightCompliance(data.success);
-                } else {
-                    setNightCompliance(false);
-                }
+        
+        const startOfDay = new Date();
+        startOfDay.setHours(0,0,0,0);
+
+        // Query: Alle Instructions, die HEUTE geendet haben
+        const qNightEnded = query(
+            collection(db, `users/${currentUser.uid}/sessions`),
+            where('type', '==', 'instruction'),
+            where('endTime', '>=', startOfDay)
+        );
+
+        const unsub = onSnapshot(qNightEnded, (snapshot) => {
+            // Prüfen, ob eine davon eine Nachtsession war
+            const hasEndedNightSession = snapshot.docs.some(doc => {
+                const data = doc.data();
+                return data.period && data.period.toLowerCase().includes('night');
+            });
+
+            if (hasEndedNightSession) {
+                setNightCompliance(true);
             } else {
-                setNightCompliance(false);
+                // Fallback: Prüfe, ob aktuell eine Nachtsession LÄUFT (die zählt als "im Gange" -> noch nicht failed)
+                // Dies ist optional, je nachdem ob du den Mond schon währenddessen golden haben willst.
+                // Aktuell lassen wir ihn erst golden werden, wenn sie beendet ist (oder wir prüfen status doc).
+                
+                // Wir checken sicherheitshalber noch das Status-Doc als Fallback, falls die Session gestern endete
+                // aber logisch zu heute gehört (Randfall).
+                getDoc(doc(db, `users/${currentUser.uid}/status/nightCompliance`)).then(snap => {
+                   if(snap.exists() && snap.data().success && snap.data().date === new Date().toISOString().split('T')[0]) {
+                       setNightCompliance(true);
+                   } else {
+                       setNightCompliance(false);
+                   }
+                });
             }
         });
+
         return () => unsub();
     }, [currentUser]);
 
@@ -96,7 +121,7 @@ export default function useSessionProgress(currentUser, items) {
             setLoading(false);
         });
 
-        // B) Historische Sessions von HEUTE
+        // B) Historische Sessions von HEUTE (für Progress Bar Minuten)
         const startOfDay = new Date();
         startOfDay.setHours(0,0,0,0);
         
@@ -112,8 +137,7 @@ export default function useSessionProgress(currentUser, items) {
             snapshot.docs.forEach(doc => {
                 const data = doc.data();
                 
-                // FILTER: Nacht-Sessions ignorieren!
-                // Das Tagesziel (ProgressBar) bildet nur die Day-Session ab.
+                // FILTER: Nacht-Sessions ignorieren für den Tages-Balken!
                 const isNight = data.period && data.period.toLowerCase().includes('night');
 
                 if (!isNight && data.endTime) {
@@ -178,7 +202,6 @@ export default function useSessionProgress(currentUser, items) {
         progress: calculateProgress(),
         dailyTargetHours,
         nightCompliance,
-        // Dummies
         startInstructionSession: async () => {}, 
         stopSession: async () => {},
         registerRelease: async () => {}
