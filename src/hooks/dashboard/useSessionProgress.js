@@ -2,16 +2,27 @@ import { useState, useEffect } from 'react';
 import { collection, query, where, onSnapshot, doc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { DEFAULT_PROTOCOL_RULES } from '../../config/defaultRules';
+import { checkAndRunWeeklyUpdate } from '../../services/ProtocolService';
 
 export default function useSessionProgress(currentUser, items) {
     const [activeSessions, setActiveSessions] = useState([]);
     const [loading, setLoading] = useState(true);
     const [nightCompliance, setNightCompliance] = useState(null);
     
-    // WICHTIG: Startwert aus den Defaults, nicht hart 4
+    // Startwert aus den Defaults (Fallback), wird aber durch Firestore überschrieben
     const [dailyTargetHours, setDailyTargetHours] = useState(DEFAULT_PROTOCOL_RULES.currentDailyGoal || 4); 
     
     const [completedTodayMinutes, setCompletedTodayMinutes] = useState(0);
+
+    // 0. AUTOMATISCHER WOCHEN-CHECK
+    // Prüft beim Laden, ob heute Montag (oder später) ist und ein Update fällig ist.
+    useEffect(() => {
+        if (!currentUser) return;
+        const runUpdate = async () => {
+            await checkAndRunWeeklyUpdate(currentUser.uid);
+        };
+        runUpdate();
+    }, [currentUser]);
 
     // 1. Protokoll-Regeln laden (DAS ZIEL)
     useEffect(() => {
@@ -24,7 +35,6 @@ export default function useSessionProgress(currentUser, items) {
             if (docSnap.exists()) {
                 const data = docSnap.data();
                 // Wenn ein Wert da ist, nehmen wir ihn. Sonst Fallback auf 4.
-                // Das reagiert sofort auf Änderungen im Slider (Settings).
                 if (data.currentDailyGoal !== undefined) {
                     setDailyTargetHours(data.currentDailyGoal);
                 } else {
@@ -95,7 +105,13 @@ export default function useSessionProgress(currentUser, items) {
 
             snapshot.docs.forEach(doc => {
                 const data = doc.data();
-                if (data.endTime) {
+                
+                // FILTER: Nacht-Sessions ignorieren!
+                // Das Tagesziel (ProgressBar) bildet nur die Day-Session ab.
+                // Die Nacht-Session wird separat via nightCompliance getrackt.
+                const isNight = data.period && data.period.toLowerCase().includes('night');
+
+                if (!isNight && data.endTime) {
                     const duration = (data.endTime.toDate() - data.startTime.toDate()) / 60000;
                     if (duration > maxDuration) maxDuration = duration;
                 }
@@ -113,6 +129,7 @@ export default function useSessionProgress(currentUser, items) {
     const calculateProgress = () => {
         const now = new Date();
         
+        // Auch bei aktiven Sessions: Nur zählen, wenn es KEINE Nacht-Session ist
         const activeInstruction = activeSessions.find(s => 
             s.type === 'instruction' && 
             (!s.period || !s.period.includes('night'))
@@ -132,7 +149,7 @@ export default function useSessionProgress(currentUser, items) {
 
         const targetMinutes = dailyTargetHours * 60;
         
-        // Logik: Ziel gilt als erreicht, wenn aktuelle ODER historische Zeit >= Ziel
+        // Logik: Ziel gilt als erreicht, wenn aktuelle ODER historische Zeit (Tag) >= Ziel
         const isGoalMet = currentMinutes >= targetMinutes;
 
         // Wenn Session inaktiv und Ziel nicht erreicht -> Reset auf 0 (Alles oder Nichts)

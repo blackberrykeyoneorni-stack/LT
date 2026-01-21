@@ -1,29 +1,98 @@
 import { db } from '../firebase';
-import { doc, setDoc, onSnapshot, getDoc, collection, query, where, getDocs, orderBy } from 'firebase/firestore';
+import { 
+    doc, setDoc, onSnapshot, getDoc, collection, query, where, getDocs, orderBy, Timestamp, serverTimestamp 
+} from 'firebase/firestore';
 import { DEFAULT_PROTOCOL_RULES } from '../config/defaultRules';
 
-// --- ALGORITHMUS FÜR WOCHENZIEL & TZD ---
+// --- HELPER ---
 
-// Helper: TZD Berechnung (Linear + Wurzeldämpfung)
+// Berechnet den Montag der aktuellen Woche (00:00 Uhr)
+const getStartOfWeek = (date) => {
+    const d = new Date(date);
+    const day = d.getDay();
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Montag berechnen
+    d.setDate(diff);
+    d.setHours(0, 0, 0, 0);
+    return d;
+};
+
+// TZD Berechnung (Linear + Wurzeldämpfung)
 export const calculateTZDEffectiveHours = (durationMinutes) => {
     const durationHours = durationMinutes / 60;
-    
-    // 1. Lineare Verteilung (6h=100%, 36h=40%)
-    // Formel: Faktor = 1.12 - 0.02 * t
+    // 1. Lineare Verteilung (6h=100%, 36h=40%) -> Faktor = 1.12 - 0.02 * t
     const factor = 1.12 - (0.02 * durationHours);
-    
-    // Effektive Stunden nach linearer Gewichtung
+    // Effektive Stunden
     const linearHours = durationHours * factor;
-    
-    // 2. Wurzeldämpfung (nur auf das TZD Ergebnis, wie gewünscht)
-    // Verhindert, dass extrem lange TZD Sessions den Durchschnitt sprengen
+    // 2. Wurzeldämpfung
     const dampenedHours = Math.sqrt(linearHours);
-
     return dampenedHours;
 };
 
+// KERN-ALGORITHMUS: Berechnet Statistiken für einen Zeitraum
+const calculateStatsForPeriod = async (userId, startDate, endDate, currentGoal) => {
+    const q = query(
+        collection(db, `users/${userId}/sessions`),
+        where('type', '==', 'instruction'),
+        where('startTime', '>=', startDate),
+        where('startTime', '<', endDate),
+        orderBy('startTime', 'desc')
+    );
+
+    const querySnapshot = await getDocs(q);
+    const validSessions = [];
+
+    querySnapshot.forEach(doc => {
+        const data = doc.data();
+        
+        // FILTER: Nur Tag-Sessions (kein 'night' im Period-String)
+        const isNight = data.period && data.period.toLowerCase().includes('night');
+        if (isNight) return;
+
+        // FILTER: Nacht-Compliance Check
+        if (data.nightSuccess === false) return;
+
+        // BERECHNUNG
+        let effectiveHours = 0;
+        
+        if (data.tzdExecuted && data.tzdDurationMinutes) {
+            effectiveHours = calculateTZDEffectiveHours(data.tzdDurationMinutes);
+        } else {
+            let durationMinutes = 0;
+            if (data.endTime) {
+                durationMinutes = (data.endTime.toDate() - data.startTime.toDate()) / 60000;
+            } else {
+                // Falls Session noch läuft
+                durationMinutes = (new Date() - data.startTime.toDate()) / 60000;
+            }
+            effectiveHours = durationMinutes / 60;
+        }
+
+        validSessions.push(effectiveHours);
+    });
+
+    // 4. Durchschnitt berechnen (Summe / 5) - Gemäß User-Regel
+    const sumHours = validSessions.reduce((a, b) => a + b, 0);
+    const average = sumHours / 5;
+
+    // 5. Ratchet Logic
+    let nextGoal = currentGoal;
+    if (average > currentGoal) {
+        nextGoal = average;
+    }
+
+    return {
+        average: parseFloat(average.toFixed(2)),
+        nextGoal: parseFloat(nextGoal.toFixed(2)),
+        sessionCount: validSessions.length,
+        currentGoal
+    };
+};
+
+// --- EXPORTIERTE FUNKTIONEN ---
+
 /**
  * Berechnet das vorgeschlagene Ziel für die nächste Woche (Preview).
+ * Basiert auf der laufenden Woche (seit Montag).
  */
 export const getProjectedGoal = async (userId) => {
     try {
@@ -32,72 +101,21 @@ export const getProjectedGoal = async (userId) => {
         const settingsSnap = await getDoc(settingsRef);
         const currentGoal = settingsSnap.exists() ? (settingsSnap.data().currentDailyGoal || 4) : 4;
 
-        // 2. Zeitraum definieren (Seit letztem Montag)
+        // 2. Zeitraum: Dieser Montag bis Jetzt
         const now = new Date();
-        const dayOfWeek = now.getDay(); // 0=So, 1=Mo...
-        const diffToMonday = (dayOfWeek + 6) % 7;
-        const monday = new Date(now);
-        monday.setDate(now.getDate() - diffToMonday);
-        monday.setHours(0, 0, 0, 0);
+        const thisMonday = getStartOfWeek(now);
+        
+        // Ende ist "Jetzt" (für Preview)
+        const endOfPeriod = new Date();
+        endOfPeriod.setDate(endOfPeriod.getDate() + 1); // Sicherheitshalber morgen, um heute komplett einzuschließen
 
-        // 3. Sessions laden
-        const q = query(
-            collection(db, `users/${userId}/sessions`),
-            where('type', '==', 'instruction'),
-            where('startTime', '>=', monday),
-            orderBy('startTime', 'desc')
-        );
-
-        const querySnapshot = await getDocs(q);
-        const validSessions = [];
-
-        querySnapshot.forEach(doc => {
-            const data = doc.data();
-            
-            // FILTER: Nur Tag-Sessions (kein 'night' im Period-String)
-            const isNight = data.period && data.period.toLowerCase().includes('night');
-            if (isNight) return;
-
-            // FILTER: Nacht-Compliance Check
-            // Wenn nightSuccess explizit false ist, zählt der Tag 0.
-            if (data.nightSuccess === false) return;
-
-            // BERECHNUNG
-            let effectiveHours = 0;
-            
-            if (data.tzdExecuted && data.tzdDurationMinutes) {
-                // TZD Logik: Linear + Wurzel
-                effectiveHours = calculateTZDEffectiveHours(data.tzdDurationMinutes);
-            } else {
-                // Reguläre Instruction: Volle Zeit
-                let durationMinutes = 0;
-                if (data.endTime) {
-                    durationMinutes = (data.endTime.toDate() - data.startTime.toDate()) / 60000;
-                } else {
-                    // Falls Session noch läuft (Live-Preview)
-                    durationMinutes = (new Date() - data.startTime.toDate()) / 60000;
-                }
-                effectiveHours = durationMinutes / 60;
-            }
-
-            validSessions.push(effectiveHours);
-        });
-
-        // 4. Durchschnitt berechnen (Summe / 5)
-        const sumHours = validSessions.reduce((a, b) => a + b, 0);
-        const average = sumHours / 5;
-
-        // 5. Ratchet Update (Ohne Dämpfung, Ziel steigt sofort auf Durchschnitt)
-        let nextGoal = currentGoal;
-        if (average > currentGoal) {
-            nextGoal = average;
-        }
+        const stats = await calculateStatsForPeriod(userId, thisMonday, endOfPeriod, currentGoal);
 
         return {
-            currentGoal: parseFloat(currentGoal.toFixed(2)),
-            projectedAverage: parseFloat(average.toFixed(2)),
-            nextGoal: parseFloat(nextGoal.toFixed(2)),
-            validSessionCount: validSessions.length
+            currentGoal: stats.currentGoal,
+            projectedAverage: stats.average,
+            nextGoal: stats.nextGoal,
+            validSessionCount: stats.sessionCount
         };
 
     } catch (e) {
@@ -107,18 +125,68 @@ export const getProjectedGoal = async (userId) => {
 };
 
 /**
- * Fixiert das neue Ziel (Montag früh auszuführen)
+ * PRÜFT UND FÜHRT WOCHEN-UPDATE DURCH (AUTOMATISCH)
+ * Wird beim Start der App aufgerufen.
+ */
+export const checkAndRunWeeklyUpdate = async (userId) => {
+    try {
+        const settingsRef = doc(db, `users/${userId}/settings/protocol`);
+        const settingsSnap = await getDoc(settingsRef);
+        
+        let currentGoal = 4;
+        let lastUpdateDate = null;
+
+        if (settingsSnap.exists()) {
+            const data = settingsSnap.data();
+            currentGoal = data.currentDailyGoal || 4;
+            if (data.lastGoalUpdate) {
+                lastUpdateDate = data.lastGoalUpdate.toDate();
+            }
+        }
+
+        const now = new Date();
+        const currentWeekStart = getStartOfWeek(now);
+
+        // Check: Wurde diese Woche schon geupdatet?
+        // Wenn lastUpdateDate existiert UND im gleichen Wochen-Intervall liegt wie "jetzt", abbrechen.
+        if (lastUpdateDate && getStartOfWeek(lastUpdateDate).getTime() === currentWeekStart.getTime()) {
+            // Update für diese Woche schon gelaufen.
+            return;
+        }
+
+        console.log("Weekly Protocol Update: Triggered.");
+
+        // Wir brauchen die Stats der VORHERIGEN Woche
+        const lastWeekStart = new Date(currentWeekStart);
+        lastWeekStart.setDate(lastWeekStart.getDate() - 7);
+        
+        // Zeitraum: Letzter Montag bis Diesen Montag (exklusive)
+        const stats = await calculateStatsForPeriod(userId, lastWeekStart, currentWeekStart, currentGoal);
+
+        // Update durchführen
+        await setDoc(settingsRef, {
+            currentDailyGoal: stats.nextGoal,
+            lastGoalUpdate: serverTimestamp(), // Wichtig: Server-Zeit für Konsistenz
+            lastWeekStats: { // Optional: Historie speichern
+                average: stats.average,
+                previousGoal: currentGoal,
+                date: new Date()
+            }
+        }, { merge: true });
+
+        console.log(`Weekly Goal updated from ${currentGoal}h to ${stats.nextGoal}h based on avg ${stats.average}h`);
+        return stats.nextGoal;
+
+    } catch (e) {
+        console.error("Fehler beim Wochen-Update:", e);
+    }
+};
+
+/**
+ * Manuelles Fixieren (Legacy/Debug)
  */
 export const commitNewWeeklyGoal = async (userId) => {
-    const projection = await getProjectedGoal(userId);
-    if (!projection) return;
-
-    await setDoc(doc(db, `users/${userId}/settings/protocol`), {
-        currentDailyGoal: projection.nextGoal,
-        lastGoalUpdate: new Date()
-    }, { merge: true });
-
-    return projection.nextGoal;
+    return checkAndRunWeeklyUpdate(userId);
 };
 
 
@@ -159,10 +227,8 @@ class ProtocolService {
                     // WICHTIG: Hier wird das Ziel geladen
                     currentDailyGoal: data.currentDailyGoal || 4
                 };
-                console.log("Protocol Rules loaded via Service:", this.rules);
             } else {
                 console.log("No protocol rules found. Creating defaults.");
-                // Wenn das Dokument fehlt, erstellen wir es mit den Defaults + 4h Ziel
                 const initialData = {
                     ...DEFAULT_PROTOCOL_RULES,
                     currentDailyGoal: 4

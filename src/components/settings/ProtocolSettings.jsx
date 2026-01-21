@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Typography, Slider, Switch, FormControlLabel, Paper, Button, Grid, Divider } from '@mui/material';
-import { doc, updateDoc, getDoc } from 'firebase/firestore';
+import { doc, updateDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import { DEFAULT_PROTOCOL_RULES } from '../../config/defaultRules';
@@ -61,7 +61,14 @@ export default function ProtocolSettings() {
 
     const handleSave = async () => {
         try {
-            await updateDoc(doc(db, `users/${currentUser.uid}/settings/protocol`), rules);
+            // WICHTIG: Wir setzen auch lastGoalUpdate, damit der automatische Wochen-Check
+            // diese manuelle Änderung als "Update für diese Woche" akzeptiert und nicht überschreibt.
+            const payload = {
+                ...rules,
+                lastGoalUpdate: serverTimestamp() 
+            };
+            
+            await updateDoc(doc(db, `users/${currentUser.uid}/settings/protocol`), payload);
             setHasChanges(false);
             alert("Protokoll-Regeln aktualisiert.");
         } catch (e) {
