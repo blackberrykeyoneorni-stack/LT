@@ -1,46 +1,56 @@
 import { useState, useEffect } from 'react';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { db } from '../firebase';
+import { useAuth } from '../contexts/AuthContext';
 
 export function useKPIs(items, activeSessionsInput, historySessionsInput = []) {
-    const [kpis, setKpis] = useState({
-        // Struktur für InfoTiles.jsx
-        health: { orphanCount: 0 },
-        financials: { avgCPW: 0 },
-        usage: { nylonIndex: 0 }, // InfoTiles erwartet hier eine Zahl
-        spermaScore: { rate: 0, total: 0, kept: 0 },
-
-        // Struktur für Stats.jsx
-        coreMetrics: {
-            enclosure: 0,
-            nocturnal: 0,
-            nylonGap: 0,
-            cpnh: 0,
-            complianceLag: 0,
-            exposure: 0,
-            resistance: 0,
-            voluntarism: 0,
-            endurance: 0,
-            submission: 0, // Legacy support
-            denial: 0,
-            chastity: 0
-        },
-        femIndex: {
-            score: 0,
-            trend: 'neutral'
-        },
-        basics: {
-            activeItems: 0,
-            washing: 0,
-            wornToday: 0,
-            archived: 0
-        }
+    const { currentUser } = useAuth();
+    
+    // State für Release-Statistiken
+    const [releaseStats, setReleaseStats] = useState({ 
+        totalReleases: 0, 
+        cleanReleases: 0,
+        keptOn: 0 
     });
 
+    const [kpis, setKpis] = useState({
+        health: { orphanCount: 0 },
+        financials: { avgCPW: 0 },
+        usage: { nylonIndex: 0 },
+        spermaScore: { rate: 0, total: 0, count: 0 }, // 'count' ist der Zähler (clean)
+        coreMetrics: {
+            enclosure: 0, nocturnal: 0, nylonGap: 0, cpnh: 0,
+            complianceLag: 0, exposure: 0, resistance: 0,
+            voluntarism: 0, endurance: 0, submission: 85,
+            denial: 12, chastity: 0
+        },
+        femIndex: { score: 0, trend: 'neutral' },
+        basics: { activeItems: 0, washing: 0, wornToday: 0, archived: 0 }
+    });
+
+    // 1. LISTENER für Release-Daten
+    useEffect(() => {
+        if (!currentUser) return;
+        
+        const statsRef = doc(db, `users/${currentUser.uid}/stats/releaseStats`);
+        const unsub = onSnapshot(statsRef, (docSnap) => {
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                setReleaseStats({
+                    totalReleases: Number(data.totalReleases) || 0,
+                    cleanReleases: Number(data.cleanReleases) || 0,
+                    keptOn: Number(data.keptOn) || 0
+                });
+            }
+        });
+
+        return () => unsub();
+    }, [currentUser]);
+
+    // 2. HAUPT-BERECHNUNG
     useEffect(() => {
         if (!Array.isArray(items)) return;
 
-        // 1. Session-Daten konsolidieren
-        // Dashboard übergibt nur arg2 (activeSessions)
-        // Stats übergibt arg2=[] und arg3 (historySessions)
         const sessionsToAnalyze = (historySessionsInput && historySessionsInput.length > 0) 
             ? historySessionsInput 
             : (activeSessionsInput || []);
@@ -51,68 +61,47 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput = []) {
         const activeItems = items.filter(i => i.status === 'active');
         const washingItems = items.filter(i => i.status === 'washing');
         const archivedItems = items.filter(i => i.status === 'archived');
-        
-        // Orphan: Active Item mit 0 Wears
         const orphanCount = items.filter(i => i.status === 'active' && (!i.wearCount || i.wearCount === 0)).length;
 
-        // B. FINANCIALS (CPW)
-        // Ø Cost per Wear aller Items, die mindestens 1x getragen wurden
-        const wornItems = items.filter(i => i.wearCount > 0 && i.cost > 0);
-        let totalCPW = 0;
-        wornItems.forEach(i => {
-            totalCPW += (i.cost / i.wearCount);
+        // B. FINANCIALS (CPW - MATCH STATS.JSX)
+        // Logik 1:1 aus Stats.jsx übernommen:
+        // Summe ALLER Kosten (auch ungetragene) / Summe ALLER Wears
+        let totalCost = 0; 
+        let totalWears = 0;
+        
+        items.forEach(i => { 
+            totalCost += (parseFloat(i.cost) || 0); 
+            totalWears += (parseInt(i.wearCount) || 0); 
         });
-        const avgCPW = wornItems.length > 0 ? (totalCPW / wornItems.length) : 0;
+        
+        const avgCPW = totalWears > 0 ? (totalCost / totalWears) : 0;
 
-        // C. NYLON INDEX & GAP
+        // C. NYLON INDEX
         const tightsItems = items.filter(i => 
-            i.status !== 'archived' && 
-            i.subCategory && 
-            typeof i.subCategory === 'string' &&
+            i.status !== 'archived' && i.subCategory && typeof i.subCategory === 'string' &&
             (i.subCategory.toLowerCase().includes('strumpfhose') || i.mainCategory?.toLowerCase().includes('nylon'))
         );
-
         const totalTightsMinutes = tightsItems.reduce((acc, curr) => acc + (Number(curr.totalMinutes) || 0), 0);
         const nylonIndexVal = tightsItems.length > 0 ? (totalTightsMinutes / tightsItems.length / 60) : 0;
-
-        // Nylon Gap (Dummy calculation für Stats, falls keine echten Daten)
-        // Hier könnte man die durchschnittliche Lücke zwischen Sessions berechnen
         const nylonGap = Math.max(0, 24 - nylonIndexVal); 
 
         // D. CORE METRICS
-        // Enclosure: Anteil Nylon Items am Gesamtbestand (active)
         const totalActive = activeItems.length + washingItems.length + items.filter(i=>i.status==='wearing').length;
-        const nylonCount = tightsItems.length;
-        const enclosure = totalActive > 0 ? Math.round((nylonCount / totalActive) * 100) : 0;
+        const enclosure = totalActive > 0 ? Math.round((tightsItems.length / totalActive) * 100) : 0;
 
-        // Nocturnal: Nacht-Sessions Quote
         const nightSessions = sessionsToAnalyze.filter(s => s.period && s.period.includes('night'));
-        const nocturnal = sessionsToAnalyze.length > 0 
-            ? Math.round((nightSessions.length / sessionsToAnalyze.length) * 100) 
-            : 0;
-            
-        // Exposure (Tragezeit Ratio - Mock)
-        const exposure = 45; // Platzhalter, müsste Zeit/24h rechnen
-
-        // Resistance (Punishment Quote)
-        const punishments = sessionsToAnalyze.filter(s => s.type === 'punishment');
-        const resistance = sessionsToAnalyze.length > 0 
-            ? Math.round((punishments.length / sessionsToAnalyze.length) * 100) 
-            : 0;
-
-        // CPNH (Cost Per Nylon Hour)
-        // Summe Kosten aller Nylons / Summe Stunden aller Nylons
+        const nocturnal = sessionsToAnalyze.length > 0 ? Math.round((nightSessions.length / sessionsToAnalyze.length) * 100) : 0;
+        
         const totalNylonCost = tightsItems.reduce((acc, i) => acc + (Number(i.cost) || 0), 0);
         const totalNylonHours = totalTightsMinutes / 60;
         const cpnh = totalNylonHours > 0 ? parseFloat((totalNylonCost / totalNylonHours).toFixed(2)) : 0;
 
-        // Voluntarism & Compliance
         const voluntary = sessionsToAnalyze.filter(s => s.type === 'voluntary').length;
         const voluntarism = sessionsToAnalyze.length > 0 ? Math.round((voluntary / sessionsToAnalyze.length) * 100) : 0;
-        const complianceLag = 12; // Mock in Minuten
+        
+        const punishments = sessionsToAnalyze.filter(s => s.type === 'punishment');
+        const resistance = sessionsToAnalyze.length > 0 ? Math.round((punishments.length / sessionsToAnalyze.length) * 100) : 0;
 
-        // Endurance (Ø Session Dauer in Stunden)
-        // Nur abgeschlossene Sessions zählen
         const closedSessions = sessionsToAnalyze.filter(s => s.endTime && s.startTime);
         let totalDurationHours = 0;
         closedSessions.forEach(s => {
@@ -122,13 +111,20 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput = []) {
         });
         const endurance = closedSessions.length > 0 ? parseFloat((totalDurationHours / closedSessions.length).toFixed(1)) : 0;
 
-        // E. SPERMA SCORE (Mock/Placeholder wenn keine Daten)
-        const spermaScore = { rate: 100, total: 5, kept: 5 }; 
+        // E. SPERMA SCORE (REVERT TO CLEAN RELEASES)
+        // Rate = (Clean Releases / Total Releases) * 100
+        const spermaRate = releaseStats.totalReleases > 0 
+            ? Math.round((releaseStats.cleanReleases / releaseStats.totalReleases) * 100) 
+            : 0; 
 
-        // F. FEM INDEX (Composite)
-        const femScore = Math.round(
-            (enclosure * 0.3) + (nocturnal * 0.2) + (nylonIndexVal * 2) // Einfache Gewichtung
-        );
+        const spermaScore = { 
+            rate: spermaRate, 
+            total: releaseStats.totalReleases, 
+            count: releaseStats.cleanReleases // Zeigt wieder "Sauber" an (4/5)
+        };
+
+        // F. FEM INDEX
+        const femScore = Math.round((enclosure * 0.3) + (nocturnal * 0.2) + (nylonIndexVal * 2));
 
         // G. BASICS WORN TODAY
         const startOfToday = new Date();
@@ -145,35 +141,16 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput = []) {
         });
 
         setKpis({
-            health: { 
-                orphanCount 
-            },
-            financials: { 
-                avgCPW 
-            },
-            usage: { 
-                nylonIndex: parseFloat(nylonIndexVal.toFixed(1)) // Zahl!
-            },
+            health: { orphanCount },
+            financials: { avgCPW },
+            usage: { nylonIndex: parseFloat(nylonIndexVal.toFixed(1)) },
             spermaScore,
             coreMetrics: {
-                enclosure,
-                nocturnal,
-                nylonGap: parseFloat(nylonGap.toFixed(1)),
-                cpnh,
-                complianceLag,
-                exposure,
-                resistance,
-                voluntarism,
-                endurance,
-                // Legacy / Fallback
-                submission: 85,
-                denial: 12,
-                chastity: enclosure // Mapping
+                enclosure, nocturnal, nylonGap: parseFloat(nylonGap.toFixed(1)),
+                cpnh, complianceLag: 12, exposure: 45, resistance,
+                voluntarism, endurance, submission: 85, denial: 12, chastity: enclosure
             },
-            femIndex: {
-                score: Math.min(100, femScore),
-                trend: 'stable'
-            },
+            femIndex: { score: Math.min(100, femScore), trend: 'stable' },
             basics: {
                 activeItems: activeItems.length,
                 washing: washingItems.length,
@@ -182,7 +159,7 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput = []) {
             }
         });
 
-    }, [items, activeSessionsInput, historySessionsInput]);
+    }, [items, activeSessionsInput, historySessionsInput, releaseStats]);
 
     return kpis;
 }
