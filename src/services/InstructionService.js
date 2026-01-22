@@ -299,12 +299,12 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
         let forcedRelease = { required: false, executed: false, method: null };
         
         if (isNightInstruction) {
-            // 15% Wahrscheinlichkeit
-            if (Math.random() < 0.15) {
+            // 75% Wahrscheinlichkeit
+            if (Math.random() < 0.75) {
                 const rMethod = Math.random();
-                let method = 'hand'; // 34%
-                if (rMethod >= 0.34 && rMethod < 0.67) method = 'toy_vaginal'; // 33%
-                else if (rMethod >= 0.67) method = 'toy_anal'; // 33%
+                let method = 'hand'; // 25%
+                if (rMethod >= 0.25 && rMethod < 0.5) method = 'toy_vaginal'; // 25%
+                else if (rMethod >= 0.5) method = 'toy_anal'; // 50%
 
                 forcedRelease = {
                     required: true,

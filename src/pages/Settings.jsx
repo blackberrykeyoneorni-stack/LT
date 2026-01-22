@@ -11,6 +11,9 @@ import { generateBackup, downloadBackupFile } from '../services/BackupService';
 import { enableBiometrics, disableBiometrics, isBiometricSupported } from '../services/BiometricService';
 import { addSuspension, getSuspensions, terminateSuspension } from '../services/SuspensionService';
 
+// NEU: Import der ProtocolSettings Komponente
+import ProtocolSettings from '../components/settings/ProtocolSettings';
+
 import {
   Box, Container, Typography, TextField, Button, Paper,
   Accordion, AccordionSummary, AccordionDetails,
@@ -26,6 +29,7 @@ import { DESIGN_TOKENS, PALETTE } from '../theme/obsidianDesign';
 import { Icons } from '../theme/appIcons';
 import MedicalServicesIcon from '@mui/icons-material/MedicalServices';
 import ScienceIcon from '@mui/icons-material/Science';
+import TuneIcon from '@mui/icons-material/Tune'; // Icon für Protocol
 
 const formatHours = (val) => `${val}h`;
 
@@ -63,10 +67,9 @@ export default function Settings() {
   const [weightValue, setWeightValue] = useState(2);
 
   // Preferences
-  const [dailyTargetHours, setDailyTargetHours] = useState(4); // Default angepasst
+  // HINWEIS: dailyTargetHours hier entfernt, da es jetzt via ProtocolSettings (ProtocolService) gesteuert wird
   const [nylonRestingHours, setNylonRestingHours] = useState(24); 
   const [maxInstructionItems, setMaxInstructionItems] = useState(1); 
-  const [previousTarget, setPreviousTarget] = useState(null);
   const [sissyProtocolEnabled, setSissyProtocolEnabled] = useState(false); 
   const [nightReleaseProbability, setNightReleaseProbability] = useState(15);
   
@@ -80,7 +83,6 @@ export default function Settings() {
   // UI States
   const [loading, setLoading] = useState(true); 
   const [backupLoading, setBackupLoading] = useState(false); 
-  const [resetModalOpen, setResetModalOpen] = useState(false); 
   const [toast, setToast] = useState({ open: false, message: '', severity: 'success' });
   
   const showToast = (message, severity = 'success') => setToast({ open: true, message, severity });
@@ -98,8 +100,7 @@ export default function Settings() {
   const loadAll = async () => {
       try {
           const userId = currentUser.uid;
-          // ARCHITEKTUR-KORREKTUR: Wir laden auch das 'protocol' Dokument, da dort der echte Wert für das Dashboard liegt.
-          const [bSnap, mSnap, catSnap, locSnap, locIdxSnap, prefSnap, arSnap, rlSnap, rcSnap, vtSnap, protoSnap] = await Promise.all([
+          const [bSnap, mSnap, catSnap, locSnap, locIdxSnap, prefSnap, arSnap, rlSnap, rcSnap, vtSnap] = await Promise.all([
               getDoc(doc(db, `users/${userId}/settings/brands`)),
               getDoc(doc(db, `users/${userId}/settings/materials`)),
               getDoc(doc(db, `users/${userId}/settings/categories`)),
@@ -110,7 +111,6 @@ export default function Settings() {
               getDoc(doc(db, `users/${userId}/settings/runLocations`)),
               getDoc(doc(db, `users/${userId}/settings/runCauses`)),
               getDoc(doc(db, `users/${userId}/settings/vibeTags`)),
-              getDoc(doc(db, `users/${userId}/settings/protocol`)) // NEU
           ]);
 
           if (bSnap.exists()) setBrands(bSnap.data().list || []);
@@ -121,23 +121,13 @@ export default function Settings() {
           
           if (prefSnap.exists()) {
               const d = prefSnap.data();
-              // Wir laden hier zunächst die alten Prefs...
+              // HINWEIS: dailyTargetHours laden wir hier nicht mehr für die UI, 
+              // da ProtocolSettings das übernimmt.
               setNylonRestingHours(d.nylonRestingHours || 24);
               setMaxInstructionItems(d.maxInstructionItems || 1);
               setSissyProtocolEnabled(d.sissyProtocolEnabled || false);
               setNightReleaseProbability(d.nightReleaseProbability || 15);
               setCategoryWeights(d.categoryWeights || {});
-              setPreviousTarget(d.previousDailyTarget || null);
-              
-              // Fallback: Wenn kein Protocol existiert, nimm den alten Wert
-              if (!protoSnap.exists() && d.dailyTargetHours) {
-                  setDailyTargetHours(d.dailyTargetHours);
-              }
-          }
-
-          // ...aber wenn ein Protocol-Wert existiert, hat dieser Vorrang (Single Source of Truth)
-          if (protoSnap.exists() && protoSnap.data().currentDailyGoal !== undefined) {
-              setDailyTargetHours(protoSnap.data().currentDailyGoal);
           }
 
           // Forensik Defaults laden falls leer
@@ -212,23 +202,12 @@ export default function Settings() {
   // --- ACTIONS: GENERAL SAVE ---
   const savePreferences = async () => {
       try {
-          // 1. Speichere in ALTE Struktur (für Backward Compatibility)
+          // Speichert nur noch die restlichen Preferences, nicht mehr das Target Goal
           await setDoc(doc(db, `users/${currentUser.uid}/settings/preferences`), {
-              dailyTargetHours, nylonRestingHours, maxInstructionItems, sissyProtocolEnabled, nightReleaseProbability, categoryWeights
+              nylonRestingHours, maxInstructionItems, sissyProtocolEnabled, nightReleaseProbability, categoryWeights
           }, { merge: true });
-
-          // 2. Speichere in NEUE Struktur (für Dashboard & ProtocolService)
-          // Das behebt den "Split-Brain" Fehler: Wir schreiben nun auch dorthin, wo das Dashboard liest.
-          await setDoc(doc(db, `users/${currentUser.uid}/settings/protocol`), {
-              currentDailyGoal: dailyTargetHours,
-              lastGoalUpdate: serverTimestamp() // Wichtig: Damit der Wochen-Algorithmus weiß, dass es manuell geändert wurde
-          }, { merge: true });
-
           showToast("Gespeichert", "success");
-      } catch (e) { 
-          console.error(e);
-          showToast("Fehler beim Speichern", "error"); 
-      }
+      } catch (e) { showToast("Fehler", "error"); }
   };
 
   // --- ACTIONS: CATEGORIES ---
@@ -329,7 +308,7 @@ export default function Settings() {
     <Container maxWidth="md" disableGutters sx={{ pt: 1, pb: 10, px: 0.5 }}>
       <Typography variant="h4" gutterBottom sx={{ ...DESIGN_TOKENS.textGradient, ml: 1 }}>Einstellungen</Typography>
 
-      {/* 1. PROTOKOLL-VERWALTUNG */}
+      {/* 1. PROTOKOLL-VERWALTUNG (Suspension) */}
       <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.accents.gold}` }}>
         <AccordionSummary expandIcon={<Icons.Expand />}>
             <SectionHeader icon={MedicalServicesIcon} title="Protokoll-Verwaltung" color={PALETTE.accents.gold} />
@@ -363,24 +342,24 @@ export default function Settings() {
         </AccordionDetails>
       </Accordion>
 
-      {/* 2. ZIELE & LIMITS */}
-      <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.primary.main}` }}>
+      {/* 2. NEU: PROTOKOLL KONFIGURATION (CORE) - Hier wird die ProtocolSettings Komponente geladen */}
+      <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.accents.purple}` }}>
         <AccordionSummary expandIcon={<Icons.Expand />}>
-            <SectionHeader icon={Icons.Track} title="Ziele & Limits" color={PALETTE.primary.main} />
+            <SectionHeader icon={TuneIcon} title="Protokoll Konfiguration (Core)" color={PALETTE.accents.purple} />
         </AccordionSummary>
         <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
-            <Box sx={{ mb: 2, mt: 1 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                    <Typography variant="body2" color="text.secondary">Tagesziel (Stunden)</Typography>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <Typography fontWeight="bold" color="primary">{dailyTargetHours} Std</Typography>
-                    {previousTarget && dailyTargetHours > previousTarget && (
-                        <Chip icon={<Icons.Reset style={{ fontSize: 14 }} />} label={`Reset ${previousTarget}h`} size="small" color="warning" variant="outlined" onClick={() => setResetModalOpen(true)} />
-                    )}
-                    </Box>
-                </Box>
-                <Slider value={dailyTargetHours} min={1} max={12} step={0.5} onChange={(e, v) => setDailyTargetHours(v)} sx={{ color: PALETTE.primary.main }} />
-            </Box>
+             <ProtocolSettings />
+        </AccordionDetails>
+      </Accordion>
+
+      {/* 3. PRÄFERENZEN & LIMITS (Ehemals Ziele & Limits, ohne Tagesziel-Slider) */}
+      <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.primary.main}` }}>
+        <AccordionSummary expandIcon={<Icons.Expand />}>
+            <SectionHeader icon={Icons.Track} title="Präferenzen & Limits" color={PALETTE.primary.main} />
+        </AccordionSummary>
+        <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
+            {/* Der Tagesziel-Slider wurde hier entfernt und nach ProtocolSettings verschoben */}
+            
             <Box sx={{ mb: 2 }}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
                     <Typography variant="body2" color="text.secondary">Ruhezeit für Nylons</Typography>
@@ -404,7 +383,7 @@ export default function Settings() {
         </AccordionDetails>
       </Accordion>
 
-      {/* 3. KATEGORIEN STRUKTUR */}
+      {/* 4. KATEGORIEN STRUKTUR */}
       <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.accents.green}` }}>
         <AccordionSummary expandIcon={<Icons.Expand />}>
             <SectionHeader icon={Icons.Category} title="Kategorie Struktur" color={PALETTE.accents.green} />
@@ -429,7 +408,7 @@ export default function Settings() {
         </AccordionDetails>
       </Accordion>
 
-      {/* 4. ALGORITHMUS */}
+      {/* 5. ALGORITHMUS */}
       <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.accents.purple}` }}>
          <AccordionSummary expandIcon={<Icons.Expand />}><SectionHeader icon={Icons.Brain} title="Algorithmus" color={PALETTE.accents.purple} /></AccordionSummary>
          <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
@@ -455,7 +434,7 @@ export default function Settings() {
          </AccordionDetails>
       </Accordion>
 
-      {/* 5. FORENSIK & ATTRIBUTE */}
+      {/* 6. FORENSIK & ATTRIBUTE */}
       <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.accents.red}` }}>
          <AccordionSummary expandIcon={<Icons.Expand />}><SectionHeader icon={ScienceIcon} title="Forensik & Attribute" color={PALETTE.accents.red} /></AccordionSummary>
          <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
@@ -469,7 +448,7 @@ export default function Settings() {
          </AccordionDetails>
       </Accordion>
 
-      {/* 6. LISTEN & ORTE */}
+      {/* 7. LISTEN & ORTE */}
       <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.accents.blue}` }}>
          <AccordionSummary expandIcon={<Icons.Expand />}><SectionHeader icon={Icons.Inventory} title="Listen & Orte" color={PALETTE.accents.blue} /></AccordionSummary>
          <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
@@ -485,7 +464,7 @@ export default function Settings() {
          </AccordionDetails>
       </Accordion>
 
-      {/* 7. SYSTEM */}
+      {/* 8. SYSTEM */}
       <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.primary.main}` }}>
          <AccordionSummary expandIcon={<Icons.Expand />}><SectionHeader icon={Icons.Settings} title="System" color={PALETTE.primary.main} /></AccordionSummary>
          <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
