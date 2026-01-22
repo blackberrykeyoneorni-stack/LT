@@ -17,7 +17,8 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput = []) {
         health: { orphanCount: 0 },
         financials: { avgCPW: 0 },
         usage: { nylonIndex: 0 },
-        spermaScore: { rate: 0, total: 0, count: 0 }, // 'count' ist der Zähler (clean)
+        // Default-Werte, damit InfoTiles nie leer bleibt
+        spermaScore: { rate: 0, total: 0, count: 0 },
         coreMetrics: {
             enclosure: 0, nocturnal: 0, nylonGap: 0, cpnh: 0,
             complianceLag: 0, exposure: 0, resistance: 0,
@@ -28,7 +29,7 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput = []) {
         basics: { activeItems: 0, washing: 0, wornToday: 0, archived: 0 }
     });
 
-    // 1. LISTENER für Release-Daten
+    // 1. LISTENER für Release-Daten (Echtzeit)
     useEffect(() => {
         if (!currentUser) return;
         
@@ -57,19 +58,20 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput = []) {
 
         // --- BERECHNUNGEN ---
 
-        // A. ITEM BASICS & ORPHANS
+        // A. ITEMS & ORPHANS
         const activeItems = items.filter(i => i.status === 'active');
         const washingItems = items.filter(i => i.status === 'washing');
         const archivedItems = items.filter(i => i.status === 'archived');
         const orphanCount = items.filter(i => i.status === 'active' && (!i.wearCount || i.wearCount === 0)).length;
 
         // B. FINANCIALS (CPW - MATCH STATS.JSX)
-        // Logik 1:1 aus Stats.jsx übernommen:
-        // Summe ALLER Kosten (auch ungetragene) / Summe ALLER Wears
+        // Logik: Gesamtkosten des Inventars / Gesamtanzahl der Nutzungen.
+        // Das entspricht exakt der Logik in Stats.jsx ("Global CPW").
         let totalCost = 0; 
         let totalWears = 0;
         
         items.forEach(i => { 
+            // Wir summieren ALLES, auch ungetragene Items (Investition)
             totalCost += (parseFloat(i.cost) || 0); 
             totalWears += (parseInt(i.wearCount) || 0); 
         });
@@ -111,7 +113,7 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput = []) {
         });
         const endurance = closedSessions.length > 0 ? parseFloat((totalDurationHours / closedSessions.length).toFixed(1)) : 0;
 
-        // E. SPERMA SCORE (REVERT TO CLEAN RELEASES)
+        // E. SPERMA SCORE (CLEAN / TOTAL)
         // Rate = (Clean Releases / Total Releases) * 100
         const spermaRate = releaseStats.totalReleases > 0 
             ? Math.round((releaseStats.cleanReleases / releaseStats.totalReleases) * 100) 
@@ -120,7 +122,7 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput = []) {
         const spermaScore = { 
             rate: spermaRate, 
             total: releaseStats.totalReleases, 
-            count: releaseStats.cleanReleases // Zeigt wieder "Sauber" an (4/5)
+            count: releaseStats.cleanReleases // Einheitlicher Name: 'count'
         };
 
         // F. FEM INDEX

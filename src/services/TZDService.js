@@ -7,9 +7,9 @@ import { registerPunishment } from './PunishmentService';
 const TRIGGER_CHANCE = 0.08; // 8% Wahrscheinlichkeit
 
 const TIME_MATRIX = [
-    { label: 'The Bait', min: 6, max: 12, cumulative: 0.20 },
-    { label: 'The Standard', min: 12, max: 24, cumulative: 0.70 },
-    { label: 'The Wall', min: 24, max: 36, cumulative: 1.00 }
+    { label: 'The Bait', min: 2, max: 4, cumulative: 0.20 },
+    { label: 'The Standard', min: 4, max: 6, cumulative: 0.70 },
+    { label: 'The Wall', min: 6, max: 8, cumulative: 1.00 }
 ];
 
 // --- HELPER ---

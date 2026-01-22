@@ -5,10 +5,15 @@ import WaterDropIcon from '@mui/icons-material/WaterDrop';
 import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
 
 export default function InfoTiles({ kpis }) {
+  // Sicherheits-Abfragen mit Defaults
   const orphanCount = kpis?.health?.orphanCount || 0;
   const avgCPW = kpis?.financials?.avgCPW || 0;
   const nylonIndex = kpis?.usage?.nylonIndex || 0;
-  const spermaScore = kpis?.spermaScore || { rate: 0, total: 0, kept: 0 };
+  
+  // SpermaScore Destructuring mit Default-Werten
+  const spermaScore = kpis?.spermaScore || { rate: 0, total: 0, count: 0 };
+  const cleanCount = spermaScore.count !== undefined ? spermaScore.count : 0;
+  const totalCount = spermaScore.total !== undefined ? spermaScore.total : 0;
 
   return (
       <Grid container spacing={2} sx={{ mb: 3 }}>
@@ -44,7 +49,8 @@ export default function InfoTiles({ kpis }) {
                         {spermaScore.rate}%
                     </Typography>
                     <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
-                        {spermaScore.kept} / {spermaScore.total}
+                        {/* Sichere Anzeige: 0 / 0 statt / */}
+                        {cleanCount} / {totalCount}
                     </Typography>
                 </CardContent>
             </Card>
@@ -56,7 +62,7 @@ export default function InfoTiles({ kpis }) {
                 <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
                     <Typography color="text.secondary" variant="caption">Ø Cost per Wear</Typography>
                     <Typography variant="h5" sx={{fontWeight:'bold', color: PALETTE.accents.green}}>
-                        {avgCPW.toFixed(2)} €
+                        {typeof avgCPW === 'number' ? avgCPW.toFixed(2) : '0.00'} €
                     </Typography>
                 </CardContent>
             </Card>
@@ -68,7 +74,7 @@ export default function InfoTiles({ kpis }) {
                 <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
                     <Typography color="text.secondary" variant="caption">Nylon Index</Typography>
                     <Typography variant="h5" sx={{fontWeight:'bold', color: PALETTE.accents.gold}}>
-                        {nylonIndex.toFixed(1)} h
+                        {typeof nylonIndex === 'number' ? nylonIndex.toFixed(1) : '0.0'} h
                     </Typography>
                 </CardContent>
             </Card>
