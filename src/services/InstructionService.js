@@ -1,5 +1,6 @@
 import { db } from '../firebase';
 import { collection, serverTimestamp, query, where, getDocs, doc, setDoc, getDoc, orderBy } from 'firebase/firestore';
+import { DEFAULT_PROTOCOL_RULES } from '../config/defaultRules';
 
 // Helper: Berechnet ob Item ruhen muss (STRIKT NUR NYLONS)
 const isItemInRecovery = (item, restingHours = 24) => {
@@ -85,6 +86,33 @@ export const getLastInstruction = async (uid) => {
     }
 };
 
+// Hilfsfunktion: Lädt Protokoll-Settings für Forced Release
+const getProtocolSettings = async (userId) => {
+    try {
+        const settingsRef = doc(db, `users/${userId}/settings/protocol`);
+        const settingsSnap = await getDoc(settingsRef);
+        
+        if (settingsSnap.exists()) {
+            const data = settingsSnap.data();
+            return {
+                ...DEFAULT_PROTOCOL_RULES,
+                ...data,
+                instruction: {
+                    ...DEFAULT_PROTOCOL_RULES.instruction,
+                    ...(data.instruction || {}),
+                    forcedReleaseMethods: {
+                        ...DEFAULT_PROTOCOL_RULES.instruction.forcedReleaseMethods,
+                        ...(data.instruction?.forcedReleaseMethods || {})
+                    }
+                }
+            };
+        }
+    } catch (e) {
+        console.error("Error loading protocol settings:", e);
+    }
+    return DEFAULT_PROTOCOL_RULES;
+};
+
 // --- SCHRITT 1: NACHT-VALIDIERUNG (CHECKPOINTS) ---
 export const verifyNightCompliance = async (userId, referenceDate = new Date()) => {
     // referenceDate ist standardmäßig "Jetzt" (der aktuelle Tag).
@@ -167,6 +195,9 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
         // 1. Hole Präferenzen
         const prefsSnap = await getDoc(doc(db, `users/${uid}/settings/preferences`));
         const prefs = prefsSnap.exists() ? prefsSnap.data() : {};
+        
+        // NEU: Hole Protokoll-Einstellungen für Forced Release
+        const protocolSettings = await getProtocolSettings(uid);
         
         const maxItems = prefs.maxInstructionItems || 1;
         const restingHours = prefs.nylonRestingHours || 24;
@@ -295,23 +326,37 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
 
         if (selectedItems.length === 0) return null;
 
-        // --- FORCED RELEASE LOGIK (DIE FALLE) - UNVERÄNDERT ---
+        // --- FORCED RELEASE LOGIK (DYNAMISCH) ---
+        // Verwendet jetzt die Werte aus ProtocolSettings
         let forcedRelease = { required: false, executed: false, method: null };
         
         if (isNightInstruction) {
-            // 100% Wahrscheinlichkeit
-            if (Math.random() < 1.00) {
-                const rMethod = Math.random();
-                let method = 'hand'; // 25%
-                if (rMethod >= 0.25 && rMethod < 0.5) method = 'toy_vaginal'; // 25%
-                else if (rMethod >= 0.5) method = 'toy_anal'; // 50%
-
-                forcedRelease = {
-                    required: true,
-                    executed: false,
-                    method: method
+            // Chance aus den Settings (Fallback 0.15)
+            const triggerChance = protocolSettings.instruction?.forcedReleaseTriggerChance ?? 0.15;
+            
+            if (Math.random() < triggerChance) {
+                forcedRelease.required = true;
+                
+                // Methoden-Wahrscheinlichkeiten aus Settings
+                const methods = protocolSettings.instruction?.forcedReleaseMethods ?? { 
+                    hand: 0.34, toy_vaginal: 0.33, toy_anal: 0.33 
                 };
-                console.log("InstructionService: Forced Release Triggered!", method);
+
+                // Gewichtete Zufallsauswahl
+                const rnd = Math.random();
+                const handProb = methods.hand || 0;
+                const vagProb = methods.toy_vaginal || 0;
+                
+                // Hier wird die "Rest-Logik" der Slider angewendet
+                if (rnd < handProb) {
+                    forcedRelease.method = 'hand';
+                } else if (rnd < (handProb + vagProb)) {
+                    forcedRelease.method = 'toy_vaginal';
+                } else {
+                    forcedRelease.method = 'toy_anal';
+                }
+                
+                console.log("InstructionService: Forced Release Triggered via Settings!", forcedRelease.method);
             }
         }
 

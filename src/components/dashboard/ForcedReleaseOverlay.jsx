@@ -114,7 +114,7 @@ export default function ForcedReleaseOverlay({ open, method, onConfirm, onRefuse
                           Methode: <strong>{formatMethod(method)}</strong>
                       </Typography>
                       <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-                          "Wirst du dein Sperma schlucken oder musst du es in deine Nylons schmieren? Der Algorithmus entscheidet."
+                          "Wirst du dein Sperma schlucken oder musst du es in deine Nylons einarbeiten? Der Algorithmus entscheidet."
                       </Typography>
                   </motion.div>
               )}
@@ -163,7 +163,7 @@ export default function ForcedReleaseOverlay({ open, method, onConfirm, onRefuse
                           <Typography variant="body2" sx={{ color: 'text.primary', mb: 2 }}>
                               {begMessage ? begMessage : (
                                   isClean 
-                                  ? "Verschwende keinen Tropfen. Deine Nyöons und Dessous müssen makellos bleiben." 
+                                  ? "Verschwende keinen Tropfen. Deine Nylons und Dessous müssen makellos bleiben." 
                                   : "Die Aufnahme ist verboten. Entlade direkt in deine Damenwäsche. Lass es einziehen."
                               )}
                           </Typography>

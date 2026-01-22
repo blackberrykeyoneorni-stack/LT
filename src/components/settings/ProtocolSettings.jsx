@@ -20,37 +20,40 @@ export default function ProtocolSettings() {
                 const ref = doc(db, `users/${currentUser.uid}/settings/protocol`);
                 const snap = await getDoc(ref);
                 
-                // DEEP MERGE STRATEGIE:
-                // 1. Nehme immer erst die kompletten Defaults als Basis (Sicherheit!)
-                // 2. Überschreibe mit Datenbank-Werten, wo vorhanden.
+                // DEEP MERGE STRATEGIE (ROBUSTHEIT)
                 let mergedRules = JSON.parse(JSON.stringify(DEFAULT_PROTOCOL_RULES));
-                
-                // Basis-Ziel Default setzen
                 mergedRules.currentDailyGoal = 4; 
 
                 if (snap.exists()) {
                     const data = snap.data();
                     
-                    // Root Properties mergen
                     if (data.currentDailyGoal !== undefined) mergedRules.currentDailyGoal = data.currentDailyGoal;
 
-                    // Nested Objects mergen (Sicherstellen, dass TZD, Time, Instruction existieren)
-                    mergedRules.time = { ...mergedRules.time, ...(data.time || {}) };
                     mergedRules.tzd = { 
                         ...mergedRules.tzd, 
                         ...(data.tzd || {}),
-                        // Matrix speziell behandeln (Array) - Datenbank gewinnt, sonst Default
                         durationMatrix: (data.tzd && data.tzd.durationMatrix) ? data.tzd.durationMatrix : mergedRules.tzd.durationMatrix
                     };
+                    
                     mergedRules.purity = { ...mergedRules.purity, ...(data.purity || {}) };
-                    mergedRules.instruction = { ...mergedRules.instruction, ...(data.instruction || {}) };
+                    
+                    mergedRules.instruction = { 
+                        ...mergedRules.instruction, 
+                        ...(data.instruction || {}),
+                        forcedReleaseMethods: {
+                            ...mergedRules.instruction.forcedReleaseMethods,
+                            ...(data.instruction?.forcedReleaseMethods || {})
+                        }
+                    };
+                    
                     mergedRules.punishment = { ...mergedRules.punishment, ...(data.punishment || {}) };
+                    // Time-Settings ignorieren wir hier beim Laden (da nicht mehr benötigt), 
+                    // oder behalten sie im Speicher, zeigen sie aber nicht an.
                 }
 
                 setRules(mergedRules);
             } catch (e) {
                 console.error("Fehler beim Laden der Protocol Settings:", e);
-                // Fallback im Fehlerfall: Defaults laden, damit App nicht crasht
                 setRules({ ...DEFAULT_PROTOCOL_RULES, currentDailyGoal: 4 });
             }
         };
@@ -68,7 +71,6 @@ export default function ProtocolSettings() {
         setHasChanges(true);
     };
 
-    // Handler für Root-Level Properties (wie currentDailyGoal)
     const handleRootChange = (key, value) => {
         setRules(prev => ({
             ...prev,
@@ -77,14 +79,86 @@ export default function ProtocolSettings() {
         setHasChanges(true);
     };
 
-    // Spezieller Handler für die TZD Matrix Gewichte
-    const handleMatrixChange = (index, newWeight) => {
-        // Sicherheits-Check
-        if (!rules.tzd || !rules.tzd.durationMatrix) return;
-
+    // --- LOGIK FÜR TZD SLIDER (2 Adjustable, 1 Remainder) ---
+    // Wir nehmen an: Idx 0 = Bait, Idx 1 = Standard, Idx 2 = Wall (Rest)
+    const handleTZDWeightChange = (changedIndex, newValue) => {
+        if (!rules.tzd?.durationMatrix) return;
+        
         const newMatrix = [...rules.tzd.durationMatrix];
-        newMatrix[index].weight = newWeight;
+        // Setze den neuen Wert für den bewegten Slider
+        newMatrix[changedIndex].weight = parseFloat(newValue.toFixed(2));
+
+        // Logik: Wir haben 1.0 zur Verfügung.
+        // Slider 0 (Bait) und Slider 1 (Standard) sind einstellbar.
+        // Slider 2 (Wall) ist der Rest.
+        
+        let bait = newMatrix[0].weight;
+        let standard = newMatrix[1].weight;
+
+        // Wenn Bait geändert wurde
+        if (changedIndex === 0) {
+            // Wenn Bait + Standard > 1, muss Standard verringert werden
+            if (bait + standard > 1.0) {
+                standard = parseFloat((1.0 - bait).toFixed(2));
+                newMatrix[1].weight = standard;
+            }
+        }
+        // Wenn Standard geändert wurde
+        else if (changedIndex === 1) {
+            // Wenn Bait + Standard > 1, muss Bait verringert werden
+            if (bait + standard > 1.0) {
+                bait = parseFloat((1.0 - standard).toFixed(2));
+                newMatrix[0].weight = bait;
+            }
+        }
+
+        // Wall ist immer der Rest (kann 0 sein)
+        let wall = parseFloat((1.0 - bait - standard).toFixed(2));
+        // Sicherheits-Clamp gegen Rundungsfehler
+        wall = Math.max(0, Math.min(1, wall));
+        
+        newMatrix[2].weight = wall;
+
         handleChange('tzd', 'durationMatrix', newMatrix);
+    };
+
+    // --- LOGIK FÜR FORCED RELEASE METHODEN (2 Adjustable, Hand Remainder) ---
+    // Struktur: Hand (Rest), Toy Vaginal (Einstellbar), Toy Anal (Einstellbar)
+    const handleMethodChange = (methodKey, newValue) => {
+        if (!rules.instruction?.forcedReleaseMethods) return;
+
+        const currentMethods = { ...rules.instruction.forcedReleaseMethods };
+        
+        // Setze neuen Wert
+        currentMethods[methodKey] = parseFloat(newValue.toFixed(2));
+
+        let vag = currentMethods.toy_vaginal || 0;
+        let anal = currentMethods.toy_anal || 0;
+
+        // Wenn Vaginal geändert wurde, muss Anal evtl. weichen, wenn Summe > 1
+        if (methodKey === 'toy_vaginal') {
+            if (vag + anal > 1.0) {
+                anal = parseFloat((1.0 - vag).toFixed(2));
+            }
+        }
+        // Wenn Anal geändert wurde, muss Vaginal evtl. weichen
+        else if (methodKey === 'toy_anal') {
+            if (vag + anal > 1.0) {
+                vag = parseFloat((1.0 - anal).toFixed(2));
+            }
+        }
+
+        // Hand ist der Rest
+        let hand = parseFloat((1.0 - vag - anal).toFixed(2));
+        hand = Math.max(0, Math.min(1, hand));
+
+        const newMethods = {
+            hand: hand,
+            toy_vaginal: vag,
+            toy_anal: anal
+        };
+
+        handleChange('instruction', 'forcedReleaseMethods', newMethods);
     };
 
     const handleSave = async () => {
@@ -93,7 +167,6 @@ export default function ProtocolSettings() {
                 ...rules,
                 lastGoalUpdate: serverTimestamp() 
             };
-            
             await updateDoc(doc(db, `users/${currentUser.uid}/settings/protocol`), payload);
             setHasChanges(false);
             alert("Protokoll-Regeln aktualisiert.");
@@ -112,17 +185,15 @@ export default function ProtocolSettings() {
 
     if (!rules) return <Typography sx={{p:3}}>Lade Konfiguration...</Typography>;
 
-    // AB HIER: SICHERER ZUGRIFF MIT OPTIONAL CHAINING (?.)
+    // Helper für sichere Anzeige
+    const methods = rules.instruction?.forcedReleaseMethods || { hand: 0, toy_vaginal: 0, toy_anal: 0 };
+
     return (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
             
-            {/* BASIS-TRAGEZEIT EINSTELLUNG */}
+            {/* BASIS-TRAGEZEIT */}
             <Paper sx={{ p: 3, bgcolor: 'rgba(255,255,255,0.05)', borderLeft: `4px solid ${PALETTE.accents.green}` }}>
                 <Typography variant="h6" sx={{ color: PALETTE.accents.green }} gutterBottom>Tragezeit-Ziel (Basis)</Typography>
-                <Typography variant="caption" sx={{ display: 'block', mb: 2, color: 'text.secondary' }}>
-                    Definiert die geforderte Tragezeit, bis der Algorithmus (Ratchet) übernimmt.
-                </Typography>
-                
                 <Box sx={{ px: 2 }}>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                         <Typography variant="body2">Tägliches Ziel</Typography>
@@ -135,25 +206,20 @@ export default function ProtocolSettings() {
                         min={1} max={12} step={0.5}
                         onChange={(_, v) => handleRootChange('currentDailyGoal', v)}
                         sx={{ color: PALETTE.accents.green }}
-                        marks={[
-                            { value: 4, label: '4h' },
-                            { value: 8, label: '8h' },
-                            { value: 12, label: '12h' }
-                        ]}
+                        marks={[{ value: 4, label: '4h' }, { value: 8, label: '8h' }, { value: 12, label: '12h' }]}
                     />
                 </Box>
             </Paper>
 
-            {/* TZD SEKTION - SICHERER ZUGRIFF */}
+            {/* TZD SEKTION */}
             <Paper sx={{ p: 3, bgcolor: 'rgba(255,255,255,0.05)', borderLeft: `4px solid ${PALETTE.accents.red}` }}>
                 <Typography variant="h6" color="primary" gutterBottom>Zeitloses Diktat (TZD)</Typography>
                 
                 {/* Trigger */}
-                <Box sx={{ px: 2, mb: 3 }}>
+                <Box sx={{ px: 2, mb: 4 }}>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                         <Typography variant="body2">Trigger Wahrscheinlichkeit</Typography>
                         <Typography color="primary" fontWeight="bold">
-                            {/* Sicherer Zugriff auf tzd.triggerChance */}
                             {rules.tzd?.triggerChance ? (rules.tzd.triggerChance * 100).toFixed(1) : '0.0'}%
                         </Typography>
                     </Box>
@@ -164,33 +230,63 @@ export default function ProtocolSettings() {
                     />
                 </Box>
 
-                {/* Matrix Visualisierung */}
-                <Typography variant="subtitle2" gutterBottom sx={{ mt: 2, color: 'text.secondary' }}>Dauer-Matrix (Wahrscheinlichkeiten)</Typography>
-                {rules.tzd?.durationMatrix?.map((zone, idx) => (
-                    <Box key={zone.id || idx} sx={{ mb: 2, px: 2, borderLeft: '2px solid #555', pl: 2 }}>
-                        <Grid container justifyContent="space-between">
-                            <Grid item><Typography variant="body2" fontWeight="bold">{zone.label}</Typography></Grid>
-                            <Grid item><Typography variant="caption">{zone.minHours}-{zone.maxHours} Std</Typography></Grid>
-                        </Grid>
-                        <Slider 
-                            value={zone.weight || 0} min={0} max={1} step={0.05}
-                            onChange={(_, v) => handleMatrixChange(idx, v)}
-                            valueLabelDisplay="auto"
-                            valueLabelFormat={v => `${(v*100).toFixed(0)}%`}
-                            sx={{ color: idx === 2 ? PALETTE.accents.red : (idx === 1 ? PALETTE.primary.main : PALETTE.accents.green) }}
-                        />
-                    </Box>
-                ))}
+                {/* Matrix - 2 Adjustable, 1 Calculated */}
+                <Typography variant="subtitle2" gutterBottom sx={{ mt: 2, color: 'text.secondary' }}>Dauer & Wahrscheinlichkeit</Typography>
+                
+                {/* 1. BAIT (Einstellbar) */}
+                <Box sx={{ mb: 2, px: 2, borderLeft: '2px solid #555', pl: 2 }}>
+                    <Grid container justifyContent="space-between">
+                        <Grid item><Typography variant="body2" fontWeight="bold">The Bait</Typography></Grid>
+                        <Grid item><Typography variant="caption">6-12 Std</Typography></Grid>
+                    </Grid>
+                    <Slider 
+                        value={rules.tzd?.durationMatrix?.[0]?.weight || 0} 
+                        min={0} max={1} step={0.05}
+                        onChange={(_, v) => handleTZDWeightChange(0, v)}
+                        valueLabelDisplay="auto"
+                        valueLabelFormat={v => `${(v*100).toFixed(0)}%`}
+                        sx={{ color: PALETTE.accents.green }}
+                    />
+                </Box>
+
+                {/* 2. STANDARD (Einstellbar) */}
+                <Box sx={{ mb: 2, px: 2, borderLeft: '2px solid #555', pl: 2 }}>
+                    <Grid container justifyContent="space-between">
+                        <Grid item><Typography variant="body2" fontWeight="bold">The Standard</Typography></Grid>
+                        <Grid item><Typography variant="caption">12-24 Std</Typography></Grid>
+                    </Grid>
+                    <Slider 
+                        value={rules.tzd?.durationMatrix?.[1]?.weight || 0} 
+                        min={0} max={1} step={0.05}
+                        onChange={(_, v) => handleTZDWeightChange(1, v)}
+                        valueLabelDisplay="auto"
+                        valueLabelFormat={v => `${(v*100).toFixed(0)}%`}
+                        sx={{ color: PALETTE.primary.main }}
+                    />
+                </Box>
+
+                {/* 3. WALL (Berechnet) */}
+                <Box sx={{ mb: 2, px: 2, borderLeft: '2px solid #555', pl: 2, opacity: 0.7 }}>
+                    <Grid container justifyContent="space-between">
+                        <Grid item><Typography variant="body2" fontWeight="bold">The Wall (Rest)</Typography></Grid>
+                        <Grid item><Typography variant="caption">24-36 Std</Typography></Grid>
+                    </Grid>
+                    <Slider 
+                        value={rules.tzd?.durationMatrix?.[2]?.weight || 0} 
+                        min={0} max={1} step={0.05}
+                        disabled // Read-Only
+                        valueLabelDisplay="auto"
+                        valueLabelFormat={v => `${(v*100).toFixed(0)}%`}
+                        sx={{ color: PALETTE.accents.red }}
+                    />
+                </Box>
             </Paper>
 
-            {/* INSTRUCTION (HIDDEN LOGIC) - SICHERER ZUGRIFF */}
+            {/* FORCED RELEASE */}
             <Paper sx={{ p: 3, bgcolor: 'rgba(255,255,255,0.05)', borderLeft: `4px solid ${PALETTE.accents.purple}` }}>
-                <Typography variant="h6" sx={{ color: PALETTE.accents.purple }} gutterBottom>Forced Release (Algorithmus)</Typography>
-                <Typography variant="caption" sx={{ display: 'block', mb: 2, color: 'text.secondary' }}>
-                    Steuert die versteckten Wahrscheinlichkeiten für erzwungene Höhepunkte (ignoriert User-Präferenzen).
-                </Typography>
+                <Typography variant="h6" sx={{ color: PALETTE.accents.purple }} gutterBottom>Forced Release</Typography>
                 
-                <Box sx={{ px: 2 }}>
+                <Box sx={{ px: 2, mb: 4 }}>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                         <Typography>Trigger Chance (Nachts)</Typography>
                         <Typography sx={{ color: PALETTE.accents.purple }} fontWeight="bold">
@@ -204,29 +300,48 @@ export default function ProtocolSettings() {
                         sx={{ color: PALETTE.accents.purple }}
                     />
                 </Box>
-            </Paper>
 
-            {/* TIME - SICHERER ZUGRIFF */}
-            <Paper sx={{ p: 3, bgcolor: 'rgba(255,255,255,0.05)', borderLeft: `4px solid ${PALETTE.accents.blue}` }}>
-                <Typography variant="h6" sx={{ color: PALETTE.accents.blue }} gutterBottom>Zeit-Definitionen</Typography>
-                <Box sx={{ px: 2, display: 'flex', gap: 4 }}>
-                    <Box sx={{ flex: 1 }}>
-                        <Typography variant="caption">Start Tag</Typography>
-                        <Slider 
-                            value={rules.time?.dayStartHour || 7} min={4} max={10} step={1}
-                            onChange={(_, v) => handleChange('time', 'dayStartHour', v)}
-                            marks valueLabelDisplay="auto"
-                        />
+                <Typography variant="subtitle2" gutterBottom sx={{ mt: 2, color: 'text.secondary' }}>Methoden Wahrscheinlichkeit</Typography>
+
+                {/* Toy Vaginal (Einstellbar) */}
+                <Box sx={{ mb: 2, px: 2 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <Typography variant="caption">Toy Vaginal</Typography>
+                        <Typography variant="caption" fontWeight="bold">{(methods.toy_vaginal * 100).toFixed(0)}%</Typography>
                     </Box>
-                    <Box sx={{ flex: 1 }}>
-                        <Typography variant="caption">Start Nacht</Typography>
-                        <Slider 
-                            value={rules.time?.nightStartHour || 23} min={18} max={24} step={1}
-                            onChange={(_, v) => handleChange('time', 'nightStartHour', v)}
-                            marks valueLabelDisplay="auto"
-                        />
-                    </Box>
+                    <Slider 
+                        value={methods.toy_vaginal || 0} min={0} max={1} step={0.01}
+                        onChange={(_, v) => handleMethodChange('toy_vaginal', v)}
+                        sx={{ color: PALETTE.accents.pink }}
+                    />
                 </Box>
+
+                {/* Toy Anal (Einstellbar) */}
+                <Box sx={{ mb: 2, px: 2 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <Typography variant="caption">Toy Anal</Typography>
+                        <Typography variant="caption" fontWeight="bold">{(methods.toy_anal * 100).toFixed(0)}%</Typography>
+                    </Box>
+                    <Slider 
+                        value={methods.toy_anal || 0} min={0} max={1} step={0.01}
+                        onChange={(_, v) => handleMethodChange('toy_anal', v)}
+                        sx={{ color: PALETTE.accents.purple }}
+                    />
+                </Box>
+
+                {/* Hand (Rest - Read Only) */}
+                <Box sx={{ mb: 2, px: 2, opacity: 0.6 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <Typography variant="caption">Hand (Restwahrscheinlichkeit)</Typography>
+                        <Typography variant="caption" fontWeight="bold">{(methods.hand * 100).toFixed(0)}%</Typography>
+                    </Box>
+                    <Slider 
+                        value={methods.hand || 0} min={0} max={1}
+                        disabled
+                        sx={{ color: 'text.secondary' }}
+                    />
+                </Box>
+
             </Paper>
 
             {/* ACTIONS */}
