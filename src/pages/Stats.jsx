@@ -23,7 +23,7 @@ import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import PsychologyIcon from '@mui/icons-material/Psychology'; 
 import TimerIcon from '@mui/icons-material/Timer';
 import SecurityIcon from '@mui/icons-material/Security';
-import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty'; // NEU für Gap
+import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty'; 
 
 // --- HELPER: Safe Date Parsing ---
 const safeDate = (val) => {
@@ -38,7 +38,8 @@ const safeDate = (val) => {
     return isNaN(d.getTime()) ? null : d;
 };
 
-// Hilfsfunktion: Berechnet die effektiven Trage-Minuten (Union) für einen Tag (dupliziert aus useKPIs für Trend-Berechnung im Frontend)
+// Hilfsfunktion: Berechnet die effektiven Trage-Minuten (Union) für einen Tag
+// Identisch zur Logik in useKPIs für Konsistenz
 const calculateDailyNylonWearMinutes = (targetDate, sessions, items) => {
     const startOfDay = new Date(targetDate);
     startOfDay.setHours(0, 0, 0, 0);
@@ -56,6 +57,7 @@ const calculateDailyNylonWearMinutes = (targetDate, sessions, items) => {
         return sItemIds.some(id => {
             const item = items.find(i => i.id === id);
             if (!item) return false;
+            // Gap Definition: Nylon oder Strumpfhose
             const cat = (item.mainCategory || '').toLowerCase();
             const sub = (item.subCategory || '').toLowerCase();
             return cat.includes('nylon') || sub.includes('strumpfhose') || sub.includes('stockings');
@@ -134,6 +136,7 @@ export default function Statistics() {
 
     // --- 3. CHART LOGIK ---
     const calculateTrend = (metricId) => {
+        // Anzeige: Letzte 30 Tage
         const displayDays = 30;
         const windowSize = 5;
         const totalDaysNeeded = displayDays + windowSize - 1;
@@ -162,8 +165,9 @@ export default function Statistics() {
                 val = mins / 60; 
             } 
             else if (metricId === 'nocturnal') {
+                // Präziser Check auf 02:00 Uhr und Strumpfhose
                 const checkTime = new Date(d);
-                checkTime.setHours(3, 0, 0, 0);
+                checkTime.setHours(2, 0, 0, 0); // User requested 02:00
                 const checkTs = checkTime.getTime();
 
                 const isWorn = sessions.some(s => {
@@ -177,16 +181,16 @@ export default function Statistics() {
                          return sItemIds.some(id => {
                              const item = items.find(i => i.id === id);
                              if (!item) return false;
-                             const cat = (item.mainCategory || '').toLowerCase();
+                             // STRIKTE FILTERUNG für Nocturnal: Nur Strumpfhose
                              const sub = (item.subCategory || '').toLowerCase();
-                             return cat.includes('nylon') || sub.includes('strumpfhose') || sub.includes('stockings');
+                             return sub.includes('strumpfhose');
                          });
                      }
                      return false;
                 });
                 val = isWorn ? 100 : 0;
             }
-            else if (metricId === 'nylonGap') { // NEU: Gap Trend
+            else if (metricId === 'nylonGap') { 
                 // 1440 Min - Effektive Tragezeit (Union) in Minuten
                 const wornMins = calculateDailyNylonWearMinutes(d, sessions, items);
                 const gapMins = 1440 - wornMins;
@@ -287,7 +291,6 @@ export default function Statistics() {
     const metrics = [
         { id: 'enclosure', title: 'Enclosure', val: `${coreMetrics.enclosure}%`, sub: 'Nylon-Quote', icon: Icons.Layers, color: PALETTE.accents.pink },
         { id: 'nocturnal', title: 'Nocturnal', val: `${coreMetrics.nocturnal}%`, sub: 'Nacht-Quote', icon: Icons.Night, color: PALETTE.accents.purple },
-        // NEUE KACHEL
         { id: 'nylonGap', title: 'Nylon Gap', val: coreMetrics.nylonGap, sub: 'Ø Lücke/Tag', icon: HourglassEmptyIcon, color: '#00e5ff' }, // Cyan Signalfarbe
         { id: 'cpnh', title: 'CPNH', val: `${coreMetrics.cpnh}€`, sub: 'Cost/Hour', icon: TrendingUpIcon, color: PALETTE.accents.green },
         { id: 'compliance', title: 'Compliance Lag', val: `${coreMetrics.complianceLag}m`, sub: 'Ø Verzögerung', icon: TimerIcon, color: PALETTE.accents.red },
