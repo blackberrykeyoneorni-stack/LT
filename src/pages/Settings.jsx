@@ -14,7 +14,6 @@ import { addSuspension, getSuspensions, terminateSuspension } from '../services/
 // Import der ProtocolSettings Komponente
 import ProtocolSettings from '../components/settings/ProtocolSettings';
 
-// KORREKTUR: FormControlLabel direkt importiert, statt unten definiert
 import {
   Box, Container, Typography, TextField, Button, Paper,
   Accordion, AccordionSummary, AccordionDetails,
@@ -467,7 +466,7 @@ export default function Settings() {
         <AccordionSummary expandIcon={<Icons.Expand />}><SectionHeader icon={Icons.Settings} title="System & Backup" color="#fff" /></AccordionSummary>
         <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
             <FormControlLabel control={<Switch checked={isBiometricActive} onChange={handleToggleBiometrics} disabled={!biometricAvailable} />} label="Biometrische Authentifizierung (Fingerprint)" sx={{ mb: 2, display: 'block' }} />
-            <Button variant="outlined" fullWidth onClick={handleBackup} disabled={backupLoading} startIcon={backupLoading ? <CircularProgress size={20} /> : <Icons.Download />}>Backup herunterladen</Button>
+            <Button variant="outlined" fullWidth onClick={handleBackup} disabled={backupLoading} startIcon={backupLoading ? <CircularProgress size={20} /> : <Icons.Cloud />}>Backup herunterladen</Button>
             <Box sx={{ mt: 4, textAlign: 'center' }}><Button color="error" onClick={logout} startIcon={<Icons.Logout />}>Abmelden</Button></Box>
             <Typography variant="caption" display="block" align="center" sx={{ mt: 2, color: 'text.secondary' }}>Version 2.4.1 • Build 20251206</Typography>
         </AccordionDetails>
