@@ -279,7 +279,38 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
         let availableGroupKeys = Object.keys(groups);
         const selectedItems = [];
 
-        for (let k = 0; k < maxItems; k++) {
+        // NEU: Berechne tatsächliche Anzahl an Items basierend auf maxItems & Wahrscheinlichkeit
+        let targetItemCount = 1;
+        const rndCount = Math.random();
+
+        if (maxItems === 1) {
+            targetItemCount = 1;
+        } else if (maxItems === 2) {
+            // 75% Chance für 2 Items, sonst 1
+            if (rndCount < 0.75) {
+                targetItemCount = 2;
+            } else {
+                targetItemCount = 1;
+            }
+        } else if (maxItems === 3) {
+            // 55% Chance für 3 Items
+            // 40% Chance für 2 Items (Summe 95%)
+            // 5% Chance für 1 Item
+            if (rndCount < 0.55) {
+                targetItemCount = 3;
+            } else if (rndCount < 0.95) { // 0.55 + 0.40
+                targetItemCount = 2;
+            } else {
+                targetItemCount = 1;
+            }
+        } else {
+            // Fallback für Werte > 3 (falls manuell in DB geändert)
+            targetItemCount = Math.max(1, maxItems);
+        }
+
+        console.log(`InstructionService: MaxItems=${maxItems}, Random=${rndCount.toFixed(2)} -> TargetCount=${targetItemCount}`);
+
+        for (let k = 0; k < targetItemCount; k++) {
             if (availableGroupKeys.length === 0) break;
 
             // Schritt B: Gewichtung berechnen (Wurzel-Dämpfung + User Settings)

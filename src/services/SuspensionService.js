@@ -1,5 +1,6 @@
 import { db } from '../firebase';
 import { collection, addDoc, query, where, getDocs, updateDoc, doc, Timestamp, orderBy } from 'firebase/firestore';
+import { DEFAULT_PROTOCOL_RULES } from '../config/defaultRules';
 
 const COLLECTION = 'suspensions';
 
@@ -69,10 +70,12 @@ export const getAllSuspensions = async (userId) => {
 /**
  * Prüft beim App-Start, ob HEUTE eine Aussetzung aktiv ist.
  * Schaltet 'scheduled' automatisch auf 'active' um, wenn die Zeit gekommen ist.
+ * * KORREKTUR: Berücksichtigt Protokoll-Zeiten (07:30 Start, 23:00 Ende).
  */
 export const checkActiveSuspension = async (userId) => {
     const now = new Date();
-    
+    const { time } = DEFAULT_PROTOCOL_RULES; // Zugriff auf dayStartHour (7:30) & nightStartHour (23:00)
+
     // 1. Gibt es bereits eine aktive?
     const qActive = query(
         collection(db, `users/${userId}/${COLLECTION}`),
@@ -86,11 +89,11 @@ export const checkActiveSuspension = async (userId) => {
         const end = data.endDate.toDate();
 
         // Check: Ist sie abgelaufen?
-        // Wir setzen das Ende auf 23:59:59 des Endtages
-        const endOfDay = new Date(end);
-        endOfDay.setHours(23, 59, 59, 999);
+        // Ende ist am letzten Tag um 23:00 Uhr (nightStartHour)
+        const endOfSuspension = new Date(end);
+        endOfSuspension.setHours(time.nightStartHour, time.nightStartMinute, 0, 0);
 
-        if (endOfDay < now) {
+        if (endOfSuspension < now) {
             await updateDoc(doc(db, `users/${userId}/${COLLECTION}`, docSnap.id), { status: 'completed' });
             return null;
         }
@@ -109,11 +112,12 @@ export const checkActiveSuspension = async (userId) => {
         const start = data.startDate.toDate();
         const end = data.endDate.toDate();
         
-        // Startzeitpunkt prüfen (ab 00:00 des Starttages)
-        const startOfDay = new Date(start);
-        startOfDay.setHours(0, 0, 0, 0);
+        // Startzeitpunkt prüfen
+        // Start ist am ersten Tag um 07:30 Uhr (dayStartHour)
+        const startOfSuspension = new Date(start);
+        startOfSuspension.setHours(time.dayStartHour, time.dayStartMinute, 0, 0);
 
-        if (startOfDay <= now) {
+        if (startOfSuspension <= now) {
             // Aktivierung!
             await updateDoc(doc(db, `users/${userId}/${COLLECTION}`, d.id), { status: 'active' });
             return { id: d.id, ...data, status: 'active', startDate: start, endDate: end };

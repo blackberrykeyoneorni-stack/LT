@@ -358,8 +358,24 @@ export default function Settings() {
             <SectionHeader icon={Icons.Track} title="Präferenzen & Limits" color={PALETTE.primary.main} />
         </AccordionSummary>
         <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
-            {/* Der Tagesziel-Slider wurde hier entfernt und nach ProtocolSettings verschoben */}
             
+            {/* --- RE-INSERTED: MAX INSTRUCTION ITEMS --- */}
+            <Box sx={{ mb: 3 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                    <Typography variant="body2" color="text.secondary">Max. Items pro Anweisung</Typography>
+                    <Typography fontWeight="bold" color="primary">{maxInstructionItems}</Typography>
+                </Box>
+                <Slider 
+                    value={maxInstructionItems} 
+                    min={1} 
+                    max={3} 
+                    step={1} 
+                    marks
+                    onChange={(e, v) => setMaxInstructionItems(v)} 
+                    sx={{ color: PALETTE.primary.main }} 
+                />
+            </Box>
+
             <Box sx={{ mb: 2 }}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
                     <Typography variant="body2" color="text.secondary">Ruhezeit für Nylons</Typography>
@@ -367,6 +383,7 @@ export default function Settings() {
                 </Box>
                 <Slider value={nylonRestingHours} min={0} max={72} step={4} onChange={(e, v) => setNylonRestingHours(v)} sx={{ color: PALETTE.secondary.main }} />
             </Box>
+            
             <Stack direction="row" justifyContent="space-between" alignItems="center">
                 <Box><Typography variant="body1">Hardcore Protokoll</Typography><Typography variant="caption" color="text.secondary">Erzwingt Ingestion & Challenges</Typography></Box>
                 <Switch checked={sissyProtocolEnabled} onChange={(e) => setSissyProtocolEnabled(e.target.checked)} color="error" />
@@ -380,6 +397,12 @@ export default function Settings() {
                      <Slider value={nightReleaseProbability} min={0} max={100} step={5} onChange={(e, v) => setNightReleaseProbability(v)} sx={{ color: PALETTE.accents.red }} />
                 </Box>
             )}
+            
+            <Box sx={{ mt: 3, display: 'flex', justifyContent: 'flex-end' }}>
+                <Button variant="contained" onClick={savePreferences} sx={DESIGN_TOKENS.buttonGradient}>
+                    Einstellungen speichern
+                </Button>
+            </Box>
         </AccordionDetails>
       </Accordion>
 
@@ -453,60 +476,49 @@ export default function Settings() {
          <AccordionSummary expandIcon={<Icons.Expand />}><SectionHeader icon={Icons.Inventory} title="Listen & Orte" color={PALETTE.accents.blue} /></AccordionSummary>
          <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
              <Typography variant="subtitle2" sx={{mb:1}}>Lagerorte</Typography>
-             <Box sx={{ display: 'flex', gap: 1, mb: 2 }}><TextField size="small" fullWidth value={newLocation} onChange={e => setNewLocation(e.target.value)} /><Button onClick={() => addItemToList('locations', newLocation, setLocations, locations)}><Icons.Add /></Button></Box>
-             <Stack spacing={1} sx={{mb:2}}>{locations.map(loc => <Paper key={loc} sx={{p:1, display:'flex', justifyContent:'space-between'}}><Typography>{loc}</Typography><IconButton size="small" onClick={()=>handleStartPairing(loc)}><Icons.Nfc fontSize="small"/></IconButton></Paper>)}</Stack>
-             
-             <Divider sx={{ my: 1 }} />
+             <Box sx={{ display: 'flex', gap: 1, mb: 2 }}><TextField size="small" fullWidth value={newLocation} onChange={e => setNewLocation(e.target.value)} /><Button onClick={() => { addItemToList('locations', newLocation, setLocations, locations); setNewLocation(''); }} variant="contained"><Icons.Add /></Button></Box>
+             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mb: 3 }}>{locations.map(l => <Chip key={l} label={l} onDelete={() => removeItemFromList('locations', l, setLocations, locations)} size="small" clickable onClick={() => handleStartPairing(l)} color={pairingLocation === l ? 'secondary' : 'default'} icon={pairingLocation === l ? <CircularProgress size={16} /> : <Icons.Nfc />} />)}</Box>
+             <Divider sx={{ my: 2 }} />
              <ListManager title="Marken" items={brands} newItem={newBrand} setNewItem={setNewBrand} listName="brands" setList={setBrands} />
-             
-             <Divider sx={{ my: 1 }} />
+             <Divider sx={{ my: 2 }} />
              <ListManager title="Materialien" items={materials} newItem={newMaterial} setNewItem={setNewMaterial} listName="materials" setList={setMaterials} />
          </AccordionDetails>
       </Accordion>
 
       {/* 8. SYSTEM */}
-      <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.primary.main}` }}>
-         <AccordionSummary expandIcon={<Icons.Expand />}><SectionHeader icon={Icons.Settings} title="System" color={PALETTE.primary.main} /></AccordionSummary>
-         <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
-            <Stack direction="row" justifyContent="space-between" alignItems="center">
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}><Icons.Fingerprint /><Typography>Biometrie</Typography></Box>
-                <Switch checked={isBiometricActive} onChange={handleToggleBiometrics} disabled={!biometricAvailable} />
-            </Stack>
-         </AccordionDetails>
+      <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 10, borderLeft: '4px solid #fff' }}>
+        <AccordionSummary expandIcon={<Icons.Expand />}><SectionHeader icon={Icons.Settings} title="System & Backup" color="#fff" /></AccordionSummary>
+        <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
+            <FormControlLabel control={<Switch checked={isBiometricActive} onChange={handleToggleBiometrics} disabled={!biometricAvailable} />} label="Biometrische Authentifizierung (Fingerprint)" sx={{ mb: 2, display: 'block' }} />
+            <Button variant="outlined" fullWidth onClick={handleBackup} disabled={backupLoading} startIcon={backupLoading ? <CircularProgress size={20} /> : <Icons.Download />}>Backup herunterladen</Button>
+            <Box sx={{ mt: 4, textAlign: 'center' }}><Button color="error" onClick={logout} startIcon={<Icons.Logout />}>Abmelden</Button></Box>
+            <Typography variant="caption" display="block" align="center" sx={{ mt: 2, color: 'text.secondary' }}>Version 2.4.0 • Build 20251206</Typography>
+        </AccordionDetails>
       </Accordion>
 
-      <Button variant="contained" size="large" fullWidth sx={{ ...DESIGN_TOKENS.buttonGradient, mt: 2, mb: 4 }} onClick={savePreferences}>Einstellungen Speichern</Button>
-      <Paper sx={{ p: 2, mb: 4, ...DESIGN_TOKENS.glassCard, display: 'flex', gap: 2 }}>
-        <Button variant="outlined" color="primary" fullWidth onClick={handleBackup}>Backup</Button>
-        <Button variant="outlined" color="error" fullWidth onClick={logout}>Abmelden</Button>
-      </Paper>
-
-      {/* SUSPENSION DIALOG */}
+      {/* DIALOGS */}
       <Dialog open={suspensionDialog} onClose={() => setSuspensionDialog(false)} PaperProps={DESIGN_TOKENS.dialog.paper}>
-          <DialogTitle sx={DESIGN_TOKENS.dialog.title.sx}>Auszeit Beantragen</DialogTitle>
-          <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
-              <DialogContentText sx={{ mb: 2 }}>Planung ist nur für die Zukunft möglich.</DialogContentText>
-              <Stack spacing={2}>
-                  <FormControl fullWidth>
-                      <InputLabel>Grund</InputLabel>
-                      <Select value={newSuspension.type} label="Grund" onChange={(e) => setNewSuspension({...newSuspension, type: e.target.value})}>
-                          <MenuItem value="medical">Medizinisch / Krankenhaus</MenuItem>
-                          <MenuItem value="travel">Dienstreise / Urlaub</MenuItem>
-                          <MenuItem value="maintenance">Wartung / Inventur</MenuItem>
-                      </Select>
-                  </FormControl>
-                  <TextField label="Start" type="date" InputLabelProps={{shrink: true}} fullWidth value={newSuspension.startDate} onChange={(e) => setNewSuspension({...newSuspension, startDate: e.target.value})} sx={DESIGN_TOKENS.inputField} />
-                  <TextField label="Ende" type="date" InputLabelProps={{shrink: true}} fullWidth value={newSuspension.endDate} onChange={(e) => setNewSuspension({...newSuspension, endDate: e.target.value})} sx={DESIGN_TOKENS.inputField} />
-                  <TextField label="Begründung (Pflicht)" multiline rows={3} fullWidth value={newSuspension.reason} onChange={(e) => setNewSuspension({...newSuspension, reason: e.target.value})} sx={DESIGN_TOKENS.inputField} />
-              </Stack>
-          </DialogContent>
-          <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}>
-              <Button onClick={() => setSuspensionDialog(false)} color="inherit">Abbrechen</Button>
-              <Button onClick={handleAddSuspension} variant="contained" disabled={!newSuspension.reason} sx={DESIGN_TOKENS.buttonGradient}>Beantragen</Button>
-          </DialogActions>
+        <DialogTitle sx={DESIGN_TOKENS.dialog.title.sx}>Auszeit planen</DialogTitle>
+        <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
+            <DialogContentText sx={{ mb: 2 }}>Die Auszeit beginnt am gewählten Starttag um 07:30 Uhr und endet am Endtag um 23:00 Uhr.</DialogContentText>
+            <TextField select fullWidth label="Grund" value={newSuspension.type} onChange={e => setNewSuspension({...newSuspension, type: e.target.value})} margin="dense"><MenuItem value="medical">Medizinisch</MenuItem><MenuItem value="vacation">Urlaub/Reise</MenuItem><MenuItem value="social">Sozial/Besuch</MenuItem><MenuItem value="other">Sonstiges</MenuItem></TextField>
+            <TextField fullWidth label="Beschreibung" value={newSuspension.reason} onChange={e => setNewSuspension({...newSuspension, reason: e.target.value})} margin="dense" placeholder="z.B. Grippe" />
+            <TextField fullWidth type="date" label="Startdatum" InputLabelProps={{ shrink: true }} value={newSuspension.startDate} onChange={e => setNewSuspension({...newSuspension, startDate: e.target.value})} margin="dense" />
+            <TextField fullWidth type="date" label="Enddatum" InputLabelProps={{ shrink: true }} value={newSuspension.endDate} onChange={e => setNewSuspension({...newSuspension, endDate: e.target.value})} margin="dense" />
+        </DialogContent>
+        <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}><Button onClick={() => setSuspensionDialog(false)} color="inherit">Abbrechen</Button><Button onClick={handleAddSuspension} variant="contained" sx={DESIGN_TOKENS.buttonGradient}>Bestätigen</Button></DialogActions>
       </Dialog>
-
-      <Snackbar open={toast.open} autoHideDuration={3000} onClose={handleCloseToast}><Alert severity={toast.severity}>{toast.message}</Alert></Snackbar>
+      
+      {/* GLOBAL TOAST */}
+      <Snackbar open={toast.open} autoHideDuration={4000} onClose={handleCloseToast} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}><Alert onClose={handleCloseToast} severity={toast.severity} variant="filled" sx={{ width: '100%' }}>{toast.message}</Alert></Snackbar>
     </Container>
   );
 }
+
+// Helper für fehlende Imports im Snippet (falls nötig)
+const FormControlLabel = ({ control, label, sx }) => (
+    <Box sx={{ display: 'flex', alignItems: 'center', ...sx }}>
+        {control}
+        <Typography variant="body1" sx={{ ml: 1 }}>{label}</Typography>
+    </Box>
+);
