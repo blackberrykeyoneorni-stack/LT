@@ -287,10 +287,9 @@ export default function Inventory() {
                 borderColor = PALETTE.accents.red;
                 background = 'rgba(20, 0, 0, 0.4)';
                 imgFilter = 'grayscale(1)';
-            } else if (isResting) {
-                imgFilter = 'brightness(0.5) grayscale(0.3)';
-            }
-
+            } 
+            // MODIFICATION: No visual darkening for resting items anymore, just the chip below.
+            
             return (
                 <Grid item xs={6} sm={4} md={3} key={item.id} component={motion.div} variants={MOTION.listItem} layout>
                     <Card sx={{ 
