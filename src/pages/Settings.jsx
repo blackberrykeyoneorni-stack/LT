@@ -11,9 +11,10 @@ import { generateBackup, downloadBackupFile } from '../services/BackupService';
 import { enableBiometrics, disableBiometrics, isBiometricSupported } from '../services/BiometricService';
 import { addSuspension, getSuspensions, terminateSuspension } from '../services/SuspensionService';
 
-// NEU: Import der ProtocolSettings Komponente
+// Import der ProtocolSettings Komponente
 import ProtocolSettings from '../components/settings/ProtocolSettings';
 
+// KORREKTUR: FormControlLabel direkt importiert, statt unten definiert
 import {
   Box, Container, Typography, TextField, Button, Paper,
   Accordion, AccordionSummary, AccordionDetails,
@@ -21,7 +22,7 @@ import {
   Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions,
   LinearProgress, CircularProgress,
   List, ListItem, ListItemText, ListItemSecondaryAction, FormControl, InputLabel, Select, MenuItem,
-  Grid, Divider, Avatar
+  Grid, Divider, Avatar, FormControlLabel
 } from '@mui/material';
 
 // --- ZENTRALES DESIGN ---
@@ -29,7 +30,7 @@ import { DESIGN_TOKENS, PALETTE } from '../theme/obsidianDesign';
 import { Icons } from '../theme/appIcons';
 import MedicalServicesIcon from '@mui/icons-material/MedicalServices';
 import ScienceIcon from '@mui/icons-material/Science';
-import TuneIcon from '@mui/icons-material/Tune'; // Icon für Protocol
+import TuneIcon from '@mui/icons-material/Tune'; 
 
 const formatHours = (val) => `${val}h`;
 
@@ -40,34 +41,27 @@ export default function Settings() {
   
   // --- STATE DEFINITIONS ---
   
-  // Listen
   const [brands, setBrands] = useState([]); const [newBrand, setNewBrand] = useState('');
   const [materials, setMaterials] = useState([]); const [newMaterial, setNewMaterial] = useState('');
   
-  // Kategorien
   const [catStructure, setCatStructure] = useState({}); 
   const [newMainCat, setNewMainCat] = useState(''); 
   const [newSubCat, setNewSubCat] = useState(''); 
   
-  // Orte & NFC
   const [locations, setLocations] = useState([]); 
   const [newLocation, setNewLocation] = useState(''); 
   const [locationIndex, setLocationIndex] = useState({}); 
   const [pairingLocation, setPairingLocation] = useState(null);
   
-  // Forensik & Attribute
   const [archiveReasons, setArchiveReasons] = useState([]); const [newArchiveReason, setNewArchiveReason] = useState('');
   const [runLocations, setRunLocations] = useState([]); const [newRunLocation, setNewRunLocation] = useState('');
   const [runCauses, setRunCauses] = useState([]); const [newRunCause, setNewRunCause] = useState('');
   const [vibeTags, setVibeTags] = useState([]); const [newVibeTag, setNewVibeTag] = useState('');
 
-  // Algorithmus & Gewichtung
   const [categoryWeights, setCategoryWeights] = useState({}); 
   const [weightTarget, setWeightTarget] = useState(''); 
   const [weightValue, setWeightValue] = useState(2);
 
-  // Preferences
-  // HINWEIS: dailyTargetHours hier entfernt, da es jetzt via ProtocolSettings (ProtocolService) gesteuert wird
   const [nylonRestingHours, setNylonRestingHours] = useState(24); 
   const [maxInstructionItems, setMaxInstructionItems] = useState(1); 
   const [sissyProtocolEnabled, setSissyProtocolEnabled] = useState(false); 
@@ -75,12 +69,10 @@ export default function Settings() {
   
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   
-  // Suspension State
   const [suspensions, setSuspensions] = useState([]);
   const [suspensionDialog, setSuspensionDialog] = useState(false);
   const [newSuspension, setNewSuspension] = useState({ type: 'medical', reason: '', startDate: '', endDate: '' });
 
-  // UI States
   const [loading, setLoading] = useState(true); 
   const [backupLoading, setBackupLoading] = useState(false); 
   const [toast, setToast] = useState({ open: false, message: '', severity: 'success' });
@@ -121,8 +113,6 @@ export default function Settings() {
           
           if (prefSnap.exists()) {
               const d = prefSnap.data();
-              // HINWEIS: dailyTargetHours laden wir hier nicht mehr für die UI, 
-              // da ProtocolSettings das übernimmt.
               setNylonRestingHours(d.nylonRestingHours || 24);
               setMaxInstructionItems(d.maxInstructionItems || 1);
               setSissyProtocolEnabled(d.sissyProtocolEnabled || false);
@@ -130,7 +120,6 @@ export default function Settings() {
               setCategoryWeights(d.categoryWeights || {});
           }
 
-          // Forensik Defaults laden falls leer
           setArchiveReasons(arSnap.exists() ? arSnap.data().list : ['Laufmasche', 'Verschlissen', 'Verloren', 'Spende']);
           setRunLocations(rlSnap.exists() ? rlSnap.data().list : ['Zehe', 'Ferse', 'Sohle', 'Oberschenkel', 'Zwickel']);
           setRunCauses(rcSnap.exists() ? rcSnap.data().list : ['Schuhe', 'Nägel', 'Schmuck', 'Möbel', 'Unbekannt']);
@@ -151,7 +140,6 @@ export default function Settings() {
       setBiometricAvailable(avail);
   };
 
-  // --- ACTIONS: SUSPENSION ---
   const handleAddSuspension = async () => {
       if(!newSuspension.startDate || !newSuspension.endDate || !newSuspension.reason) return;
       try {
@@ -172,7 +160,6 @@ export default function Settings() {
       showToast("Willkommen zurück.", "success");
   };
 
-  // --- ACTIONS: BIOMETRICS ---
   const handleToggleBiometrics = async (e) => {
       const shouldEnable = e.target.checked;
       if (shouldEnable) {
@@ -186,7 +173,6 @@ export default function Settings() {
       }
   };
 
-  // --- ACTIONS: NFC LOCATIONS ---
   const handleStartPairing = (loc) => {
       setPairingLocation(loc);
       startBindingScan(async (tagId) => {
@@ -199,10 +185,8 @@ export default function Settings() {
       });
   };
 
-  // --- ACTIONS: GENERAL SAVE ---
   const savePreferences = async () => {
       try {
-          // Speichert nur noch die restlichen Preferences, nicht mehr das Target Goal
           await setDoc(doc(db, `users/${currentUser.uid}/settings/preferences`), {
               nylonRestingHours, maxInstructionItems, sissyProtocolEnabled, nightReleaseProbability, categoryWeights
           }, { merge: true });
@@ -210,7 +194,6 @@ export default function Settings() {
       } catch (e) { showToast("Fehler", "error"); }
   };
 
-  // --- ACTIONS: CATEGORIES ---
   const updateCategories = async (newStruct) => {
       try { await setDoc(doc(db, `users/${currentUser.uid}/settings/categories`), { structure: newStruct }, { merge: true }); setCatStructure(newStruct); } catch(e){}
   };
@@ -235,7 +218,6 @@ export default function Settings() {
     await updateCategories({ ...catStructure, [main]: [...current, newSubCat.trim()] }); setNewSubCat('');
   };
 
-  // --- ACTIONS: LISTS HELPER ---
   const addItemToList = async (n, i, s, c) => { 
       if (!i.trim()) return; 
       const l = [...c, i.trim()]; 
@@ -249,7 +231,6 @@ export default function Settings() {
       s(l); 
   };
 
-  // --- ACTIONS: ALGORITHM WEIGHTS ---
   const addWeight = () => {
       if (weightTarget) {
           setCategoryWeights(prev => ({ ...prev, [weightTarget]: weightValue }));
@@ -272,7 +253,6 @@ export default function Settings() {
       finally { setBackupLoading(false); }
   };
 
-  // --- UI COMPONENTS ---
   const SectionHeader = ({ icon: Icon, title, color }) => (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1, color: color || 'text.primary' }}>
       <Avatar sx={{ bgcolor: `${color}22`, color: color, width: 32, height: 32 }}><Icon fontSize="small" /></Avatar>
@@ -297,7 +277,6 @@ export default function Settings() {
 
   if (loading) return <Box sx={{ display: 'flex', justifyContent: 'center', mt: 10 }}><CircularProgress /></Box>;
 
-  // Flatten Categories for Dropdown in Algorithm
   const allCategoryOptions = [];
   Object.keys(catStructure).forEach(main => {
       allCategoryOptions.push({ label: `HAUPT: ${main}`, value: main });
@@ -308,7 +287,7 @@ export default function Settings() {
     <Container maxWidth="md" disableGutters sx={{ pt: 1, pb: 10, px: 0.5 }}>
       <Typography variant="h4" gutterBottom sx={{ ...DESIGN_TOKENS.textGradient, ml: 1 }}>Einstellungen</Typography>
 
-      {/* 1. PROTOKOLL-VERWALTUNG (Suspension) */}
+      {/* 1. PROTOKOLL-VERWALTUNG */}
       <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.accents.gold}` }}>
         <AccordionSummary expandIcon={<Icons.Expand />}>
             <SectionHeader icon={MedicalServicesIcon} title="Protokoll-Verwaltung" color={PALETTE.accents.gold} />
@@ -342,7 +321,7 @@ export default function Settings() {
         </AccordionDetails>
       </Accordion>
 
-      {/* 2. NEU: PROTOKOLL KONFIGURATION (CORE) - Hier wird die ProtocolSettings Komponente geladen */}
+      {/* 2. PROTOKOLL KONFIGURATION */}
       <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.accents.purple}` }}>
         <AccordionSummary expandIcon={<Icons.Expand />}>
             <SectionHeader icon={TuneIcon} title="Protokoll Konfiguration (Core)" color={PALETTE.accents.purple} />
@@ -352,14 +331,12 @@ export default function Settings() {
         </AccordionDetails>
       </Accordion>
 
-      {/* 3. PRÄFERENZEN & LIMITS (Ehemals Ziele & Limits, ohne Tagesziel-Slider) */}
+      {/* 3. PRÄFERENZEN & LIMITS */}
       <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.primary.main}` }}>
         <AccordionSummary expandIcon={<Icons.Expand />}>
             <SectionHeader icon={Icons.Track} title="Präferenzen & Limits" color={PALETTE.primary.main} />
         </AccordionSummary>
         <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
-            
-            {/* --- RE-INSERTED: MAX INSTRUCTION ITEMS --- */}
             <Box sx={{ mb: 3 }}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
                     <Typography variant="body2" color="text.secondary">Max. Items pro Anweisung</Typography>
@@ -406,7 +383,7 @@ export default function Settings() {
         </AccordionDetails>
       </Accordion>
 
-      {/* 4. KATEGORIEN STRUKTUR */}
+      {/* 4. KATEGORIEN */}
       <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.accents.green}` }}>
         <AccordionSummary expandIcon={<Icons.Expand />}>
             <SectionHeader icon={Icons.Category} title="Kategorie Struktur" color={PALETTE.accents.green} />
@@ -457,7 +434,7 @@ export default function Settings() {
          </AccordionDetails>
       </Accordion>
 
-      {/* 6. FORENSIK & ATTRIBUTE */}
+      {/* 6. FORENSIK */}
       <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.accents.red}` }}>
          <AccordionSummary expandIcon={<Icons.Expand />}><SectionHeader icon={ScienceIcon} title="Forensik & Attribute" color={PALETTE.accents.red} /></AccordionSummary>
          <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
@@ -492,7 +469,7 @@ export default function Settings() {
             <FormControlLabel control={<Switch checked={isBiometricActive} onChange={handleToggleBiometrics} disabled={!biometricAvailable} />} label="Biometrische Authentifizierung (Fingerprint)" sx={{ mb: 2, display: 'block' }} />
             <Button variant="outlined" fullWidth onClick={handleBackup} disabled={backupLoading} startIcon={backupLoading ? <CircularProgress size={20} /> : <Icons.Download />}>Backup herunterladen</Button>
             <Box sx={{ mt: 4, textAlign: 'center' }}><Button color="error" onClick={logout} startIcon={<Icons.Logout />}>Abmelden</Button></Box>
-            <Typography variant="caption" display="block" align="center" sx={{ mt: 2, color: 'text.secondary' }}>Version 2.4.0 • Build 20251206</Typography>
+            <Typography variant="caption" display="block" align="center" sx={{ mt: 2, color: 'text.secondary' }}>Version 2.4.1 • Build 20251206</Typography>
         </AccordionDetails>
       </Accordion>
 
@@ -514,11 +491,3 @@ export default function Settings() {
     </Container>
   );
 }
-
-// Helper für fehlende Imports im Snippet (falls nötig)
-const FormControlLabel = ({ control, label, sx }) => (
-    <Box sx={{ display: 'flex', alignItems: 'center', ...sx }}>
-        {control}
-        <Typography variant="body1" sx={{ ml: 1 }}>{label}</Typography>
-    </Box>
-);

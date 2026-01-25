@@ -37,6 +37,7 @@ export const getSuspensions = async (userId) => {
         orderBy('startDate', 'asc')
     );
     const snap = await getDocs(q);
+    
     return snap.docs.map(d => ({ 
         id: d.id, 
         ...d.data(),
@@ -55,6 +56,7 @@ export const getAllSuspensions = async (userId) => {
             orderBy('startDate', 'desc')
         );
         const snap = await getDocs(q);
+        
         return snap.docs.map(d => ({ 
             id: d.id, 
             ...d.data(),
@@ -70,13 +72,21 @@ export const getAllSuspensions = async (userId) => {
 /**
  * Prüft beim App-Start, ob HEUTE eine Aussetzung aktiv ist.
  * Schaltet 'scheduled' automatisch auf 'active' um, wenn die Zeit gekommen ist.
- * * KORREKTUR: Berücksichtigt Protokoll-Zeiten (07:30 Start, 23:00 Ende).
+ * KORREKTUR: Berücksichtigt Protokoll-Zeiten (07:30 Start, 23:00 Ende).
+ * ZUSATZ: Mit Fallback für DEFAULT_PROTOCOL_RULES gegen Import-Probleme.
  */
 export const checkActiveSuspension = async (userId) => {
     const now = new Date();
-    const { time } = DEFAULT_PROTOCOL_RULES; // Zugriff auf dayStartHour (7:30) & nightStartHour (23:00)
+    
+    // Sicherheits-Fallback, falls Import fehlschlägt oder undefined ist
+    const timeRules = DEFAULT_PROTOCOL_RULES?.time || { 
+        dayStartHour: 7, 
+        dayStartMinute: 30, 
+        nightStartHour: 23, 
+        nightStartMinute: 0 
+    };
 
-    // 1. Gibt es bereits eine aktive?
+    // 1. Gibt es bereits eine aktive Aussetzung?
     const qActive = query(
         collection(db, `users/${userId}/${COLLECTION}`),
         where('status', '==', 'active')
@@ -91,16 +101,17 @@ export const checkActiveSuspension = async (userId) => {
         // Check: Ist sie abgelaufen?
         // Ende ist am letzten Tag um 23:00 Uhr (nightStartHour)
         const endOfSuspension = new Date(end);
-        endOfSuspension.setHours(time.nightStartHour, time.nightStartMinute, 0, 0);
+        endOfSuspension.setHours(timeRules.nightStartHour, timeRules.nightStartMinute, 0, 0);
 
         if (endOfSuspension < now) {
+            // Aussetzung ist vorbei -> Status auf 'completed'
             await updateDoc(doc(db, `users/${userId}/${COLLECTION}`, docSnap.id), { status: 'completed' });
             return null;
         }
         return { id: docSnap.id, ...data, startDate: data.startDate.toDate(), endDate: end };
     }
 
-    // 2. Gibt es eine geplante, die heute starten muss?
+    // 2. Gibt es eine geplante Aussetzung, die heute starten muss?
     const qScheduled = query(
         collection(db, `users/${userId}/${COLLECTION}`),
         where('status', '==', 'scheduled')
@@ -115,10 +126,10 @@ export const checkActiveSuspension = async (userId) => {
         // Startzeitpunkt prüfen
         // Start ist am ersten Tag um 07:30 Uhr (dayStartHour)
         const startOfSuspension = new Date(start);
-        startOfSuspension.setHours(time.dayStartHour, time.dayStartMinute, 0, 0);
+        startOfSuspension.setHours(timeRules.dayStartHour, timeRules.dayStartMinute, 0, 0);
 
         if (startOfSuspension <= now) {
-            // Aktivierung!
+            // Zeit erreicht -> Aktivierung!
             await updateDoc(doc(db, `users/${userId}/${COLLECTION}`, d.id), { status: 'active' });
             return { id: d.id, ...data, status: 'active', startDate: start, endDate: end };
         }

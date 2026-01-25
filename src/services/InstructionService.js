@@ -2,21 +2,38 @@ import { db } from '../firebase';
 import { collection, serverTimestamp, query, where, getDocs, doc, setDoc, getDoc, orderBy } from 'firebase/firestore';
 import { DEFAULT_PROTOCOL_RULES } from '../config/defaultRules';
 
-// Helper: Berechnet ob Item ruhen muss (STRIKT NUR NYLONS)
+// --- HELPER FUNKTIONEN ---
+
+/**
+ * Helper: Berechnet ob Item ruhen muss (STRIKT NUR NYLONS)
+ * Berücksichtigt die Ruhezeit (restingHours) seit dem letzten Tragen.
+ */
 const isItemInRecovery = (item, restingHours = 24) => {
     // 1. Kategorien Check: Nur wenn Hauptkategorie exakt 'Nylons' ist
-    if (!item.mainCategory || item.mainCategory !== 'Nylons') return false;
+    if (!item.mainCategory || item.mainCategory !== 'Nylons') {
+        return false;
+    }
 
     // 2. Zeit Check
-    if (!item.lastWorn) return false;
+    if (!item.lastWorn) {
+        return false;
+    }
+
     const lastWornDate = item.lastWorn.toDate ? item.lastWorn.toDate() : new Date(item.lastWorn);
-    if (isNaN(lastWornDate.getTime())) return false; 
+    
+    // Sicherheitscheck für ungültige Daten
+    if (isNaN(lastWornDate.getTime())) {
+        return false; 
+    }
 
     const hoursSince = (new Date() - lastWornDate) / (1000 * 60 * 60);
     return hoursSince < restingHours;
 };
 
-// Zukünftige Pläne für Pre-Locking laden
+/**
+ * Zukünftige Pläne für Pre-Locking laden.
+ * Verhindert, dass Items ausgewählt werden, die in den nächsten 48h fest eingeplant sind.
+ */
 const getFutureBlockedItemIds = async (uid, restingHours) => {
     try {
         const now = new Date();
@@ -31,12 +48,14 @@ const getFutureBlockedItemIds = async (uid, restingHours) => {
 
         const snap = await getDocs(q);
         let blockedIds = [];
+        
         snap.forEach(doc => {
             const data = doc.data();
             if (data.itemIds && Array.isArray(data.itemIds)) {
                 blockedIds = [...blockedIds, ...data.itemIds];
             }
         });
+        
         return blockedIds;
     } catch (e) {
         console.warn("Konnte zukünftige Pläne nicht laden (ignoriere):", e);
@@ -44,7 +63,10 @@ const getFutureBlockedItemIds = async (uid, restingHours) => {
     }
 };
 
-// NEU: Prüft, ob es für HEUTE einen expliziten Plan gibt
+/**
+ * Prüft, ob es für HEUTE einen expliziten Plan im Kalender gibt.
+ * Falls ja, werden diese Items priorisiert behandelt.
+ */
 const checkTodayPlan = async (uid, allItems) => {
     try {
         // Wir nutzen das Datum im Format YYYY-MM-DD als ID (wie im CalendarService)
@@ -71,11 +93,14 @@ const checkTodayPlan = async (uid, allItems) => {
     }
 };
 
-// Lädt die letzte generierte Instruction
+/**
+ * Lädt die letzte generierte Instruction aus der Datenbank.
+ */
 export const getLastInstruction = async (uid) => {
     try {
         const docRef = doc(db, `users/${uid}/status/dailyInstruction`);
         const docSnap = await getDoc(docRef);
+        
         if (docSnap.exists()) {
             return docSnap.data();
         }
@@ -86,7 +111,10 @@ export const getLastInstruction = async (uid) => {
     }
 };
 
-// Hilfsfunktion: Lädt Protokoll-Settings für Forced Release
+/**
+ * Hilfsfunktion: Lädt Protokoll-Settings für Forced Release.
+ * Kombiniert Default-Werte mit User-Einstellungen.
+ */
 const getProtocolSettings = async (userId) => {
     try {
         const settingsRef = doc(db, `users/${userId}/settings/protocol`);
@@ -113,11 +141,14 @@ const getProtocolSettings = async (userId) => {
     return DEFAULT_PROTOCOL_RULES;
 };
 
-// --- SCHRITT 1: NACHT-VALIDIERUNG (CHECKPOINTS) ---
+// --- CORE FUNKTIONEN ---
+
+/**
+ * Überprüft die Einhaltung der Nacht-Regeln (Checkpoints).
+ * Prüft um 01:30, 03:00, 04:30 und 06:00 Uhr.
+ */
 export const verifyNightCompliance = async (userId, referenceDate = new Date()) => {
     // referenceDate ist standardmäßig "Jetzt" (der aktuelle Tag).
-    // Die zu prüfenden Checkpoints liegen am Morgen dieses Tages (01:30 - 06:00).
-    // Beispiel: Wir sind am Dienstag um 08:00 Uhr. Wir prüfen Dienstag Morgen.
     
     try {
         const year = referenceDate.getFullYear();
@@ -134,8 +165,7 @@ export const verifyNightCompliance = async (userId, referenceDate = new Date()) 
 
         // Suchfenster für Sessions: Von Gestern 20:00 bis Heute 08:00
         const searchStart = new Date(year, month, day - 1, 20, 0, 0);
-        const searchEnd = new Date(year, month, day, 8, 0, 0);
-
+        
         const q = query(
             collection(db, `users/${userId}/sessions`),
             where('type', '==', 'instruction'),
@@ -190,6 +220,10 @@ export const verifyNightCompliance = async (userId, referenceDate = new Date()) 
     }
 };
 
+/**
+ * Hauptfunktion zur Generierung der täglichen Anweisung.
+ * Berücksichtigt: Plan, Einstellungen, Wahrscheinlichkeiten, Recovery.
+ */
 export const generateAndSaveInstruction = async (uid, items, activeSessions, periodId) => {
     try {
         // 1. Hole Präferenzen
@@ -199,7 +233,9 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
         // NEU: Hole Protokoll-Einstellungen für Forced Release
         const protocolSettings = await getProtocolSettings(uid);
         
-        const maxItems = prefs.maxInstructionItems || 1;
+        // SICHERHEIT: Parse als Integer, um String-Vergleiche zu vermeiden
+        // Dies verhindert Fehler bei der Wahrscheinlichkeitsberechnung unten
+        const maxItems = parseInt(prefs.maxInstructionItems || 1, 10);
         const restingHours = prefs.nylonRestingHours || 24;
         const userWeights = prefs.categoryWeights || {}; // Manuelle Gewichtungen aus Settings
 
@@ -245,15 +281,22 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
 
         // 3. Filterung der verfügbaren Items
         const availableItems = items.filter(i => {
+            // Nur aktive Items
             if (i.status !== 'active') return false; 
+            
+            // Nicht, wenn bereits getragen
             if (allActiveIds.has(i.id)) return false; 
+            
+            // Nicht, wenn in Recovery (Elasthan-Ruhe)
             if (isItemInRecovery(i, restingHours)) return false; 
             
             // Bestehender Filter für Accessoires/Buttplugs wie gewünscht beibehalten
             if (i.mainCategory === 'Accessoires' && i.subCategory === 'Buttplug') return false;
             
+            // Nicht, wenn für die Zukunft geplant
             if (futureBlockedIds.includes(i.id)) return false;
 
+            // Zeit-Check (Tag/Nacht Eignung)
             const itemPeriod = i.suitablePeriod || 'Beide'; 
             
             if (isNightInstruction) {
@@ -279,7 +322,9 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
         let availableGroupKeys = Object.keys(groups);
         const selectedItems = [];
 
-        // NEU: Berechne tatsächliche Anzahl an Items basierend auf maxItems & Wahrscheinlichkeit
+        // --- NEU: Wahrscheinlichkeits-Logik für Item-Anzahl ---
+        // Berechnet tatsächliche Anzahl basierend auf maxItems & Zufall
+        
         let targetItemCount = 1;
         const rndCount = Math.random();
 
@@ -292,7 +337,7 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
             } else {
                 targetItemCount = 1;
             }
-        } else if (maxItems === 3) {
+        } else if (maxItems >= 3) { // Auch für > 3 gilt die Logik von 3
             // 55% Chance für 3 Items
             // 40% Chance für 2 Items (Summe 95%)
             // 5% Chance für 1 Item
@@ -303,13 +348,11 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
             } else {
                 targetItemCount = 1;
             }
-        } else {
-            // Fallback für Werte > 3 (falls manuell in DB geändert)
-            targetItemCount = Math.max(1, maxItems);
-        }
+        } 
 
         console.log(`InstructionService: MaxItems=${maxItems}, Random=${rndCount.toFixed(2)} -> TargetCount=${targetItemCount}`);
 
+        // Schleife zum Ziehen der Items
         for (let k = 0; k < targetItemCount; k++) {
             if (availableGroupKeys.length === 0) break;
 
