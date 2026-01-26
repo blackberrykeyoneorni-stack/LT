@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { 
-    doc, getDoc, setDoc, updateDoc, collection, getDocs, 
-    serverTimestamp, writeBatch 
+    doc, getDoc, setDoc, writeBatch, serverTimestamp 
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
@@ -10,6 +9,7 @@ import { useNFCGlobal } from '../contexts/NFCContext';
 import { generateBackup, downloadBackupFile } from '../services/BackupService';
 import { enableBiometrics, disableBiometrics, isBiometricSupported } from '../services/BiometricService';
 import { addSuspension, getSuspensions, terminateSuspension } from '../services/SuspensionService';
+import { DEFAULT_PROTOCOL_RULES } from '../config/defaultRules'; // Import Defaults
 
 // Import der ProtocolSettings Komponente
 import ProtocolSettings from '../components/settings/ProtocolSettings';
@@ -19,9 +19,8 @@ import {
   Accordion, AccordionSummary, AccordionDetails,
   Chip, Stack, Switch, Slider, Snackbar, Alert, IconButton,
   Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions,
-  LinearProgress, CircularProgress,
-  List, ListItem, ListItemText, ListItemSecondaryAction, FormControl, InputLabel, Select, MenuItem,
-  Grid, Divider, Avatar, FormControlLabel
+  CircularProgress, List, ListItem, ListItemText, FormControl, InputLabel, Select, MenuItem,
+  Divider, Avatar, FormControlLabel
 } from '@mui/material';
 
 // --- ZENTRALES DESIGN ---
@@ -30,8 +29,7 @@ import { Icons } from '../theme/appIcons';
 import MedicalServicesIcon from '@mui/icons-material/MedicalServices';
 import ScienceIcon from '@mui/icons-material/Science';
 import TuneIcon from '@mui/icons-material/Tune'; 
-
-const formatHours = (val) => `${val}h`;
+import SaveIcon from '@mui/icons-material/Save'; // Import für den großen Button
 
 export default function Settings() {
   const { currentUser, logout } = useAuth();
@@ -66,6 +64,9 @@ export default function Settings() {
   const [sissyProtocolEnabled, setSissyProtocolEnabled] = useState(false); 
   const [nightReleaseProbability, setNightReleaseProbability] = useState(15);
   
+  // NEU: State für Protocol Rules im Parent
+  const [protocolRules, setProtocolRules] = useState(null);
+
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   
   const [suspensions, setSuspensions] = useState([]);
@@ -74,6 +75,7 @@ export default function Settings() {
 
   const [loading, setLoading] = useState(true); 
   const [backupLoading, setBackupLoading] = useState(false); 
+  const [isSavingAll, setIsSavingAll] = useState(false); // Neuer State für Save Button
   const [toast, setToast] = useState({ open: false, message: '', severity: 'success' });
   
   const showToast = (message, severity = 'success') => setToast({ open: true, message, severity });
@@ -91,7 +93,7 @@ export default function Settings() {
   const loadAll = async () => {
       try {
           const userId = currentUser.uid;
-          const [bSnap, mSnap, catSnap, locSnap, locIdxSnap, prefSnap, arSnap, rlSnap, rcSnap, vtSnap] = await Promise.all([
+          const [bSnap, mSnap, catSnap, locSnap, locIdxSnap, prefSnap, arSnap, rlSnap, rcSnap, vtSnap, protSnap] = await Promise.all([
               getDoc(doc(db, `users/${userId}/settings/brands`)),
               getDoc(doc(db, `users/${userId}/settings/materials`)),
               getDoc(doc(db, `users/${userId}/settings/categories`)),
@@ -102,6 +104,7 @@ export default function Settings() {
               getDoc(doc(db, `users/${userId}/settings/runLocations`)),
               getDoc(doc(db, `users/${userId}/settings/runCauses`)),
               getDoc(doc(db, `users/${userId}/settings/vibeTags`)),
+              getDoc(doc(db, `users/${userId}/settings/protocol`)) // Protocol hier laden
           ]);
 
           if (bSnap.exists()) setBrands(bSnap.data().list || []);
@@ -118,6 +121,25 @@ export default function Settings() {
               setNightReleaseProbability(d.nightReleaseProbability || 15);
               setCategoryWeights(d.categoryWeights || {});
           }
+
+          // Protocol Merging Logic (wie vorher in ProtocolSettings)
+          let mergedRules = JSON.parse(JSON.stringify(DEFAULT_PROTOCOL_RULES));
+          mergedRules.currentDailyGoal = 4;
+          if (protSnap.exists()) {
+              const data = protSnap.data();
+              if (data.currentDailyGoal !== undefined) mergedRules.currentDailyGoal = data.currentDailyGoal;
+              mergedRules.tzd = { 
+                  ...mergedRules.tzd, ...(data.tzd || {}),
+                  durationMatrix: (data.tzd && data.tzd.durationMatrix) ? data.tzd.durationMatrix : mergedRules.tzd.durationMatrix
+              };
+              mergedRules.purity = { ...mergedRules.purity, ...(data.purity || {}) };
+              mergedRules.instruction = { 
+                  ...mergedRules.instruction, ...(data.instruction || {}),
+                  forcedReleaseMethods: { ...mergedRules.instruction.forcedReleaseMethods, ...(data.instruction?.forcedReleaseMethods || {}) }
+              };
+              mergedRules.punishment = { ...mergedRules.punishment, ...(data.punishment || {}) };
+          }
+          setProtocolRules(mergedRules);
 
           setArchiveReasons(arSnap.exists() ? arSnap.data().list : ['Laufmasche', 'Verschlissen', 'Verloren', 'Spende']);
           setRunLocations(rlSnap.exists() ? rlSnap.data().list : ['Zehe', 'Ferse', 'Sohle', 'Oberschenkel', 'Zwickel']);
@@ -139,6 +161,53 @@ export default function Settings() {
       setBiometricAvailable(avail);
   };
 
+  // --- ACTIONS: SAVE ALL ---
+  const handleSaveAll = async () => {
+      setIsSavingAll(true);
+      try {
+          const batch = writeBatch(db);
+          const uid = currentUser.uid;
+
+          // 1. Preferences
+          const prefRef = doc(db, `users/${uid}/settings/preferences`);
+          batch.set(prefRef, {
+              nylonRestingHours, maxInstructionItems, sissyProtocolEnabled, 
+              nightReleaseProbability, categoryWeights
+          }, { merge: true });
+
+          // 2. Protocol
+          if (protocolRules) {
+              const protRef = doc(db, `users/${uid}/settings/protocol`);
+              batch.set(protRef, { ...protocolRules, lastGoalUpdate: serverTimestamp() }, { merge: true });
+          }
+
+          // 3. Lists
+          batch.set(doc(db, `users/${uid}/settings/brands`), { list: brands }, { merge: true });
+          batch.set(doc(db, `users/${uid}/settings/materials`), { list: materials }, { merge: true });
+          batch.set(doc(db, `users/${uid}/settings/locations`), { list: locations }, { merge: true });
+          batch.set(doc(db, `users/${uid}/settings/archiveReasons`), { list: archiveReasons }, { merge: true });
+          batch.set(doc(db, `users/${uid}/settings/runLocations`), { list: runLocations }, { merge: true });
+          batch.set(doc(db, `users/${uid}/settings/runCauses`), { list: runCauses }, { merge: true });
+          batch.set(doc(db, `users/${uid}/settings/vibeTags`), { list: vibeTags }, { merge: true });
+
+          // 4. Categories
+          batch.set(doc(db, `users/${uid}/settings/categories`), { structure: catStructure }, { merge: true });
+
+          // 5. NFC Index (Zur Sicherheit mit speichern, falls offline Änderungen waren)
+          batch.set(doc(db, `users/${uid}/settings/locationIndex`), { mapping: locationIndex }, { merge: true });
+
+          await batch.commit();
+          showToast("Alle Einstellungen erfolgreich gespeichert.", "success");
+
+      } catch (e) {
+          console.error("Save Error:", e);
+          showToast("Fehler beim Speichern: " + e.message, "error");
+      } finally {
+          setIsSavingAll(false);
+      }
+  };
+
+  // --- ACTIONS: SUSPENSION ---
   const handleAddSuspension = async () => {
       if(!newSuspension.startDate || !newSuspension.endDate || !newSuspension.reason) return;
       try {
@@ -159,6 +228,7 @@ export default function Settings() {
       showToast("Willkommen zurück.", "success");
   };
 
+  // --- ACTIONS: BIOMETRICS ---
   const handleToggleBiometrics = async (e) => {
       const shouldEnable = e.target.checked;
       if (shouldEnable) {
@@ -172,11 +242,13 @@ export default function Settings() {
       }
   };
 
+  // --- ACTIONS: NFC LOCATIONS ---
   const handleStartPairing = (loc) => {
       setPairingLocation(loc);
       startBindingScan(async (tagId) => {
           try {
               const newMapping = { ...locationIndex, [tagId]: loc };
+              // NFC Pairing speichern wir sofort, da es eine Interaktion ist
               await setDoc(doc(db, `users/${currentUser.uid}/settings/locationIndex`), { mapping: newMapping }, { merge: true });
               setLocationIndex(newMapping);
               showToast(`Ort ${loc} verknüpft!`, "success");
@@ -184,50 +256,40 @@ export default function Settings() {
       });
   };
 
-  const savePreferences = async () => {
-      try {
-          await setDoc(doc(db, `users/${currentUser.uid}/settings/preferences`), {
-              nylonRestingHours, maxInstructionItems, sissyProtocolEnabled, nightReleaseProbability, categoryWeights
-          }, { merge: true });
-          showToast("Gespeichert", "success");
-      } catch (e) { showToast("Fehler", "error"); }
-  };
-
-  const updateCategories = async (newStruct) => {
-      try { await setDoc(doc(db, `users/${currentUser.uid}/settings/categories`), { structure: newStruct }, { merge: true }); setCatStructure(newStruct); } catch(e){}
-  };
+  // --- ACTIONS: CATEGORIES (lokal) ---
+  const updateCategories = (newStruct) => setCatStructure(newStruct);
   
-  const addMainCategory = async () => {
+  const addMainCategory = () => {
     if (!newMainCat.trim()) return;
     if (catStructure[newMainCat.trim()]) return showToast("Existiert bereits", "error");
     const newStruct = { ...catStructure, [newMainCat.trim()]: [] };
-    await updateCategories(newStruct); setNewMainCat('');
+    updateCategories(newStruct); setNewMainCat('');
   };
 
-  const removeMainCategory = async (main) => {
+  const removeMainCategory = (main) => {
     if (!window.confirm(`Kategorie "${main}" löschen?`)) return;
     const newStruct = { ...catStructure }; delete newStruct[main];
-    await updateCategories(newStruct);
+    updateCategories(newStruct);
   };
 
-  const addSubCategory = async (main) => {
+  const addSubCategory = (main) => {
     if (!newSubCat.trim()) return;
     const current = catStructure[main] || [];
     if (current.includes(newSubCat.trim())) return;
-    await updateCategories({ ...catStructure, [main]: [...current, newSubCat.trim()] }); setNewSubCat('');
+    updateCategories({ ...catStructure, [main]: [...current, newSubCat.trim()] }); setNewSubCat('');
   };
 
-  const addItemToList = async (n, i, s, c) => { 
-      if (!i.trim()) return; 
-      const l = [...c, i.trim()]; 
-      await setDoc(doc(db, `users/${currentUser.uid}/settings/${n}`), { list: l }, { merge: true }); 
-      s(l); 
+  // --- ACTIONS: LISTS HELPER (lokal) ---
+  // HINWEIS: Hier speichern wir nicht mehr in die DB, sondern nur in den State!
+  const addItemToList = (listName, newItem, setList, currentList) => { 
+      if (!newItem.trim()) return; 
+      const l = [...currentList, newItem.trim()]; 
+      setList(l); 
   };
   
-  const removeItemFromList = async (n, i, s, c) => { 
-      const l = c.filter(x => x !== i); 
-      await setDoc(doc(db, `users/${currentUser.uid}/settings/${n}`), { list: l }, { merge: true }); 
-      s(l); 
+  const removeItemFromList = (listName, item, setList, currentList) => { 
+      const l = currentList.filter(x => x !== item); 
+      setList(l); 
   };
 
   const addWeight = () => {
@@ -283,7 +345,7 @@ export default function Settings() {
   });
 
   return (
-    <Container maxWidth="md" disableGutters sx={{ pt: 1, pb: 10, px: 0.5 }}>
+    <Container maxWidth="md" disableGutters sx={{ pt: 1, pb: 15, px: 0.5 }}>
       <Typography variant="h4" gutterBottom sx={{ ...DESIGN_TOKENS.textGradient, ml: 1 }}>Einstellungen</Typography>
 
       {/* 1. PROTOKOLL-VERWALTUNG */}
@@ -326,7 +388,7 @@ export default function Settings() {
             <SectionHeader icon={TuneIcon} title="Protokoll Konfiguration (Core)" color={PALETTE.accents.purple} />
         </AccordionSummary>
         <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
-             <ProtocolSettings />
+             <ProtocolSettings rules={protocolRules} onChange={setProtocolRules} />
         </AccordionDetails>
       </Accordion>
 
@@ -373,12 +435,6 @@ export default function Settings() {
                      <Slider value={nightReleaseProbability} min={0} max={100} step={5} onChange={(e, v) => setNightReleaseProbability(v)} sx={{ color: PALETTE.accents.red }} />
                 </Box>
             )}
-            
-            <Box sx={{ mt: 3, display: 'flex', justifyContent: 'flex-end' }}>
-                <Button variant="contained" onClick={savePreferences} sx={DESIGN_TOKENS.buttonGradient}>
-                    Einstellungen speichern
-                </Button>
-            </Box>
         </AccordionDetails>
       </Accordion>
 
@@ -468,9 +524,31 @@ export default function Settings() {
             <FormControlLabel control={<Switch checked={isBiometricActive} onChange={handleToggleBiometrics} disabled={!biometricAvailable} />} label="Biometrische Authentifizierung (Fingerprint)" sx={{ mb: 2, display: 'block' }} />
             <Button variant="outlined" fullWidth onClick={handleBackup} disabled={backupLoading} startIcon={backupLoading ? <CircularProgress size={20} /> : <Icons.Cloud />}>Backup herunterladen</Button>
             <Box sx={{ mt: 4, textAlign: 'center' }}><Button color="error" onClick={logout} startIcon={<Icons.Logout />}>Abmelden</Button></Box>
-            <Typography variant="caption" display="block" align="center" sx={{ mt: 2, color: 'text.secondary' }}>Version 2.4.1 • Build 20251206</Typography>
+            <Typography variant="caption" display="block" align="center" sx={{ mt: 2, color: 'text.secondary' }}>Version 2.4.2 • Build 20251206</Typography>
         </AccordionDetails>
       </Accordion>
+
+      {/* CENTRAL SAVE BUTTON */}
+      <Paper sx={{ 
+          position: 'fixed', bottom: 80, left: 0, right: 0, 
+          zIndex: 1000, 
+          p: 2, 
+          bgcolor: 'rgba(0,0,0,0.8)', 
+          backdropFilter: 'blur(10px)',
+          borderTop: '1px solid rgba(255,255,255,0.1)',
+          display: 'flex', justifyContent: 'center'
+      }}>
+          <Button 
+            variant="contained" 
+            size="large"
+            startIcon={isSavingAll ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
+            onClick={handleSaveAll}
+            disabled={isSavingAll}
+            sx={{ ...DESIGN_TOKENS.buttonGradient, width: '90%', maxWidth: 400, height: 50, fontSize: '1rem' }}
+          >
+              {isSavingAll ? "Speichere..." : "Alle Änderungen speichern"}
+          </Button>
+      </Paper>
 
       {/* DIALOGS */}
       <Dialog open={suspensionDialog} onClose={() => setSuspensionDialog(false)} PaperProps={DESIGN_TOKENS.dialog.paper}>

@@ -105,7 +105,8 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput = []) {
         coreMetrics: {
             enclosure: 0, nocturnal: 0, nylonGap: 0, cpnh: 0,
             complianceLag: 0, exposure: 0, resistance: 0,
-            voluntarism: 0, endurance: 0, submission: 85,
+            voluntarism: 0, endurance: 0, enduranceNylon: 0, enduranceDessous: 0, // NEU
+            submission: 85,
             denial: 12, chastity: 0
         },
         femIndex: { score: 0, trend: 'neutral' },
@@ -222,21 +223,74 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput = []) {
         }
         const avgGap = gapDaysCount > 0 ? (totalGapHours / gapDaysCount) : 24;
 
-        // 4. Voluntarism, Resistance, Endurance (basierend auf gefilterten Sessions)
+        // 4. Voluntarism, Resistance (basierend auf gefilterten Sessions)
         const voluntary = historySessions.filter(s => s.type === 'voluntary').length;
         const voluntarism = historySessions.length > 0 ? Math.round((voluntary / historySessions.length) * 100) : 0;
         
         const punishments = historySessions.filter(s => s.type === 'punishment');
         const resistance = historySessions.length > 0 ? Math.round((punishments.length / historySessions.length) * 100) : 0;
 
+        // --- ENDURANCE BERECHNUNG (NEU: Split & Accessoire-Filter) ---
         const closedSessions = historySessions.filter(s => s.endTime && s.startTime);
-        let totalDurationHours = 0;
+        
+        let globalDuration = 0;
+        let globalCount = 0;
+        let nylonDuration = 0;
+        let nylonCount = 0;
+        let dessousDuration = 0;
+        let dessousCount = 0;
+
         closedSessions.forEach(s => {
             const start = s.startTime.toDate ? s.startTime.toDate() : new Date(s.startTime);
             const end = s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime);
-            totalDurationHours += (end - start) / 3600000;
+            const durationHours = (end - start) / 3600000;
+            
+            // Items der Session laden
+            const sessionItemIds = s.itemIds || (s.itemId ? [s.itemId] : []);
+            const sessionItems = sessionItemIds.map(id => items.find(i => i.id === id)).filter(i => i);
+
+            if (sessionItems.length === 0) return;
+
+            // Kategorien-Checks
+            const hasNylon = sessionItems.some(i => {
+                const cat = (i.mainCategory || '').toLowerCase();
+                const sub = (i.subCategory || '').toLowerCase();
+                return cat.includes('nylon') || sub.includes('strumpfhose') || sub.includes('stockings');
+            });
+
+            const hasDessous = sessionItems.some(i => {
+                const cat = (i.mainCategory || '').toLowerCase();
+                const sub = (i.subCategory || '').toLowerCase();
+                return cat.includes('dessous') || cat.includes('wäsche') || cat.includes('corsage') || sub.includes('body') || sub.includes('bh') || sub.includes('slip');
+            });
+
+            const isAccessoryOnly = sessionItems.every(i => {
+                const cat = (i.mainCategory || '').toLowerCase();
+                return cat === 'accessoires' || cat === 'schuhe';
+            });
+
+            // 1. Global Endurance (Bereinigt um reine Accessoires)
+            if (!isAccessoryOnly) {
+                globalDuration += durationHours;
+                globalCount++;
+            }
+
+            // 2. Nylon Endurance
+            if (hasNylon) {
+                nylonDuration += durationHours;
+                nylonCount++;
+            }
+
+            // 3. Dessous Endurance
+            if (hasDessous) {
+                dessousDuration += durationHours;
+                dessousCount++;
+            }
         });
-        const endurance = closedSessions.length > 0 ? parseFloat((totalDurationHours / closedSessions.length).toFixed(1)) : 0;
+
+        const endurance = globalCount > 0 ? parseFloat((globalDuration / globalCount).toFixed(1)) : 0;
+        const enduranceNylon = nylonCount > 0 ? parseFloat((nylonDuration / nylonCount).toFixed(1)) : 0;
+        const enduranceDessous = dessousCount > 0 ? parseFloat((dessousDuration / dessousCount).toFixed(1)) : 0;
 
         // E. SPERMA SCORE
         const spermaRate = releaseStats.totalReleases > 0 
@@ -280,6 +334,8 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput = []) {
                 resistance,
                 voluntarism, 
                 endurance, 
+                enduranceNylon, // NEU
+                enduranceDessous, // NEU
                 submission: 85, 
                 denial: 12, 
                 chastity: enclosure

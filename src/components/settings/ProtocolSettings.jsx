@@ -1,192 +1,93 @@
-import React, { useState, useEffect } from 'react';
-import { Box, Typography, Slider, Switch, FormControlLabel, Paper, Button, Grid, Divider } from '@mui/material';
-import { doc, updateDoc, getDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '../../firebase';
-import { useAuth } from '../../contexts/AuthContext';
-import { DEFAULT_PROTOCOL_RULES } from '../../config/defaultRules';
-import SaveIcon from '@mui/icons-material/Save';
-import RestoreIcon from '@mui/icons-material/Restore';
-import { PALETTE, DESIGN_TOKENS } from '../../theme/obsidianDesign';
+import React from 'react';
+import { Box, Typography, Slider, Paper, Grid } from '@mui/material';
+import { PALETTE } from '../../theme/obsidianDesign';
 
-export default function ProtocolSettings() {
-    const { currentUser } = useAuth();
-    const [rules, setRules] = useState(null);
-    const [hasChanges, setHasChanges] = useState(false);
+// Diese Komponente ist nun "stateless" bzgl. Datenbank.
+// Sie zeigt nur an und meldet Änderungen an Settings.jsx zurück.
+export default function ProtocolSettings({ rules, onChange }) {
+    
+    if (!rules) return <Typography sx={{p:3}}>Lade Konfiguration...</Typography>;
 
-    useEffect(() => {
-        if (!currentUser) return;
-        const load = async () => {
-            try {
-                const ref = doc(db, `users/${currentUser.uid}/settings/protocol`);
-                const snap = await getDoc(ref);
-                
-                // DEEP MERGE STRATEGIE (ROBUSTHEIT)
-                let mergedRules = JSON.parse(JSON.stringify(DEFAULT_PROTOCOL_RULES));
-                mergedRules.currentDailyGoal = 4; 
-
-                if (snap.exists()) {
-                    const data = snap.data();
-                    
-                    if (data.currentDailyGoal !== undefined) mergedRules.currentDailyGoal = data.currentDailyGoal;
-
-                    mergedRules.tzd = { 
-                        ...mergedRules.tzd, 
-                        ...(data.tzd || {}),
-                        durationMatrix: (data.tzd && data.tzd.durationMatrix) ? data.tzd.durationMatrix : mergedRules.tzd.durationMatrix
-                    };
-                    
-                    mergedRules.purity = { ...mergedRules.purity, ...(data.purity || {}) };
-                    
-                    mergedRules.instruction = { 
-                        ...mergedRules.instruction, 
-                        ...(data.instruction || {}),
-                        forcedReleaseMethods: {
-                            ...mergedRules.instruction.forcedReleaseMethods,
-                            ...(data.instruction?.forcedReleaseMethods || {})
-                        }
-                    };
-                    
-                    mergedRules.punishment = { ...mergedRules.punishment, ...(data.punishment || {}) };
-                    // Time-Settings ignorieren wir hier beim Laden (da nicht mehr benötigt), 
-                    // oder behalten sie im Speicher, zeigen sie aber nicht an.
-                }
-
-                setRules(mergedRules);
-            } catch (e) {
-                console.error("Fehler beim Laden der Protocol Settings:", e);
-                setRules({ ...DEFAULT_PROTOCOL_RULES, currentDailyGoal: 4 });
-            }
-        };
-        load();
-    }, [currentUser]);
+    // Helper für sichere Anzeige
+    const methods = rules.instruction?.forcedReleaseMethods || { hand: 0, toy_vaginal: 0, toy_anal: 0 };
 
     const handleChange = (section, key, value) => {
-        setRules(prev => ({
-            ...prev,
+        const newRules = {
+            ...rules,
             [section]: {
-                ...prev[section],
+                ...rules[section],
                 [key]: value
             }
-        }));
-        setHasChanges(true);
+        };
+        onChange(newRules);
     };
 
     const handleRootChange = (key, value) => {
-        setRules(prev => ({
-            ...prev,
+        const newRules = {
+            ...rules,
             [key]: value
-        }));
-        setHasChanges(true);
+        };
+        onChange(newRules);
     };
 
     // --- LOGIK FÜR TZD SLIDER (2 Adjustable, 1 Remainder) ---
-    // Wir nehmen an: Idx 0 = Bait, Idx 1 = Standard, Idx 2 = Wall (Rest)
     const handleTZDWeightChange = (changedIndex, newValue) => {
         if (!rules.tzd?.durationMatrix) return;
         
         const newMatrix = [...rules.tzd.durationMatrix];
-        // Setze den neuen Wert für den bewegten Slider
+        // Clone objects inside array to avoid mutation
+        newMatrix[0] = { ...newMatrix[0] };
+        newMatrix[1] = { ...newMatrix[1] };
+        newMatrix[2] = { ...newMatrix[2] };
+
         newMatrix[changedIndex].weight = parseFloat(newValue.toFixed(2));
 
-        // Logik: Wir haben 1.0 zur Verfügung.
-        // Slider 0 (Bait) und Slider 1 (Standard) sind einstellbar.
-        // Slider 2 (Wall) ist der Rest.
-        
         let bait = newMatrix[0].weight;
         let standard = newMatrix[1].weight;
 
-        // Wenn Bait geändert wurde
         if (changedIndex === 0) {
-            // Wenn Bait + Standard > 1, muss Standard verringert werden
             if (bait + standard > 1.0) {
                 standard = parseFloat((1.0 - bait).toFixed(2));
                 newMatrix[1].weight = standard;
             }
         }
-        // Wenn Standard geändert wurde
         else if (changedIndex === 1) {
-            // Wenn Bait + Standard > 1, muss Bait verringert werden
             if (bait + standard > 1.0) {
                 bait = parseFloat((1.0 - standard).toFixed(2));
                 newMatrix[0].weight = bait;
             }
         }
 
-        // Wall ist immer der Rest (kann 0 sein)
         let wall = parseFloat((1.0 - bait - standard).toFixed(2));
-        // Sicherheits-Clamp gegen Rundungsfehler
         wall = Math.max(0, Math.min(1, wall));
-        
         newMatrix[2].weight = wall;
 
         handleChange('tzd', 'durationMatrix', newMatrix);
     };
 
-    // --- LOGIK FÜR FORCED RELEASE METHODEN (2 Adjustable, Hand Remainder) ---
-    // Struktur: Hand (Rest), Toy Vaginal (Einstellbar), Toy Anal (Einstellbar)
+    // --- LOGIK FÜR FORCED RELEASE METHODEN ---
     const handleMethodChange = (methodKey, newValue) => {
         if (!rules.instruction?.forcedReleaseMethods) return;
 
         const currentMethods = { ...rules.instruction.forcedReleaseMethods };
-        
-        // Setze neuen Wert
         currentMethods[methodKey] = parseFloat(newValue.toFixed(2));
 
         let vag = currentMethods.toy_vaginal || 0;
         let anal = currentMethods.toy_anal || 0;
 
-        // Wenn Vaginal geändert wurde, muss Anal evtl. weichen, wenn Summe > 1
         if (methodKey === 'toy_vaginal') {
-            if (vag + anal > 1.0) {
-                anal = parseFloat((1.0 - vag).toFixed(2));
-            }
+            if (vag + anal > 1.0) anal = parseFloat((1.0 - vag).toFixed(2));
         }
-        // Wenn Anal geändert wurde, muss Vaginal evtl. weichen
         else if (methodKey === 'toy_anal') {
-            if (vag + anal > 1.0) {
-                vag = parseFloat((1.0 - anal).toFixed(2));
-            }
+            if (vag + anal > 1.0) vag = parseFloat((1.0 - anal).toFixed(2));
         }
 
-        // Hand ist der Rest
         let hand = parseFloat((1.0 - vag - anal).toFixed(2));
         hand = Math.max(0, Math.min(1, hand));
 
-        const newMethods = {
-            hand: hand,
-            toy_vaginal: vag,
-            toy_anal: anal
-        };
-
+        const newMethods = { hand, toy_vaginal: vag, toy_anal: anal };
         handleChange('instruction', 'forcedReleaseMethods', newMethods);
     };
-
-    const handleSave = async () => {
-        try {
-            const payload = {
-                ...rules,
-                lastGoalUpdate: serverTimestamp() 
-            };
-            await updateDoc(doc(db, `users/${currentUser.uid}/settings/protocol`), payload);
-            setHasChanges(false);
-            alert("Protokoll-Regeln aktualisiert.");
-        } catch (e) {
-            console.error(e);
-            alert("Fehler beim Speichern.");
-        }
-    };
-
-    const handleReset = () => {
-        if(window.confirm("Alle Regeln auf Standard zurücksetzen?")) {
-            setRules({ ...DEFAULT_PROTOCOL_RULES, currentDailyGoal: 4 });
-            setHasChanges(true);
-        }
-    };
-
-    if (!rules) return <Typography sx={{p:3}}>Lade Konfiguration...</Typography>;
-
-    // Helper für sichere Anzeige
-    const methods = rules.instruction?.forcedReleaseMethods || { hand: 0, toy_vaginal: 0, toy_anal: 0 };
 
     return (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
@@ -230,10 +131,10 @@ export default function ProtocolSettings() {
                     />
                 </Box>
 
-                {/* Matrix - 2 Adjustable, 1 Calculated */}
+                {/* Matrix */}
                 <Typography variant="subtitle2" gutterBottom sx={{ mt: 2, color: 'text.secondary' }}>Dauer & Wahrscheinlichkeit</Typography>
                 
-                {/* 1. BAIT (Einstellbar) */}
+                {/* 1. BAIT */}
                 <Box sx={{ mb: 2, px: 2, borderLeft: '2px solid #555', pl: 2 }}>
                     <Grid container justifyContent="space-between">
                         <Grid item><Typography variant="body2" fontWeight="bold">The Bait</Typography></Grid>
@@ -249,7 +150,7 @@ export default function ProtocolSettings() {
                     />
                 </Box>
 
-                {/* 2. STANDARD (Einstellbar) */}
+                {/* 2. STANDARD */}
                 <Box sx={{ mb: 2, px: 2, borderLeft: '2px solid #555', pl: 2 }}>
                     <Grid container justifyContent="space-between">
                         <Grid item><Typography variant="body2" fontWeight="bold">The Standard</Typography></Grid>
@@ -265,7 +166,7 @@ export default function ProtocolSettings() {
                     />
                 </Box>
 
-                {/* 3. WALL (Berechnet) */}
+                {/* 3. WALL */}
                 <Box sx={{ mb: 2, px: 2, borderLeft: '2px solid #555', pl: 2, opacity: 0.7 }}>
                     <Grid container justifyContent="space-between">
                         <Grid item><Typography variant="body2" fontWeight="bold">The Wall (Rest)</Typography></Grid>
@@ -274,7 +175,7 @@ export default function ProtocolSettings() {
                     <Slider 
                         value={rules.tzd?.durationMatrix?.[2]?.weight || 0} 
                         min={0} max={1} step={0.05}
-                        disabled // Read-Only
+                        disabled
                         valueLabelDisplay="auto"
                         valueLabelFormat={v => `${(v*100).toFixed(0)}%`}
                         sx={{ color: PALETTE.accents.red }}
@@ -303,7 +204,6 @@ export default function ProtocolSettings() {
 
                 <Typography variant="subtitle2" gutterBottom sx={{ mt: 2, color: 'text.secondary' }}>Methoden Wahrscheinlichkeit</Typography>
 
-                {/* Toy Vaginal (Einstellbar) */}
                 <Box sx={{ mb: 2, px: 2 }}>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                         <Typography variant="caption">Toy Vaginal</Typography>
@@ -316,7 +216,6 @@ export default function ProtocolSettings() {
                     />
                 </Box>
 
-                {/* Toy Anal (Einstellbar) */}
                 <Box sx={{ mb: 2, px: 2 }}>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                         <Typography variant="caption">Toy Anal</Typography>
@@ -329,7 +228,6 @@ export default function ProtocolSettings() {
                     />
                 </Box>
 
-                {/* Hand (Rest - Read Only) */}
                 <Box sx={{ mb: 2, px: 2, opacity: 0.6 }}>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                         <Typography variant="caption">Hand (Restwahrscheinlichkeit)</Typography>
@@ -341,16 +239,7 @@ export default function ProtocolSettings() {
                         sx={{ color: 'text.secondary' }}
                     />
                 </Box>
-
             </Paper>
-
-            {/* ACTIONS */}
-            <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end', mt: 2, pb: 4 }}>
-                <Button startIcon={<RestoreIcon />} color="error" onClick={handleReset}>Reset</Button>
-                <Button variant="contained" startIcon={<SaveIcon />} disabled={!hasChanges} onClick={handleSave} sx={DESIGN_TOKENS.buttonGradient}>
-                    Speichern
-                </Button>
-            </Box>
         </Box>
     );
 }

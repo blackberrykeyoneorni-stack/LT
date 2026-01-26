@@ -297,7 +297,7 @@ export default function Statistics() {
         { id: 'exposure', title: 'Exposure', val: `${coreMetrics.exposure}%`, sub: 'Tragezeit-Ratio', icon: AccessTimeIcon, color: PALETTE.primary.main },
         { id: 'resistance', title: 'Resistance', val: `${coreMetrics.resistance}%`, sub: 'Straf-Quote', icon: SecurityIcon, color: PALETTE.accents.gold },
         { id: 'voluntarism', title: 'Voluntarism', val: coreMetrics.voluntarism, sub: 'Wille / Befehl', icon: PsychologyIcon, color: PALETTE.accents.blue },
-        { id: 'endurance', title: 'Endurance', val: `${coreMetrics.endurance}h`, sub: 'Ø Dauer', icon: SpeedIcon, color: PALETTE.text.secondary },
+        { id: 'endurance', title: 'Endurance', val: `${coreMetrics.endurance}h`, sub: `Nyl: ${coreMetrics.enduranceNylon || 0}h • Des: ${coreMetrics.enduranceDessous || 0}h`, icon: SpeedIcon, color: PALETTE.text.secondary },
     ];
 
     return (
