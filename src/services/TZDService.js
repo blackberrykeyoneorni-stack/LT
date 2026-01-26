@@ -3,26 +3,46 @@ import { doc, updateDoc, serverTimestamp, setDoc, getDoc, increment, query, coll
 import { safeDate } from '../utils/dateUtils';
 import { registerPunishment } from './PunishmentService';
 
-// --- KONSTANTEN ---
-const TRIGGER_CHANCE = 0.12; // 12 % Wahrscheinlichkeit
+// --- FALLBACK KONSTANTEN (Falls keine Settings geladen werden können) ---
+const FALLBACK_TRIGGER_CHANCE = 0.12; 
 
-const TIME_MATRIX = [
-    { label: 'The Bait', min: 2, max: 4, cumulative: 0.20 },
-    { label: 'The Standard', min: 4, max: 8, cumulative: 0.70 },
-    { label: 'The Wall', min: 8, max: 12, cumulative: 1.00 }
+// Fallback Matrix mit Weights (passend zur Logik der Settings)
+const FALLBACK_MATRIX = [
+    { label: 'The Bait', min: 2, max: 4, weight: 0.20 },
+    { label: 'The Standard', min: 4, max: 8, weight: 0.70 }, // Im Fallback leicht abweichend strukturiert, aber funktional
+    { label: 'The Wall', min: 8, max: 12, weight: 0.10 }
 ];
 
 // --- HELPER ---
-const determineSecretDuration = () => {
+/**
+ * Berechnet die Dauer basierend auf der übergebenen Matrix (aus Settings oder Fallback).
+ * Die Matrix aus den Settings nutzt 'weight' (z.B. 0.2), nicht 'cumulative'.
+ */
+const determineSecretDuration = (matrix) => {
+    const durationMatrix = (matrix && matrix.length > 0) ? matrix : FALLBACK_MATRIX;
     const rand = Math.random();
-    for (const zone of TIME_MATRIX) {
-        if (rand < zone.cumulative) {
-            const range = zone.max - zone.min;
-            const randomOffset = Math.floor(Math.random() * (range + 1));
-            return (zone.min + randomOffset) * 60; // Minuten
+    
+    let cumulative = 0;
+    
+    for (const zone of durationMatrix) {
+        // Sicherstellen, dass wir mit Weights arbeiten
+        const weight = zone.weight || 0;
+        cumulative += weight;
+        
+        if (rand < cumulative) {
+            // Nutze minHours/maxHours aus Settings (dort heißen sie meist so) oder min/max als Fallback
+            const min = zone.minHours !== undefined ? zone.minHours : zone.min;
+            const max = zone.maxHours !== undefined ? zone.maxHours : zone.max;
+            
+            const range = max - min;
+            // Zufällige Minuten innerhalb der Range
+            const randomOffsetMinutes = Math.floor(Math.random() * (range * 60 + 1));
+            
+            return (min * 60) + randomOffsetMinutes; // Gesamtdauer in Minuten
         }
     }
-    return 12 * 60; // Fallback
+    
+    return 12 * 60; // Fallback, falls Mathe versagt
 };
 
 // --- ELIGIBILITY CHECK ---
@@ -33,7 +53,6 @@ export const isItemEligibleForTZD = (item) => {
     const name = (item.name || '').toLowerCase();
 
     // Änderung: Nur noch Strumpfhosen lösen das Diktat aus.
-    // Die Prüfung auf Intimissimi-Unterteile wurde entfernt.
     if (cat.includes('strumpfhose') || sub.includes('strumpfhose') || name.includes('strumpfhose') || 
         cat.includes('tights') || sub.includes('tights')) {
         return true;
@@ -59,8 +78,6 @@ export const checkForTZDTrigger = async (userId, activeSessions, items) => {
         if (hour < 12 || (hour === 12 && min <= 30)) inWindow = true;
     }
 
-    // Freitag (5) und Samstag (6) bleiben false
-
     if (!inWindow) return false;
 
     // 2. Session Prüfung: Läuft eine INSTRUCTION Session?
@@ -82,11 +99,36 @@ export const checkForTZDTrigger = async (userId, activeSessions, items) => {
     
     if (relevantItems.length === 0) return false;
 
-    // 4. Wahrscheinlichkeit
+    // 4. Wahrscheinlichkeit & Settings laden
+    // HIER IST DIE ÄNDERUNG: Wir laden die echten User-Settings
+    let currentChance = FALLBACK_TRIGGER_CHANCE;
+    let currentMatrix = FALLBACK_MATRIX;
+
+    try {
+        const settingsSnap = await getDoc(doc(db, `users/${userId}/settings/protocol`));
+        if (settingsSnap.exists()) {
+            const data = settingsSnap.data();
+            if (data.tzd) {
+                if (typeof data.tzd.triggerChance === 'number') {
+                    currentChance = data.tzd.triggerChance;
+                }
+                if (data.tzd.durationMatrix && Array.isArray(data.tzd.durationMatrix)) {
+                    currentMatrix = data.tzd.durationMatrix;
+                }
+            }
+        }
+    } catch (e) {
+        console.error("Fehler beim Laden der TZD Settings, nutze Fallback", e);
+    }
+
     const roll = Math.random();
     
-    if (roll < TRIGGER_CHANCE) {
-        await startTZD(userId, relevantItems);
+    // Debug Log für dich (kann später raus)
+    console.log(`TZD Check: Roll ${roll.toFixed(3)} vs Chance ${currentChance}`);
+
+    if (roll < currentChance) {
+        // Wir übergeben die geladene Matrix an startTZD
+        await startTZD(userId, relevantItems, currentMatrix);
         return true;
     }
 
@@ -96,14 +138,15 @@ export const checkForTZDTrigger = async (userId, activeSessions, items) => {
 /**
  * Startet das Protokoll
  */
-export const startTZD = async (userId, targetItems) => {
-    const targetDuration = determineSecretDuration();
+export const startTZD = async (userId, targetItems, durationMatrix) => {
+    // Nutze die übergebene Matrix (aus Settings) oder Fallback
+    const targetDuration = determineSecretDuration(durationMatrix);
     const itemsArray = Array.isArray(targetItems) ? targetItems : [targetItems];
 
     const tzdData = {
         isActive: true,
         startTime: serverTimestamp(),
-        targetDurationMinutes: targetDuration,
+        targetDurationMinutes: Math.round(targetDuration),
         lockedItems: itemsArray.map(i => ({
             id: i.id,
             name: i.name,
@@ -181,7 +224,7 @@ export const terminateTZD = async (userId, success = true) => {
         result: success ? 'completed' : 'failed' 
     });
 
-    // B) NEU: Vermerk in der LAUFENDEN Instruction-Session
+    // B) Vermerk in der LAUFENDEN Instruction-Session
     // Dieser "Stempel" (tzdExecuted) verhindert den Neustart in der Trigger-Logik.
     if (success) {
         try {
