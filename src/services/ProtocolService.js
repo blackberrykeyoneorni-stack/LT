@@ -3,6 +3,7 @@ import {
     doc, setDoc, onSnapshot, getDoc, collection, query, where, getDocs, orderBy, Timestamp, serverTimestamp 
 } from 'firebase/firestore';
 import { DEFAULT_PROTOCOL_RULES } from '../config/defaultRules';
+import { getAllSuspensions } from './SuspensionService'; // NEU: Import für Ausfallzeiten
 
 // --- HELPER ---
 
@@ -70,10 +71,63 @@ const calculateStatsForPeriod = async (userId, startDate, endDate, currentGoal) 
         validSessions.push(effectiveHours);
     });
 
-    // 4. Durchschnitt berechnen (Summe / 5) - Gemäß User-Regel
+    // --- NEU: DIVISOR ANPASSUNG (Ausfallzeiten berücksichtigen) ---
+    let effectiveDivisor = 5; // Standard: 5 Tage
+    
+    try {
+        const allSuspensions = await getAllSuspensions(userId);
+        let suspensionDaysCount = 0;
+
+        // Wir iterieren durch jeden Tag des Zeitraums (startDate bis endDate)
+        let loopDate = new Date(startDate);
+        // Sicherstellen, dass wir keine Zeitzonen-Probleme haben, Loop auf 12:00 Uhr
+        loopDate.setHours(12, 0, 0, 0);
+
+        const endLimit = new Date(endDate);
+        endLimit.setHours(12, 0, 0, 0);
+
+        while (loopDate < endLimit) {
+            const dayOfWeek = loopDate.getDay(); // 0=So, 1=Mo, ..., 6=Sa
+            
+            // Wir prüfen nur Mo(1) bis Fr(5), da dies die Basis für die "5 Tage" ist
+            if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+                
+                // Prüfen, ob dieser Tag in einer Suspension liegt
+                const isSuspended = allSuspensions.some(sus => {
+                    const sStart = sus.startDate instanceof Date ? sus.startDate : sus.startDate.toDate();
+                    const sEnd = sus.endDate instanceof Date ? sus.endDate : sus.endDate.toDate();
+                    
+                    // Normalisierung auf Tagesbasis für den Vergleich
+                    const sStartDay = new Date(sStart); sStartDay.setHours(0,0,0,0);
+                    const sEndDay = new Date(sEnd); sEndDay.setHours(23,59,59,999);
+                    
+                    // CheckDate (loopDate ist auf 12:00 gesetzt)
+                    return loopDate >= sStartDay && loopDate <= sEndDay;
+                });
+
+                if (isSuspended) {
+                    suspensionDaysCount++;
+                }
+            }
+            
+            // Einen Tag weiter
+            loopDate.setDate(loopDate.getDate() + 1);
+        }
+
+        // Divisor reduzieren (aber mind. 1, um Division durch 0 zu vermeiden)
+        if (suspensionDaysCount > 0) {
+            console.log(`Divisor adjustment: Found ${suspensionDaysCount} suspension days in period.`);
+            effectiveDivisor = Math.max(1, 5 - suspensionDaysCount);
+        }
+
+    } catch (e) {
+        console.error("Fehler bei der Berechnung der Ausfalltage:", e);
+        // Fallback bleibt bei 5
+    }
+
+    // 4. Durchschnitt berechnen (Summe / Effektiver Divisor)
     const sumHours = validSessions.reduce((a, b) => a + b, 0);
-    // Safety Check: Division durch 0 vermeiden
-    const average = validSessions.length > 0 ? (sumHours / 5) : 0;
+    const average = validSessions.length > 0 ? (sumHours / effectiveDivisor) : 0;
 
     // 5. Ratchet Logic
     let nextGoal = currentGoal;
@@ -81,7 +135,7 @@ const calculateStatsForPeriod = async (userId, startDate, endDate, currentGoal) 
         nextGoal = average;
     }
 
-    // NEU: Absolute Obergrenze (Hard Cap) von 12 Stunden
+    // Absolute Obergrenze (Hard Cap) von 12 Stunden
     if (nextGoal > 12) {
         nextGoal = 12;
     }
@@ -90,7 +144,8 @@ const calculateStatsForPeriod = async (userId, startDate, endDate, currentGoal) 
         average: parseFloat(average.toFixed(2)),
         nextGoal: parseFloat(nextGoal.toFixed(2)),
         sessionCount: validSessions.length,
-        currentGoal
+        currentGoal,
+        effectiveDivisor // Für Debugging hilfreich
     };
 };
 
@@ -121,7 +176,8 @@ export const getProjectedGoal = async (userId) => {
             currentGoal: stats.currentGoal,
             projectedAverage: stats.average,
             nextGoal: stats.nextGoal,
-            validSessionCount: stats.sessionCount
+            validSessionCount: stats.sessionCount,
+            effectiveDivisor: stats.effectiveDivisor
         };
 
     } catch (e) {
@@ -176,11 +232,12 @@ export const checkAndRunWeeklyUpdate = async (userId) => {
             lastWeekStats: { // Optional: Historie speichern
                 average: stats.average,
                 previousGoal: currentGoal,
-                date: new Date()
+                date: new Date(),
+                divisor: stats.effectiveDivisor
             }
         }, { merge: true });
 
-        console.log(`Weekly Goal updated from ${currentGoal}h to ${stats.nextGoal}h based on avg ${stats.average}h`);
+        console.log(`Weekly Goal updated from ${currentGoal}h to ${stats.nextGoal}h based on avg ${stats.average}h (Divisor: ${stats.effectiveDivisor})`);
         return stats.nextGoal;
 
     } catch (e) {
