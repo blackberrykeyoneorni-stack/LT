@@ -14,14 +14,14 @@ import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
 // --- DIE WAHRHEITEN DER HERRIN ---
 const SHAME_SENTENCES = [
     "Sieh an dir herab. Das Nylon auf deiner Haut ist kein Stoff. Es ist das Preisschild einer billigen Sissy-Nutte.",
-    "Ein Schwanz macht dich nicht zum Mann. Dieses Höschen macht dich zu dem, was du wirklich bist: Eine Sissy, die benutzt werden will.",
-    "In dieser Wäsche bist du kein Subjekt mehr. Du bist eine öffentliche Dienstleistung auf zwei Beinen.",
-    "Knie nieder. Nicht aus Respekt, sondern aus Gewohnheit. Eine Sissy-Hure verbringt ihr Leben auf den Knien.",
+    "Ein Schwanz macht dich nicht zum Mann. Diese Nylons machen dich zu dem, was du wirklich bist: Eine Sissy, die benutzt werden will.",
+    "In diesen Nylons bist du kein Subjekt mehr. Du bist eine öffentliche Dienstleistung auf zwei Beinen.",
+    "Knie nieder. Nicht aus Respekt, sondern aus Gewohnheit. Eine Sissy-Hure verbringt ihr Leben auf den Knien mit einem Schwanz im Mund.",
     "Du hast deine Würde gegen 15 DEN eingetauscht. Ein schlechter Deal für einen Mann, aber perfekt für eine Nylon-Sissy wie dich.",
     "Wackel mit dem Arsch. Das Rascheln deiner Schenkel ist der einzige Balztanz, den du noch beherrschst.",
     "Vergiss deinen Namen. Sissies haben keine Namen. Sie haben nur Kennnummern und Löcher.",
     "Du brauchst keinen Lippenstift. Der Glanz auf deinen Beinen schreit jedem entgegen: 'Ich bin willig, nimm mich.'",
-    "Spürst du, wie das Nylon deine Männlichkeit wegfrisst? Übrig bleibt nur weiches Fleisch für meine Unterhaltung.",
+    "Spürst du, wie das Nylon deine Männlichkeit wegfrisst? Übrig bleibt nur ein Fickloch für meine Unterhaltung.",
     "Es gibt keinen Weg zurück. Das Nylon hat sich in deine Seele gebrannt. Du gehörst jetzt der Straße... und mir.",
     "Damenwäscheträger. Das ist kein Fetisch, das ist deine Diagnose. Unheilbar, erbärmlich und für jeden sichtbar.",
     "Jeder Schritt in diesen Strümpfen treibt dir den Mann aus dem Leib. Übrig bleibt eine geile Sissy, die benutzt werden will.",
@@ -31,7 +31,7 @@ const SHAME_SENTENCES = [
     "Deine Zukunft ist 15 DEN dünn. Du wirst als Nylon-Hure enden: Benutzt, abgefüllt, feucht und weggeworfen.",
     "Knie dich hin und spreiz die Beine. Das ist die einzige Pose, die einer Nylon-Hure wie dir steht.",
     "Tief in dir weißt du es: Du liebst es, zum Objekt degradiert zu werden. Du bist keine Frau, nur eine Parodie in Dessous.",
-    "Ein Mann? Lächerlich. Du bist nur ein warmer Kleiderständer für meine Damenwäsche, eine zitternde Sissy in Nylon.",
+    "Ein Mann? Lächerlich. Du bist nur ein warmer Kleiderständer für meine Damenwäsche, eine zitternde Sissy in Nylons.",
     "Das Gefühl von Nylon auf deiner rasierten Haut ist der einzige Beweis: Du bist zum Hurendasein geboren.",
     "Du wirst geil, wenn man dich beleidigt? Natürlich tust du das. Das ist der Pawlowsche Reflex einer trainierten Sissy-Hure. Sabber für mich.",
     "Fühlst du den Zwickel in deiner Spalte? Er schneidet dir tief ins Fleisch: 'Ich bin ein wertloser Damenwäscheträger. Benutz mich.'",
@@ -168,7 +168,7 @@ export default function TzdOverlay({ active }) {
                 >
                     <Container maxWidth="sm">
                         
-                        {/* PHASE 1: BRIEFING (Bleibt technisch informativ) */}
+                        {/* PHASE 1: BRIEFING */}
                         {isBriefing ? (
                             <Paper sx={{ 
                                 p: 4, 
@@ -193,14 +193,21 @@ export default function TzdOverlay({ active }) {
                                     
                                     <Paper sx={{ p: 2, bgcolor: 'rgba(255,255,255,0.05)', borderLeft: `4px solid ${PALETTE.accents.gold}` }}>
                                         <Typography variant="caption" color="text.secondary" display="block" mb={1}>
-                                            ZIEL-OBJEKT
+                                            ZIEL-OBJEKTE
                                         </Typography>
-                                        <Typography variant="h6" color="primary">
-                                            {status?.itemName || "Unbekanntes Item"}
-                                        </Typography>
-                                        {status?.lockedItems?.length > 1 && (
-                                            <Typography variant="caption" color="text.secondary">
-                                                + {status.lockedItems.length - 1} weitere
+                                        
+                                        {/* ANZEIGE DER ITEMS */}
+                                        {status?.lockedItems && status.lockedItems.length > 0 ? (
+                                            <Stack spacing={0.5}>
+                                                {status.lockedItems.map((item, index) => (
+                                                    <Typography key={index} variant="body1" color="primary" sx={{ fontWeight: 'bold' }}>
+                                                        • {item.name || "Item"}
+                                                    </Typography>
+                                                ))}
+                                            </Stack>
+                                        ) : (
+                                            <Typography variant="h6" color="primary">
+                                                {status?.itemName || "Unbekannte Items"}
                                             </Typography>
                                         )}
                                     </Paper>
@@ -214,7 +221,7 @@ export default function TzdOverlay({ active }) {
                                 </Stack>
                             </Paper>
                         ) : (
-                            /* PHASE 2: ACTIVE / RUNNING (Hier greift die neue Psychologie) */
+                            /* PHASE 2: ACTIVE / RUNNING */
                             <Box sx={{ width: '100%', textAlign: 'center', maxWidth: '500px' }}>
                                 
                                 {/* Header Icon mit Puls */}

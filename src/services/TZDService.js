@@ -4,12 +4,12 @@ import { safeDate } from '../utils/dateUtils';
 import { registerPunishment } from './PunishmentService';
 
 // --- KONSTANTEN ---
-const TRIGGER_CHANCE = 0.08; // 8% Wahrscheinlichkeit
+const TRIGGER_CHANCE = 0.12; // 12 % Wahrscheinlichkeit
 
 const TIME_MATRIX = [
     { label: 'The Bait', min: 2, max: 4, cumulative: 0.20 },
-    { label: 'The Standard', min: 4, max: 6, cumulative: 0.70 },
-    { label: 'The Wall', min: 6, max: 8, cumulative: 1.00 }
+    { label: 'The Standard', min: 4, max: 8, cumulative: 0.70 },
+    { label: 'The Wall', min: 8, max: 12, cumulative: 1.00 }
 ];
 
 // --- HELPER ---
@@ -30,23 +30,15 @@ export const isItemEligibleForTZD = (item) => {
     if (!item) return false;
     const cat = (item.mainCategory || '').toLowerCase();
     const sub = (item.subCategory || '').toLowerCase();
-    const brand = (item.brand || '').toLowerCase();
     const name = (item.name || '').toLowerCase();
 
-    // 1. Strumpfhosen
+    // Änderung: Nur noch Strumpfhosen lösen das Diktat aus.
+    // Die Prüfung auf Intimissimi-Unterteile wurde entfernt.
     if (cat.includes('strumpfhose') || sub.includes('strumpfhose') || name.includes('strumpfhose') || 
         cat.includes('tights') || sub.includes('tights')) {
         return true;
     }
 
-    // 2. Intimissimi Unterteile
-    if (brand.includes('intimissimi')) {
-        if (sub.includes('slip') || sub.includes('panty') || sub.includes('string') || 
-            sub.includes('thong') || sub.includes('höschen') || sub.includes('brief') ||
-            name.includes('slip') || name.includes('panty') || name.includes('höschen')) {
-            return true;
-        }
-    }
     return false;
 };
 
@@ -72,7 +64,11 @@ export const checkForTZDTrigger = async (userId, activeSessions, items) => {
     if (!inWindow) return false;
 
     // 2. Session Prüfung: Läuft eine INSTRUCTION Session?
-    const instructionSessions = activeSessions.filter(s => s.type === 'instruction');
+    // FIX: Wir filtern Sessions heraus, die bereits ein TZD hatten (s.tzdExecuted)
+    const instructionSessions = activeSessions.filter(s => 
+        s.type === 'instruction' && !s.tzdExecuted
+    );
+    
     if (instructionSessions.length === 0) return false;
 
     // 3. Item Prüfung
@@ -186,7 +182,7 @@ export const terminateTZD = async (userId, success = true) => {
     });
 
     // B) NEU: Vermerk in der LAUFENDEN Instruction-Session
-    // Wir suchen die aktive Instruction-Session und schreiben den TZD-Erfolg hinein.
+    // Dieser "Stempel" (tzdExecuted) verhindert den Neustart in der Trigger-Logik.
     if (success) {
         try {
             const q = query(
