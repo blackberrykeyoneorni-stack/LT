@@ -28,10 +28,18 @@ export default function ItemHistory({ historyEvents }) {
                         color = s.type === 'instruction' ? 'secondary' : 'default';
                         icon = <AccessTimeIcon style={{ fontSize: 16 }} />;
                         
-                        const endTime = s.endTime ? s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime) : null;
-                        if (endTime) {
-                            sub = `${event.date.toLocaleDateString()}, ${event.date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} - ${endTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`;
-                            durationLabel = formatDuration(s.durationMinutes || 0);
+                        // Startzeit liegt bereits als Date-Objekt in event.date vor (durch useItemDetailLogic)
+                        const startTime = event.date;
+                        // Endzeit sicher parsen
+                        const endTime = s.endTime ? (s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime)) : null;
+
+                        if (endTime && startTime) {
+                            sub = `${startTime.toLocaleDateString()}, ${startTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} - ${endTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`;
+                            
+                            // FIX: Dauer live berechnen (Ende - Start), statt gespeicherten Wert zu nutzen
+                            const diffMs = endTime.getTime() - startTime.getTime();
+                            const diffMins = Math.floor(diffMs / 60000);
+                            durationLabel = formatDuration(diffMins);
                         } else {
                             sub = `${event.date.toLocaleDateString()} - Laufend`;
                             durationLabel = 'Laufend';
