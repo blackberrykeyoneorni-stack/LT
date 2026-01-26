@@ -53,10 +53,10 @@ export default function ForcedReleaseOverlay({ open, method, onConfirm, onRefuse
           
           if (isMercyGranted) {
               setVerdict('clean');
-              setBegMessage("Gnade gewährt. Schluck deine Sissy-Sahne.");
+              setBegMessage("Gnade gewährt. Schluck dein Sissy-Sperma. Behalte es eine Minute im Mund, gewöhne dich an den Geschmack");
           } else {
               setVerdict('ruined');
-              setBegMessage("ABGELEHNT! Schmier deine Sissy-Soße in deine Uniform. Ruiniere sie!");
+              setBegMessage("ABGELEHNT! Schmier deine Sissy-Sahne in deine Nylons. Ruiniere sie!");
           }
           setStage('result');
       }, 1500);
