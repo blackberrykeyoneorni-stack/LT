@@ -279,16 +279,33 @@ export default function Inventory() {
             let background = catColors.bg;
             let imgFilter = 'none';
             
-            if (isWashing) {
-                borderColor = PALETTE.accents.blue;
-                background = `${PALETTE.accents.blue}1A`;
-                imgFilter = 'grayscale(0.8)';
-            } else if (isArchived) {
+            // --- ID CHIP STYLING LOGIC ---
+            let idChipBg = 'rgba(0,0,0,0.6)';
+            let idChipColor = 'white';
+
+            if (isArchived) {
+                // Roter Chip für Archiviert
+                idChipBg = PALETTE.accents.red;
+                
+                // Card Styling für Archiviert
                 borderColor = PALETTE.accents.red;
                 background = 'rgba(20, 0, 0, 0.4)';
                 imgFilter = 'grayscale(1)';
             } 
-            // MODIFICATION: No visual darkening for resting items anymore, just the chip below.
+            else if (isWashing) {
+                // Kräftiges Blau (#2979ff) für Wäsche statt Accent-Blue
+                idChipBg = '#2979ff';
+
+                // Card Styling für Wäsche
+                borderColor = '#2979ff';
+                background = `rgba(41, 121, 255, 0.1)`;
+                imgFilter = 'grayscale(0.8)';
+            }
+            else if (isResting) {
+                // Gelb/Gold (#ffc107) für Elasthan Recovery
+                idChipBg = '#ffc107'; 
+                idChipColor = 'black'; // Schwarze Schrift für Kontrast
+            }
             
             return (
                 <Grid item xs={6} sm={4} md={3} key={item.id} component={motion.div} variants={MOTION.listItem} layout>
@@ -302,8 +319,28 @@ export default function Inventory() {
                                 <CardMedia component="img" image={imgUrl} alt={getDisplayName(item)} sx={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', objectFit: 'cover', filter: imgFilter }} />
                             ) : (<CheckroomIcon sx={{ position: 'absolute', top: '35%', left: '35%', fontSize: 40, opacity: 0.3 }} />)}
                             
-                            {item.customId && <Chip icon={<FingerprintIcon style={{ fontSize: 16, color: 'white' }} />} label={item.customId} size="small" sx={{ position: 'absolute', top: 8, left: 8, bgcolor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', color: 'white', fontWeight: 'bold' }} />}
-                            {isWashing && <LocalLaundryServiceIcon sx={{ position: 'absolute', bottom: 8, right: 8, color: PALETTE.accents.blue, filter: 'drop-shadow(0 0 4px black)' }} />}
+                            {/* --- MODIFIED ID CHIP --- */}
+                            {item.customId && (
+                                <Chip 
+                                    icon={<FingerprintIcon style={{ fontSize: 14, color: idChipColor }} />} 
+                                    label={item.customId} 
+                                    size="small" 
+                                    sx={{ 
+                                        position: 'absolute', 
+                                        top: 8, 
+                                        left: 8, 
+                                        bgcolor: idChipBg, 
+                                        backdropFilter: 'blur(4px)', 
+                                        color: idChipColor, 
+                                        fontWeight: 'bold',
+                                        height: '22px',      // Kleiner als Standard
+                                        fontSize: '0.7rem',  // Kleinere Schrift
+                                        '& .MuiChip-icon': { marginLeft: '4px' } 
+                                    }} 
+                                />
+                            )}
+
+                            {isWashing && <LocalLaundryServiceIcon sx={{ position: 'absolute', bottom: 8, right: 8, color: '#2979ff', filter: 'drop-shadow(0 0 4px black)' }} />}
                             {isResting && item.status === 'active' && (
                                 <Tooltip title={`Erholung: noch ${recoveryInfo.remaining}h`}>
                                     <Chip icon={<SnoozeIcon style={{ fontSize: 16, color: '#fff' }} />} label={`${recoveryInfo.remaining}h`} size="small" sx={{ position: 'absolute', top: 8, right: 8, bgcolor: 'rgba(0,0,0,0.7)', color: '#fff', border: `1px solid ${PALETTE.secondary.main}`, backdropFilter: 'blur(4px)' }} />
