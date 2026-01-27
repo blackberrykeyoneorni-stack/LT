@@ -189,9 +189,19 @@ export default function Inventory() {
 
   // --- FILTER LOGIC ---
   const getRecoveryInfo = (item) => {
-      if (!item || item.mainCategory !== 'Nylons') return null;
+      if (!item) return null;
+      
+      // Lockerer Kategorie-Check (Nylon, Strumpf, Tights...)
+      const cat = (item.mainCategory || '').toLowerCase();
+      const sub = (item.subCategory || '').toLowerCase();
+      const isNylonRelated = cat.includes('nylon') || cat.includes('strumpf') || cat.includes('tights') || 
+                             sub.includes('nylon') || sub.includes('strumpf') || sub.includes('tights');
+
+      if (!isNylonRelated) return null;
+
       const lastWornDate = safeDate(item.lastWorn); 
       if (!lastWornDate) return null;
+      
       const hoursSince = (new Date() - lastWornDate) / (1000 * 60 * 60);
       if (hoursSince < restingHours) {
           return { isResting: true, remaining: Math.ceil(restingHours - hoursSince) };
