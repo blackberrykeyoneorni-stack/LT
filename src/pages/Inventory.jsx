@@ -199,8 +199,19 @@ export default function Inventory() {
 
       if (!isNylonRelated) return null;
 
-      const lastWornDate = safeDate(item.lastWorn); 
-      if (!lastWornDate) return null;
+      // Robuste Datumskonvertierung
+      let lastWornDate = null;
+      if (item.lastWorn) {
+        // Falls Firestore Timestamp
+        if (typeof item.lastWorn.toDate === 'function') {
+            lastWornDate = item.lastWorn.toDate();
+        } else {
+            // Falls String oder Date Objekt
+            lastWornDate = new Date(item.lastWorn);
+        }
+      }
+
+      if (!lastWornDate || isNaN(lastWornDate.getTime())) return null;
       
       const hoursSince = (new Date() - lastWornDate) / (1000 * 60 * 60);
       if (hoursSince < restingHours) {
@@ -314,7 +325,7 @@ export default function Inventory() {
             else if (isResting) {
                 // Gelb/Gold (#ffc107) für Elasthan Recovery
                 idChipBg = '#ffc107'; 
-                idChipColor = 'black'; // Schwarze Schrift für Kontrast
+                idChipColor = '#000'; // Schwarze Schrift für Kontrast auf Gelb
             }
             
             return (
@@ -351,9 +362,26 @@ export default function Inventory() {
                             )}
 
                             {isWashing && <LocalLaundryServiceIcon sx={{ position: 'absolute', bottom: 8, right: 8, color: '#2979ff', filter: 'drop-shadow(0 0 4px black)' }} />}
+                            
+                            {/* --- RECOVERY CHIP (JETZT AUCH GOLD/GELB) --- */}
                             {isResting && item.status === 'active' && (
                                 <Tooltip title={`Erholung: noch ${recoveryInfo.remaining}h`}>
-                                    <Chip icon={<SnoozeIcon style={{ fontSize: 16, color: '#fff' }} />} label={`${recoveryInfo.remaining}h`} size="small" sx={{ position: 'absolute', top: 8, right: 8, bgcolor: 'rgba(0,0,0,0.7)', color: '#fff', border: `1px solid ${PALETTE.secondary.main}`, backdropFilter: 'blur(4px)' }} />
+                                    <Chip 
+                                        icon={<SnoozeIcon style={{ fontSize: 16, color: '#000' }} />} 
+                                        label={`${recoveryInfo.remaining}h`} 
+                                        size="small" 
+                                        sx={{ 
+                                            position: 'absolute', 
+                                            top: 8, 
+                                            right: 8, 
+                                            bgcolor: '#ffc107', // Gold Hintergrund
+                                            color: '#000',      // Schwarze Schrift
+                                            fontWeight: 'bold',
+                                            border: `1px solid #e0a800`,
+                                            backdropFilter: 'blur(4px)',
+                                            boxShadow: '0 2px 4px rgba(0,0,0,0.3)'
+                                        }} 
+                                    />
                                 </Tooltip>
                             )}
                         </Box>

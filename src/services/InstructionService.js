@@ -20,10 +20,10 @@ const isItemInRecovery = (item, restingHours = 24) => {
     }
 
     const lastWornDate = item.lastWorn.toDate ? item.lastWorn.toDate() : new Date(item.lastWorn);
-    
+
     // Sicherheitscheck für ungültige Daten
     if (isNaN(lastWornDate.getTime())) {
-        return false; 
+        return false;
     }
 
     const hoursSince = (new Date() - lastWornDate) / (1000 * 60 * 60);
@@ -48,14 +48,14 @@ const getFutureBlockedItemIds = async (uid, restingHours) => {
 
         const snap = await getDocs(q);
         let blockedIds = [];
-        
+
         snap.forEach(doc => {
             const data = doc.data();
             if (data.itemIds && Array.isArray(data.itemIds)) {
                 blockedIds = [...blockedIds, ...data.itemIds];
             }
         });
-        
+
         return blockedIds;
     } catch (e) {
         console.warn("Konnte zukünftige Pläne nicht laden (ignoriere):", e);
@@ -100,7 +100,7 @@ export const getLastInstruction = async (uid) => {
     try {
         const docRef = doc(db, `users/${uid}/status/dailyInstruction`);
         const docSnap = await getDoc(docRef);
-        
+
         if (docSnap.exists()) {
             return docSnap.data();
         }
@@ -119,7 +119,7 @@ const getProtocolSettings = async (userId) => {
     try {
         const settingsRef = doc(db, `users/${userId}/settings/protocol`);
         const settingsSnap = await getDoc(settingsRef);
-        
+
         if (settingsSnap.exists()) {
             const data = settingsSnap.data();
             return {
@@ -141,6 +141,48 @@ const getProtocolSettings = async (userId) => {
     return DEFAULT_PROTOCOL_RULES;
 };
 
+/**
+ * Holt die relevanten Sessions der letzten X Stunden, um den echten LastWorn-Zeitpunkt zu bestimmen.
+ * Dies ist robuster als nur item.lastWorn zu vertrauen (Frontend-Logik-Parität).
+ */
+const getRecentSessionsMap = async (uid, lookbackHours = 48) => {
+    try {
+        const now = new Date();
+        const past = new Date(now.getTime() - (lookbackHours * 60 * 60 * 1000));
+
+        const q = query(
+            collection(db, `users/${uid}/sessions`),
+            where('endTime', '>=', past),
+            orderBy('endTime', 'desc')
+        );
+
+        const snap = await getDocs(q);
+        const map = {}; // itemId -> Date
+
+        snap.forEach(doc => {
+            const data = doc.data();
+            const endDate = data.endTime ? data.endTime.toDate() : new Date(); // Fallback für laufende
+
+            // Sammle IDs (da Sessions mehrere Items haben können)
+            const ids = [];
+            if (data.itemId) ids.push(data.itemId);
+            if (data.itemIds && Array.isArray(data.itemIds)) ids.push(...data.itemIds);
+
+            ids.forEach(id => {
+                // Wir wollen das *neueste* End-Datum wissen
+                if (!map[id] || endDate > map[id]) {
+                    map[id] = endDate;
+                }
+            });
+        });
+
+        return map;
+    } catch (e) {
+        console.error("Fehler beim Laden der Recent Sessions:", e);
+        return {};
+    }
+};
+
 // --- CORE FUNKTIONEN ---
 
 /**
@@ -149,7 +191,7 @@ const getProtocolSettings = async (userId) => {
  */
 export const verifyNightCompliance = async (userId, referenceDate = new Date()) => {
     // referenceDate ist standardmäßig "Jetzt" (der aktuelle Tag).
-    
+
     try {
         const year = referenceDate.getFullYear();
         const month = referenceDate.getMonth();
@@ -165,7 +207,7 @@ export const verifyNightCompliance = async (userId, referenceDate = new Date()) 
 
         // Suchfenster für Sessions: Von Gestern 20:00 bis Heute 08:00
         const searchStart = new Date(year, month, day - 1, 20, 0, 0);
-        
+
         const q = query(
             collection(db, `users/${userId}/sessions`),
             where('type', '==', 'instruction'),
@@ -194,10 +236,10 @@ export const verifyNightCompliance = async (userId, referenceDate = new Date()) 
         checkpoints.forEach(cp => {
             // Eine Session ist gültig, wenn sie VOR/AM Checkpoint startete und NACH/AM Checkpoint endete
             const isCovered = sessions.some(s => s.start <= cp && s.end >= cp);
-            
+
             if (!isCovered) {
                 allCheckpointsCovered = false;
-                missedCheckpoints.push(cp.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}));
+                missedCheckpoints.push(cp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
             }
         });
 
@@ -229,34 +271,38 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
         // 1. Hole Präferenzen
         const prefsSnap = await getDoc(doc(db, `users/${uid}/settings/preferences`));
         const prefs = prefsSnap.exists() ? prefsSnap.data() : {};
-        
+
         // NEU: Hole Protokoll-Einstellungen für Forced Release
         const protocolSettings = await getProtocolSettings(uid);
-        
+
         // SICHERHEIT: Parse als Integer, um String-Vergleiche zu vermeiden
         // Dies verhindert Fehler bei der Wahrscheinlichkeitsberechnung unten
         const maxItems = parseInt(prefs.maxInstructionItems || 1, 10);
         const restingHours = prefs.nylonRestingHours || 24;
         const userWeights = prefs.categoryWeights || {}; // Manuelle Gewichtungen aus Settings
 
+        // 1b. NEU: Hole echte Session-Daten für robusten Recovery-Check
+        // Wir schauen so weit zurück wie die Resting-Time ist (plus Puffer)
+        const recentSessionsMap = await getRecentSessionsMap(uid, restingHours + 5);
+
         // 2. CHECK: GIBT ES EINEN PLAN FÜR HEUTE?
         const plannedItems = await checkTodayPlan(uid, items);
-        
+
         if (plannedItems && plannedItems.length > 0) {
             console.log("InstructionService: Führe geplanten Plan aus.");
-            
+
             const titleNames = plannedItems.map(i => i.subCategory || i.name || 'Item').join(' & ');
 
             const instructionData = {
                 periodId,
                 generatedAt: serverTimestamp(),
                 isAccepted: false,
-                isPlanned: true, 
+                isPlanned: true,
                 itemName: titleNames,
                 forcedRelease: { required: false, executed: false, method: null },
                 items: plannedItems.map(i => ({
                     id: i.id,
-                    name: i.subCategory || i.name || 'Unbenanntes Item', 
+                    name: i.subCategory || i.name || 'Unbenanntes Item',
                     brand: i.brand || '',
                     img: i.imageUrl || (i.images && i.images[0]) || null,
                     subCategory: i.subCategory || ''
@@ -276,29 +322,42 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
         });
 
         const futureBlockedIds = await getFutureBlockedItemIds(uid, restingHours);
-        
+
         const isNightInstruction = periodId && periodId.includes('night');
 
         // 3. Filterung der verfügbaren Items
         const availableItems = items.filter(i => {
             // Nur aktive Items
-            if (i.status !== 'active') return false; 
-            
+            if (i.status !== 'active') return false;
+
             // Nicht, wenn bereits getragen
-            if (allActiveIds.has(i.id)) return false; 
-            
+            if (allActiveIds.has(i.id)) return false;
+
             // Nicht, wenn in Recovery (Elasthan-Ruhe)
-            if (isItemInRecovery(i, restingHours)) return false; 
-            
+            // NEU: Wir prüfen gegen das effektive Datum aus Sessions, falls vorhanden
+            let effectiveItem = i;
+            if (recentSessionsMap[i.id]) {
+                const sessionDate = recentSessionsMap[i.id];
+                const itemDate = i.lastWorn && i.lastWorn.toDate ? i.lastWorn.toDate() : (i.lastWorn ? new Date(i.lastWorn) : null);
+
+                // Wenn Session neuer ist als Item-Eintrag, nutzen wir das Session-Datum
+                if (!itemDate || sessionDate > itemDate) {
+                    effectiveItem = { ...i, lastWorn: sessionDate }; // Temporäres Override
+                    // console.log(`Recovery-Override für ${i.name}: ${sessionDate}`);
+                }
+            }
+
+            if (isItemInRecovery(effectiveItem, restingHours)) return false;
+
             // Bestehender Filter für Accessoires/Buttplugs wie gewünscht beibehalten
             if (i.mainCategory === 'Accessoires' && i.subCategory === 'Buttplug') return false;
-            
+
             // Nicht, wenn für die Zukunft geplant
             if (futureBlockedIds.includes(i.id)) return false;
 
             // Zeit-Check (Tag/Nacht Eignung)
-            const itemPeriod = i.suitablePeriod || 'Beide'; 
-            
+            const itemPeriod = i.suitablePeriod || 'Beide';
+
             if (isNightInstruction) {
                 if (itemPeriod === 'Tag') return false;
             } else {
@@ -307,7 +366,7 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
 
             return true;
         });
-        
+
         if (availableItems.length === 0) return null;
 
         // 4. SMART HYBRID SELECTOR
@@ -324,7 +383,7 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
 
         // --- NEU: Wahrscheinlichkeits-Logik für Item-Anzahl ---
         // Berechnet tatsächliche Anzahl basierend auf maxItems & Zufall
-        
+
         let targetItemCount = 1;
         const rndCount = Math.random();
 
@@ -348,7 +407,7 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
             } else {
                 targetItemCount = 1;
             }
-        } 
+        }
 
         console.log(`InstructionService: MaxItems=${maxItems}, Random=${rndCount.toFixed(2)} -> TargetCount=${targetItemCount}`);
 
@@ -361,20 +420,20 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
             const weightedGroups = availableGroupKeys.map(key => {
                 const count = groups[key].length;
                 // Wurzel-Dämpfung: Große Sammlungen zählen mehr, aber nicht linear
-                const rootScore = Math.sqrt(count); 
+                const rootScore = Math.sqrt(count);
                 // Manuelle Gewichtung aus Einstellungen (Multiplikator)
                 const manualWeight = parseInt(userWeights[key] || 1);
-                
+
                 const finalScore = rootScore * manualWeight;
                 totalWeight += finalScore;
-                
+
                 return { key, score: finalScore };
             });
 
             // Schritt C: Roulette-Wheel Selection der Kategorie
             let randomValue = Math.random() * totalWeight;
             let chosenCategoryKey = null;
-            
+
             for (const group of weightedGroups) {
                 randomValue -= group.score;
                 if (randomValue <= 0) {
@@ -403,24 +462,24 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
         // --- FORCED RELEASE LOGIK (DYNAMISCH) ---
         // Verwendet jetzt die Werte aus ProtocolSettings
         let forcedRelease = { required: false, executed: false, method: null };
-        
+
         if (isNightInstruction) {
             // Chance aus den Settings (Fallback 0.15)
             const triggerChance = protocolSettings.instruction?.forcedReleaseTriggerChance ?? 0.15;
-            
+
             if (Math.random() < triggerChance) {
                 forcedRelease.required = true;
-                
+
                 // Methoden-Wahrscheinlichkeiten aus Settings
-                const methods = protocolSettings.instruction?.forcedReleaseMethods ?? { 
-                    hand: 0.34, toy_vaginal: 0.33, toy_anal: 0.33 
+                const methods = protocolSettings.instruction?.forcedReleaseMethods ?? {
+                    hand: 0.34, toy_vaginal: 0.33, toy_anal: 0.33
                 };
 
                 // Gewichtete Zufallsauswahl
                 const rnd = Math.random();
                 const handProb = methods.hand || 0;
                 const vagProb = methods.toy_vaginal || 0;
-                
+
                 // Hier wird die "Rest-Logik" der Slider angewendet
                 if (rnd < handProb) {
                     forcedRelease.method = 'hand';
@@ -429,7 +488,7 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                 } else {
                     forcedRelease.method = 'toy_anal';
                 }
-                
+
                 console.log("InstructionService: Forced Release Triggered via Settings!", forcedRelease.method);
             }
         }
@@ -441,7 +500,7 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
             generatedAt: serverTimestamp(),
             isAccepted: false,
             itemName: titleNames,
-            forcedRelease, 
+            forcedRelease,
             items: selectedItems.map(i => ({
                 id: i.id,
                 name: i.subCategory || i.name || 'Unbenanntes Item',
@@ -450,13 +509,13 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                 subCategory: i.subCategory || ''
             }))
         };
-        
+
         await setDoc(doc(db, `users/${uid}/status/dailyInstruction`), instructionData);
         return instructionData;
 
     } catch (e) {
         console.error("FATAL ERROR in generateAndSaveInstruction:", e);
-        return null; 
+        return null;
     }
 };
 
