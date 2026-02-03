@@ -2,8 +2,9 @@
   --bg-deep: #050505;
   --glass-border: rgba(255, 255, 255, 0.08);
   --glass-surface: rgba(255, 255, 255, 0.03);
-  --primary-gold: #E6C2BF;
-  --crimson-red: #990000;
+  /* SSOT FIX: Werte synchronisiert mit materialTheme.js (m3Tokens.primary & m3Tokens.errorContainer) */
+  --primary-gold: #EBE7E1; 
+  --crimson-red: #93000A;
 }
 
 body {

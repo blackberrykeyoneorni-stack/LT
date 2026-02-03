@@ -8,8 +8,8 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useNFCGlobal } from '../contexts/NFCContext'; 
-import { loadVibeTags } from '../services/ItemService';
-import { startSession as startSessionService } from '../services/SessionService'; // NEU
+import { loadVibeTags, calculateItemRecoveryStatus } from '../services/ItemService'; // SSOT Import
+import { startSession as startSessionService } from '../services/SessionService'; 
 import { safeDate } from '../utils/dateUtils';
 import { DEFAULT_ARCHIVE_REASONS, DEFAULT_RUN_LOCATIONS, DEFAULT_RUN_CAUSES } from '../utils/constants';
 
@@ -29,7 +29,7 @@ export function useItemDetailLogic() {
     const [restingHoursSetting, setRestingHoursSetting] = useState(24);
     
     // IMAGE UPLOAD STATE
-    const [pendingFiles, setPendingFiles] = useState([]); // { file, preview }
+    const [pendingFiles, setPendingFiles] = useState([]); 
 
     // Form Data
     const [formData, setFormData] = useState({});
@@ -177,33 +177,9 @@ export function useItemDetailLogic() {
         };
     }, [sessions, item]);
 
+    // SSOT FIX: Logik wurde in den Service ausgelagert
     const recoveryInfo = useMemo(() => {
-        if (!item) return null;
-        if (item.mainCategory !== 'Nylons') return null;
-
-        let lastWornDate = safeDate(item.lastWorn);
-        if (sessions && sessions.length > 0) {
-            const lastSession = sessions.find(s => s.endTime);
-            if (lastSession) {
-                const sessionEnd = safeDate(lastSession.endTime);
-                if (sessionEnd && (!lastWornDate || sessionEnd > lastWornDate)) {
-                    lastWornDate = sessionEnd;
-                }
-            }
-        }
-
-        if (!lastWornDate) return null;
-        
-        const hoursSince = (new Date() - lastWornDate) / (1000 * 60 * 60);
-        
-        if (hoursSince < restingHoursSetting) {
-            return {
-                isResting: true,
-                remainingHours: Math.ceil(restingHoursSetting - hoursSince),
-                progress: (hoursSince / restingHoursSetting) * 100
-            };
-        }
-        return null;
+        return calculateItemRecoveryStatus(item, sessions, restingHoursSetting);
     }, [item, sessions, restingHoursSetting]);
 
     const historyEvents = useMemo(() => {
@@ -220,7 +196,6 @@ export function useItemDetailLogic() {
         return events.sort((a, b) => (b.date || 0) - (a.date || 0));
     }, [sessions, item]);
 
-    // Berechne Bilderliste für die Galerie (Bestand + Neu)
     const galleryImages = useMemo(() => {
         const existing = item?.images || (item?.imageUrl ? [item.imageUrl] : []);
         const pending = pendingFiles.map(p => p.preview);
@@ -236,7 +211,6 @@ export function useItemDetailLogic() {
             if (!window.confirm(`ACHTUNG: Elasthan Recovery nicht abgeschlossen. Trotzdem tragen?`)) return;
         }
         try {
-            // Check Instruction Logic (Smarte Erkennung bleibt hier, aber Logik im Service)
             let type = 'voluntary';
             let periodId = null;
             let acceptedAt = null;
@@ -249,11 +223,10 @@ export function useItemDetailLogic() {
                 if (instr.items && instr.items.some(i => i.id === id)) {
                     type = 'instruction';
                     periodId = instr.periodId;
-                    acceptedAt = instr.acceptedAt; // WICHTIG: Übergeben für Lag-Berechnung
+                    acceptedAt = instr.acceptedAt; 
                 }
             }
 
-            // REFACTOR: Service Aufruf statt direktem addDoc
             await startSessionService(currentUser.uid, {
                 itemId: id,
                 type,
@@ -280,7 +253,6 @@ export function useItemDetailLogic() {
     const handleSave = async () => {
         if (!currentUser || !id) return;
         try {
-            // 1. Upload new images if any
             const uploadedUrls = [];
             if (pendingFiles.length > 0) {
                 for (const p of pendingFiles) {
@@ -291,7 +263,6 @@ export function useItemDetailLogic() {
                 }
             }
 
-            // 2. Merge Images
             const existingImages = item.images || (item.imageUrl ? [item.imageUrl] : []);
             const finalImages = [...existingImages, ...uploadedUrls];
 
@@ -301,15 +272,13 @@ export function useItemDetailLogic() {
                 cost: isNaN(costNum) ? 0 : costNum, 
                 updatedAt: serverTimestamp(),
                 images: finalImages,
-                // Ensure imageUrl is set (Thumbnail)
                 imageUrl: finalImages.length > 0 ? finalImages[0] : null
             };
 
             await updateDoc(doc(db, `users/${currentUser.uid}/items`, id), updatedData);
             
-            // 3. Local State Update & Cleanup
             setItem({ ...item, ...updatedData });
-            setPendingFiles([]); // Clear pending
+            setPendingFiles([]); 
             setIsEditing(false);
             
         } catch (e) { console.error(e); alert("Fehler beim Speichern"); }
@@ -371,20 +340,17 @@ export function useItemDetailLogic() {
     }, [loading, item, location.state]);
 
     return {
-        // Data
         item, loading, isEditing, isBusy, recoveryInfo, 
         formData, dropdowns, stats, historyEvents, archiveDialog,
-        galleryImages, // EXPORTIERTE BILDER (Live Preview)
-        // Setters
+        galleryImages,
         setIsEditing, setFormData, setArchiveDialog,
-        // Actions
         actions: {
             startSession: handleStartSession,
             save: handleSave,
             wash: handleWash,
             archive: handleArchive,
             writeNFC: handleWriteNFC,
-            addImages: handleAddImages // EXPORTIERTE FUNKTION
+            addImages: handleAddImages
         }
     };
 }

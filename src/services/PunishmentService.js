@@ -1,27 +1,39 @@
 import { db } from '../firebase';
 import { doc, getDoc, updateDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { DEFAULT_PROTOCOL_RULES } from '../config/defaultRules';
 
-// Konstanten für das Straf-Item und das Zeitfenster
+// Konstanten für das Straf-Item
 const PUNISHMENT_ITEM_CATEGORY = 'Accessoires';
 const PUNISHMENT_ITEM_SUBCATEGORY = 'Buttplug';
-const PUNISHMENT_START_HOUR = 23;
-const PUNISHMENT_END_HOUR = 7; 
+
+// Zeitfenster aus der Config (SSOT)
+// Wir greifen direkt auf die Config zu, statt lokale Konstanten zu pflegen.
+const { time, punishment } = DEFAULT_PROTOCOL_RULES;
 
 // Konstanten für Bailout
 const BAILOUT_PROBABILITY = 0.25; // 25% Risiko bei Abbruch
 
-// Konstanten für Strafmaß (in Minuten)
+// Konstanten für Strafmaß (Limits)
 const MIN_PUNISHMENT_MINUTES = 15;
-const MAX_PUNISHMENT_MINUTES = 90; // Deckel zum Schutz
-const OATH_REFUSAL_PENALTY = 45;   // Pauschale bei Verweigerung
+const MAX_PUNISHMENT_MINUTES = 180; // Angehoben, da Config höhere Werte erlauben könnte
 const BAILOUT_PENALTY_FACTOR = 0.5; // Verhältnis: 1h verpasste Tragezeit = 30min Strafe
 
 // Prüft, ob wir uns im erlaubten nächtlichen Zeitfenster für den Vollzug befinden
 export const isPunishmentWindowOpen = () => {
     const d = new Date();
     const h = d.getHours();
-    // Fenster: 23:00 Uhr bis (inkl.) 07:59 Uhr morgens
-    return (h >= PUNISHMENT_START_HOUR || h <= PUNISHMENT_END_HOUR);
+    // Fenster definiert in defaultRules.js
+    // Wir ignorieren hier Minuten für die Grob-Prüfung, wie im Original
+    const start = time.nightStartHour;
+    const end = time.dayStartHour;
+    
+    // Logik für Zeitfenster über Mitternacht (z.B. 23 bis 7)
+    if (start > end) {
+        return (h >= start || h < end);
+    } else {
+        // Fallback für Fenster am gleichen Tag (z.B. 01 bis 06)
+        return (h >= start && h < end);
+    }
 };
 
 // Lädt den aktuellen Straf-Status (umbenannt zu getActivePunishment für Kompatibilität)
@@ -59,7 +71,7 @@ export const getActivePunishment = async (userId) => {
     return data;
 };
 
-// Alias für Abwärtskompatibilität (falls woanders getPunishmentStatus importiert wird)
+// Alias für Abwärtskompatibilität
 export const getPunishmentStatus = getActivePunishment;
 
 /**
@@ -68,11 +80,14 @@ export const getPunishmentStatus = getActivePunishment;
  * @param {string} reason 
  * @param {number} durationMinutes - Die errechnete Dauer der Strafe
  */
-export const registerPunishment = async (userId, reason, durationMinutes = 30) => {
+export const registerPunishment = async (userId, reason, durationMinutes = null) => {
     const statusRef = doc(db, `users/${userId}/status/punishment`);
     
+    // Fallback auf Config-Standard, falls keine Dauer übergeben
+    const duration = durationMinutes || punishment.defaultDurationMinutes;
+
     // Limits anwenden
-    const finalDuration = Math.min(Math.max(durationMinutes, MIN_PUNISHMENT_MINUTES), MAX_PUNISHMENT_MINUTES);
+    const finalDuration = Math.min(Math.max(duration, MIN_PUNISHMENT_MINUTES), MAX_PUNISHMENT_MINUTES);
     
     const active = isPunishmentWindowOpen();
     
@@ -80,7 +95,7 @@ export const registerPunishment = async (userId, reason, durationMinutes = 30) =
         active: active, // Sofort aktiv, wenn Nachtfenster offen
         deferred: !active, // Aufgeschoben, wenn Tag
         reason: reason,
-        durationMinutes: finalDuration, // NEU: Dauer wird gespeichert
+        durationMinutes: finalDuration, 
         registeredAt: serverTimestamp(),
     }, { merge: true });
     
@@ -131,8 +146,6 @@ export const checkAndRegisterBailout = async (userId, session) => {
     const durationMinutes = Math.floor((end.getTime() - start.getTime()) / 60000);
     
     // 3. Prüfen auf Unterfüllung
-    // Wir werten es als Bailout, wenn weniger als 80% des Tagesziels in dieser Session erreicht wurden
-    // (Da wir "Single Attempt" fordern, muss die Session fast das ganze Ziel decken)
     const threshold = targetMinutes * 0.8; 
 
     if (durationMinutes < threshold) {
@@ -142,7 +155,6 @@ export const checkAndRegisterBailout = async (userId, session) => {
 
         const reason = `Bailout (${durationMinutes}m von ${targetMinutes}m). Fehlzeit: ${missingMinutes}m.`;
         
-        // 4. Strafe registrieren mit berechneter Dauer
         await registerPunishment(userId, reason, penaltyDuration);
         return true; 
     }
@@ -152,5 +164,8 @@ export const checkAndRegisterBailout = async (userId, session) => {
 
 // Hilfsfunktion für den Oath-Decline im Dashboard
 export const registerOathRefusal = async (userId) => {
-    await registerPunishment(userId, "Blind Oath verweigert.", OATH_REFUSAL_PENALTY);
+    // SSOT: Berechnung basierend auf Config
+    // Formel: Standard-Dauer * Multiplikator
+    const penaltyMinutes = Math.round(punishment.defaultDurationMinutes * punishment.refusalMultiplier);
+    await registerPunishment(userId, "Blind Oath verweigert.", penaltyMinutes);
 };
