@@ -10,34 +10,25 @@ export const DEFAULT_PROTOCOL_RULES = {
         weekendExtensionMinutes: 0, 
     },
 
-    // 2. Zeitloses Diktat (Exakt aus TZDService.js)
+    // 2. Zeitloses Diktat (Refaktoriert)
     tzd: {
-        triggerChance: 0.08, // 8% Hardcoded im Service
-        // Die Matrix definiert die Dauer-Wahrscheinlichkeiten
-        // cumulative wird zur Berechnung genutzt, hier speichern wir Einzel-Wahrscheinlichkeiten für die UI
-        durationMatrix: [
-            { id: 'bait', label: 'The Bait', minHours: 6, maxHours: 12, weight: 0.20 },     // 20%
-            { id: 'standard', label: 'The Standard', minHours: 12, maxHours: 24, weight: 0.50 }, // 50%
-            { id: 'wall', label: 'The Wall', minHours: 24, maxHours: 36, weight: 0.30 }      // 30%
-        ],
-        lockInventory: true
+        triggerChance: 0.08, // 8%
+        tzdMaxHours: 36,     // Der neue Anker-Wert (Standard: 36h)
+        lockInventory: true,
+        // Fixe Gewichtung der Zonen (Bait / Standard / Wall)
+        zoneWeights: [0.20, 0.50, 0.30] 
     },
 
-    // 3. Purity Roulette (Aus ForcedReleaseOverlay.jsx)
+    // 3. Purity Roulette
     purity: {
-        cleanChance: 0.60, // 60/40 Logik
+        cleanChance: 0.60,
         allowBegging: true,
         beggingSuccessChance: 0.50
     },
 
-    // 4. Instruktionen (Aus InstructionService.js)
-    // HINWEIS: maxItems etc. kommen aus den User-Settings (Preferences), nicht von hier.
-    // Hier regeln wir nur die "versteckten" Wahrscheinlichkeiten.
+    // 4. Instruktionen
     instruction: {
-        // Aktuell hardcoded: "if (Math.random() < 0.15)"
         forcedReleaseTriggerChance: 0.15, 
-        
-        // Aktuell hardcoded: 34% Hand, 33% Toy Vaginal, 33% Toy Anal
         forcedReleaseMethods: {
             hand: 0.34,
             toy_vaginal: 0.33,
@@ -45,7 +36,7 @@ export const DEFAULT_PROTOCOL_RULES = {
         }
     },
 
-    // 5. Bestrafung (Aus PunishmentService.js)
+    // 5. Bestrafung
     punishment: {
         defaultDurationMinutes: 60,
         refusalMultiplier: 1.5,

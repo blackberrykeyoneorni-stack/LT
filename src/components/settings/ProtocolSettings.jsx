@@ -1,14 +1,22 @@
 import React from 'react';
-import { Box, Typography, Slider, Paper, Grid } from '@mui/material';
+import { Box, Typography, Slider, Paper, Grid, LinearProgress } from '@mui/material';
 import { PALETTE } from '../../theme/obsidianDesign';
+import { DEFAULT_PROTOCOL_RULES } from '../../config/defaultRules';
 
-// Diese Komponente ist nun "stateless" bzgl. Datenbank.
-// Sie zeigt nur an und meldet Änderungen an Settings.jsx zurück.
+// --- HELPER ZUR BERECHNUNG DER ZONEN (Lokal für UI-Visualisierung) ---
+const calculateZones = (maxHours) => {
+    return [
+        { label: 'The Bait', min: maxHours / 6, max: maxHours / 3, color: PALETTE.accents.green, weight: '20%' },
+        { label: 'The Standard', min: maxHours / 3, max: (maxHours * 2) / 3, color: PALETTE.primary.main, weight: '50%' },
+        { label: 'The Wall', min: (maxHours * 2) / 3, max: maxHours, color: PALETTE.accents.red, weight: '30%' }
+    ];
+};
+
 export default function ProtocolSettings({ rules, onChange }) {
     
     if (!rules) return <Typography sx={{p:3}}>Lade Konfiguration...</Typography>;
 
-    // Helper für sichere Anzeige
+    // Helper für sichere Anzeige der Forced Release Methoden
     const methods = rules.instruction?.forcedReleaseMethods || { hand: 0, toy_vaginal: 0, toy_anal: 0 };
 
     const handleChange = (section, key, value) => {
@@ -23,49 +31,11 @@ export default function ProtocolSettings({ rules, onChange }) {
     };
 
     const handleRootChange = (key, value) => {
-        const newRules = {
-            ...rules,
-            [key]: value
-        };
+        const newRules = { ...rules, [key]: value };
         onChange(newRules);
     };
 
-    // --- LOGIK FÜR TZD SLIDER (2 Adjustable, 1 Remainder) ---
-    const handleTZDWeightChange = (changedIndex, newValue) => {
-        if (!rules.tzd?.durationMatrix) return;
-        
-        const newMatrix = [...rules.tzd.durationMatrix];
-        // Clone objects inside array to avoid mutation
-        newMatrix[0] = { ...newMatrix[0] };
-        newMatrix[1] = { ...newMatrix[1] };
-        newMatrix[2] = { ...newMatrix[2] };
-
-        newMatrix[changedIndex].weight = parseFloat(newValue.toFixed(2));
-
-        let bait = newMatrix[0].weight;
-        let standard = newMatrix[1].weight;
-
-        if (changedIndex === 0) {
-            if (bait + standard > 1.0) {
-                standard = parseFloat((1.0 - bait).toFixed(2));
-                newMatrix[1].weight = standard;
-            }
-        }
-        else if (changedIndex === 1) {
-            if (bait + standard > 1.0) {
-                bait = parseFloat((1.0 - standard).toFixed(2));
-                newMatrix[0].weight = bait;
-            }
-        }
-
-        let wall = parseFloat((1.0 - bait - standard).toFixed(2));
-        wall = Math.max(0, Math.min(1, wall));
-        newMatrix[2].weight = wall;
-
-        handleChange('tzd', 'durationMatrix', newMatrix);
-    };
-
-    // --- LOGIK FÜR FORCED RELEASE METHODEN ---
+    // Forced Release Logic (Methoden Balance)
     const handleMethodChange = (methodKey, newValue) => {
         if (!rules.instruction?.forcedReleaseMethods) return;
 
@@ -88,6 +58,10 @@ export default function ProtocolSettings({ rules, onChange }) {
         const newMethods = { hand, toy_vaginal: vag, toy_anal: anal };
         handleChange('instruction', 'forcedReleaseMethods', newMethods);
     };
+
+    // Aktueller TZD Max Wert (oder Default)
+    const tzdMax = rules.tzd?.tzdMaxHours || DEFAULT_PROTOCOL_RULES.tzd.tzdMaxHours;
+    const zones = calculateZones(tzdMax);
 
     return (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
@@ -112,11 +86,11 @@ export default function ProtocolSettings({ rules, onChange }) {
                 </Box>
             </Paper>
 
-            {/* TZD SEKTION */}
+            {/* TZD SEKTION (REFAKTORIERT) */}
             <Paper sx={{ p: 3, bgcolor: 'rgba(255,255,255,0.05)', borderLeft: `4px solid ${PALETTE.accents.red}` }}>
                 <Typography variant="h6" color="primary" gutterBottom>Zeitloses Diktat (TZD)</Typography>
                 
-                {/* Trigger */}
+                {/* 1. Trigger Chance */}
                 <Box sx={{ px: 2, mb: 4 }}>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                         <Typography variant="body2">Trigger Wahrscheinlichkeit</Typography>
@@ -131,56 +105,54 @@ export default function ProtocolSettings({ rules, onChange }) {
                     />
                 </Box>
 
-                {/* Matrix */}
-                <Typography variant="subtitle2" gutterBottom sx={{ mt: 2, color: 'text.secondary' }}>Dauer & Wahrscheinlichkeit</Typography>
+                {/* 2. Maximaldauer Slider */}
+                <Box sx={{ px: 2, mb: 4 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <Typography variant="body2" sx={{ fontWeight: 'bold' }}>Maximaldauer (Anker)</Typography>
+                        <Typography variant="h5" sx={{ color: PALETTE.accents.red, fontWeight: 'bold' }}>
+                            {tzdMax} Std.
+                        </Typography>
+                    </Box>
+                    <Slider 
+                        value={tzdMax} 
+                        min={6} max={72} step={6}
+                        onChange={(_, v) => handleChange('tzd', 'tzdMaxHours', v)}
+                        marks={[
+                            { value: 6, label: '6h' },
+                            { value: 24, label: '24h' },
+                            { value: 48, label: '48h' },
+                            { value: 72, label: '72h' }
+                        ]}
+                        sx={{ 
+                            color: PALETTE.accents.red,
+                            '& .MuiSlider-thumb': { boxShadow: `0 0 10px ${PALETTE.accents.red}` }
+                        }}
+                    />
+                </Box>
+
+                {/* 3. Zonen Visualisierung */}
+                <Typography variant="subtitle2" gutterBottom sx={{ mt: 2, color: 'text.secondary' }}>Berechnete Zonen (Dauer & Wahrscheinlichkeit)</Typography>
                 
-                {/* 1. BAIT */}
-                <Box sx={{ mb: 2, px: 2, borderLeft: '2px solid #555', pl: 2 }}>
-                    <Grid container justifyContent="space-between">
-                        <Grid item><Typography variant="body2" fontWeight="bold">The Bait</Typography></Grid>
-                        <Grid item><Typography variant="caption">6-12 Std</Typography></Grid>
-                    </Grid>
-                    <Slider 
-                        value={rules.tzd?.durationMatrix?.[0]?.weight || 0} 
-                        min={0} max={1} step={0.05}
-                        onChange={(_, v) => handleTZDWeightChange(0, v)}
-                        valueLabelDisplay="auto"
-                        valueLabelFormat={v => `${(v*100).toFixed(0)}%`}
-                        sx={{ color: PALETTE.accents.green }}
-                    />
-                </Box>
+                {zones.map((zone, idx) => (
+                    <Box key={idx} sx={{ mb: 2, px: 2, borderLeft: `2px solid ${zone.color}`, pl: 2, bgcolor: 'rgba(0,0,0,0.2)', py: 1 }}>
+                        <Grid container justifyContent="space-between" alignItems="center">
+                            <Grid item xs={5}>
+                                <Typography variant="body2" fontWeight="bold" sx={{ color: zone.color }}>{zone.label}</Typography>
+                            </Grid>
+                            <Grid item xs={4} sx={{ textAlign: 'center' }}>
+                                <Typography variant="caption" sx={{ color: '#fff' }}>
+                                    {Math.round(zone.min)}-{Math.round(zone.max)} Std
+                                </Typography>
+                            </Grid>
+                            <Grid item xs={3} sx={{ textAlign: 'right' }}>
+                                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                                    {zone.weight}
+                                </Typography>
+                            </Grid>
+                        </Grid>
+                    </Box>
+                ))}
 
-                {/* 2. STANDARD */}
-                <Box sx={{ mb: 2, px: 2, borderLeft: '2px solid #555', pl: 2 }}>
-                    <Grid container justifyContent="space-between">
-                        <Grid item><Typography variant="body2" fontWeight="bold">The Standard</Typography></Grid>
-                        <Grid item><Typography variant="caption">12-24 Std</Typography></Grid>
-                    </Grid>
-                    <Slider 
-                        value={rules.tzd?.durationMatrix?.[1]?.weight || 0} 
-                        min={0} max={1} step={0.05}
-                        onChange={(_, v) => handleTZDWeightChange(1, v)}
-                        valueLabelDisplay="auto"
-                        valueLabelFormat={v => `${(v*100).toFixed(0)}%`}
-                        sx={{ color: PALETTE.primary.main }}
-                    />
-                </Box>
-
-                {/* 3. WALL */}
-                <Box sx={{ mb: 2, px: 2, borderLeft: '2px solid #555', pl: 2, opacity: 0.7 }}>
-                    <Grid container justifyContent="space-between">
-                        <Grid item><Typography variant="body2" fontWeight="bold">The Wall (Rest)</Typography></Grid>
-                        <Grid item><Typography variant="caption">24-36 Std</Typography></Grid>
-                    </Grid>
-                    <Slider 
-                        value={rules.tzd?.durationMatrix?.[2]?.weight || 0} 
-                        min={0} max={1} step={0.05}
-                        disabled
-                        valueLabelDisplay="auto"
-                        valueLabelFormat={v => `${(v*100).toFixed(0)}%`}
-                        sx={{ color: PALETTE.accents.red }}
-                    />
-                </Box>
             </Paper>
 
             {/* FORCED RELEASE */}

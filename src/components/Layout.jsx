@@ -1,7 +1,9 @@
-import React from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Box, Paper, BottomNavigation, BottomNavigationAction } from '@mui/material';
+import { Box, Paper, BottomNavigation, BottomNavigationAction, Snackbar, Alert } from '@mui/material';
 import { DESIGN_TOKENS, PALETTE } from '../theme/obsidianDesign'; // NEU
+import { useAuth } from '../contexts/AuthContext';
+import { penalizeTZDAppOpen } from '../services/TZDService';
 
 // Icons
 import DashboardIcon from '@mui/icons-material/Dashboard';
@@ -13,6 +15,40 @@ import SettingsIcon from '@mui/icons-material/Settings';
 export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { currentUser } = useAuth();
+
+  // --- PERFIDITÄT: TZD PENALTY LOGIC ---
+  const [penaltyOpen, setPenaltyOpen] = useState(false);
+  const lastPenaltyTime = useRef(0);
+
+  useEffect(() => {
+    const handleVisibilityChange = async () => {
+      // Wenn die App sichtbar wird (User öffnet sie oder wechselt zurück)
+      if (document.visibilityState === 'visible' && currentUser) {
+        const now = Date.now();
+        
+        // Drosselung: Nur alle 60 Sekunden prüfen, um System-Trigger zu vermeiden
+        if (now - lastPenaltyTime.current > 60000) {
+            const punished = await penalizeTZDAppOpen(currentUser.uid);
+            
+            if (punished) {
+                // Wenn bestraft wurde: Zeit merken und Warnung zeigen
+                lastPenaltyTime.current = now;
+                setPenaltyOpen(true);
+            }
+        }
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [currentUser]);
+
+  const handleClosePenalty = () => {
+      setPenaltyOpen(false);
+  };
 
   // Mapping Route -> Value
   const getNavValue = (path) => {
@@ -29,6 +65,23 @@ export default function Layout() {
     // ZENTRALISIERTER HINTERGRUND
     <Box sx={DESIGN_TOKENS.bottomNavSpacer}>
       
+      {/* TZD PENALTY FEEDBACK */}
+      <Snackbar 
+          open={penaltyOpen} 
+          autoHideDuration={6000} 
+          onClose={handleClosePenalty}
+          anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      >
+          <Alert 
+            onClose={handleClosePenalty} 
+            severity="error" 
+            variant="filled" 
+            sx={{ width: '100%', fontWeight: 'bold' }}
+          >
+              Diktat erkannt. +15 Minuten hinzugefügt.
+          </Alert>
+      </Snackbar>
+
       {/* CONTENT AREA */}
       <Box sx={{ p: 2, pb: 10 }}>
          <Outlet />

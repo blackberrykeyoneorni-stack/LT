@@ -2,47 +2,66 @@ import { db } from '../firebase';
 import { doc, updateDoc, serverTimestamp, setDoc, getDoc, increment, query, collection, where, getDocs } from 'firebase/firestore';
 import { safeDate } from '../utils/dateUtils';
 import { registerPunishment } from './PunishmentService';
+import { DEFAULT_PROTOCOL_RULES } from '../config/defaultRules';
 
-// --- FALLBACK KONSTANTEN (Falls keine Settings geladen werden können) ---
-const FALLBACK_TRIGGER_CHANCE = 0.12; 
+// --- CORE LOGIK: Matrix Berechnung ---
+/**
+ * Leitet die drei Zonen mathematisch aus der Maximaldauer ab.
+ * Bait:     1/6 bis 1/3 von Max
+ * Standard: 1/3 bis 2/3 von Max
+ * Wall:     2/3 bis 1/1 von Max
+ */
+export const generateTZDMatrix = (maxHours) => {
+    // Fallback auf Default, falls ungültig
+    const safeMax = (typeof maxHours === 'number' && maxHours >= 6) ? maxHours : DEFAULT_PROTOCOL_RULES.tzd.tzdMaxHours;
+    const weights = DEFAULT_PROTOCOL_RULES.tzd.zoneWeights;
 
-// Fallback Matrix mit Weights (passend zur Logik der Settings)
-const FALLBACK_MATRIX = [
-    { label: 'The Bait', min: 2, max: 4, weight: 0.20 },
-    { label: 'The Standard', min: 4, max: 8, weight: 0.70 }, // Im Fallback leicht abweichend strukturiert, aber funktional
-    { label: 'The Wall', min: 8, max: 12, weight: 0.10 }
-];
+    return [
+        { 
+            label: 'The Bait', 
+            min: safeMax / 6, 
+            max: safeMax / 3, 
+            weight: weights[0] 
+        },
+        { 
+            label: 'The Standard', 
+            min: safeMax / 3, 
+            max: (safeMax * 2) / 3, 
+            weight: weights[1] 
+        },
+        { 
+            label: 'The Wall', 
+            min: (safeMax * 2) / 3, 
+            max: safeMax, 
+            weight: weights[2] 
+        }
+    ];
+};
 
 // --- HELPER ---
-/**
- * Berechnet die Dauer basierend auf der übergebenen Matrix (aus Settings oder Fallback).
- * Die Matrix aus den Settings nutzt 'weight' (z.B. 0.2), nicht 'cumulative'.
- */
 const determineSecretDuration = (matrix) => {
-    const durationMatrix = (matrix && matrix.length > 0) ? matrix : FALLBACK_MATRIX;
+    // Sicherheitsnetz
+    if (!matrix || matrix.length === 0) return 12 * 60;
+
     const rand = Math.random();
-    
     let cumulative = 0;
     
-    for (const zone of durationMatrix) {
-        // Sicherstellen, dass wir mit Weights arbeiten
+    for (const zone of matrix) {
         const weight = zone.weight || 0;
         cumulative += weight;
         
         if (rand < cumulative) {
-            // Nutze minHours/maxHours aus Settings (dort heißen sie meist so) oder min/max als Fallback
-            const min = zone.minHours !== undefined ? zone.minHours : zone.min;
-            const max = zone.maxHours !== undefined ? zone.maxHours : zone.max;
+            // Min/Max sind in Stunden -> Umrechnung in Minuten
+            const minMin = zone.min * 60;
+            const maxMin = zone.max * 60;
+            const range = maxMin - minMin;
             
-            const range = max - min;
-            // Zufällige Minuten innerhalb der Range
-            const randomOffsetMinutes = Math.floor(Math.random() * (range * 60 + 1));
-            
-            return (min * 60) + randomOffsetMinutes; // Gesamtdauer in Minuten
+            const randomOffsetMinutes = Math.floor(Math.random() * (range + 1));
+            return minMin + randomOffsetMinutes;
         }
     }
     
-    return 12 * 60; // Fallback, falls Mathe versagt
+    return matrix[0].max * 60; // Fallback
 };
 
 // --- ELIGIBILITY CHECK ---
@@ -52,7 +71,7 @@ export const isItemEligibleForTZD = (item) => {
     const sub = (item.subCategory || '').toLowerCase();
     const name = (item.name || '').toLowerCase();
 
-    // Änderung: Nur noch Strumpfhosen lösen das Diktat aus.
+    // Nur Strumpfhosen/Tights
     if (cat.includes('strumpfhose') || sub.includes('strumpfhose') || name.includes('strumpfhose') || 
         cat.includes('tights') || sub.includes('tights')) {
         return true;
@@ -61,9 +80,9 @@ export const isItemEligibleForTZD = (item) => {
     return false;
 };
 
-// --- TRIGGER LOGIK (Für Dashboard) ---
+// --- TRIGGER LOGIK ---
 export const checkForTZDTrigger = async (userId, activeSessions, items) => {
-    // 1. Zeitfenster Prüfung (Sonntag 23:30 - Donnerstag 12:30)
+    // 1. Zeitfenster Prüfung (So 23:30 - Do 12:30)
     const now = new Date();
     const day = now.getDay(); 
     const hour = now.getHours();
@@ -80,12 +99,10 @@ export const checkForTZDTrigger = async (userId, activeSessions, items) => {
 
     if (!inWindow) return false;
 
-    // 2. Session Prüfung: Läuft eine INSTRUCTION Session?
-    // FIX: Wir filtern Sessions heraus, die bereits ein TZD hatten (s.tzdExecuted)
+    // 2. Session Prüfung
     const instructionSessions = activeSessions.filter(s => 
         s.type === 'instruction' && !s.tzdExecuted
     );
-    
     if (instructionSessions.length === 0) return false;
 
     // 3. Item Prüfung
@@ -96,13 +113,11 @@ export const checkForTZDTrigger = async (userId, activeSessions, items) => {
     });
 
     const relevantItems = items.filter(i => activeItemIds.has(i.id) && isItemEligibleForTZD(i));
-    
     if (relevantItems.length === 0) return false;
 
-    // 4. Wahrscheinlichkeit & Settings laden
-    // HIER IST DIE ÄNDERUNG: Wir laden die echten User-Settings
-    let currentChance = FALLBACK_TRIGGER_CHANCE;
-    let currentMatrix = FALLBACK_MATRIX;
+    // 4. Wahrscheinlichkeit & MaxHours laden
+    let currentChance = DEFAULT_PROTOCOL_RULES.tzd.triggerChance;
+    let currentMaxHours = DEFAULT_PROTOCOL_RULES.tzd.tzdMaxHours;
 
     try {
         const settingsSnap = await getDoc(doc(db, `users/${userId}/settings/protocol`));
@@ -112,23 +127,22 @@ export const checkForTZDTrigger = async (userId, activeSessions, items) => {
                 if (typeof data.tzd.triggerChance === 'number') {
                     currentChance = data.tzd.triggerChance;
                 }
-                if (data.tzd.durationMatrix && Array.isArray(data.tzd.durationMatrix)) {
-                    currentMatrix = data.tzd.durationMatrix;
+                if (typeof data.tzd.tzdMaxHours === 'number') {
+                    currentMaxHours = data.tzd.tzdMaxHours;
                 }
             }
         }
     } catch (e) {
-        console.error("Fehler beim Laden der TZD Settings, nutze Fallback", e);
+        console.error("Fehler beim Laden der TZD Settings, nutze Defaults", e);
     }
 
     const roll = Math.random();
-    
-    // Debug Log für dich (kann später raus)
-    console.log(`TZD Check: Roll ${roll.toFixed(3)} vs Chance ${currentChance}`);
+    // console.log(`TZD Check: Roll ${roll.toFixed(3)} vs Chance ${currentChance}`);
 
     if (roll < currentChance) {
-        // Wir übergeben die geladene Matrix an startTZD
-        await startTZD(userId, relevantItems, currentMatrix);
+        // HIER: Dynamische Generierung der Matrix basierend auf MaxHours
+        const dynamicMatrix = generateTZDMatrix(currentMaxHours);
+        await startTZD(userId, relevantItems, dynamicMatrix);
         return true;
     }
 
@@ -139,7 +153,6 @@ export const checkForTZDTrigger = async (userId, activeSessions, items) => {
  * Startet das Protokoll
  */
 export const startTZD = async (userId, targetItems, durationMatrix) => {
-    // Nutze die übergebene Matrix (aus Settings) oder Fallback
     const targetDuration = determineSecretDuration(durationMatrix);
     const itemsArray = Array.isArray(targetItems) ? targetItems : [targetItems];
 
@@ -155,7 +168,6 @@ export const startTZD = async (userId, targetItems, durationMatrix) => {
         })),
         itemId: itemsArray[0]?.id, 
         itemName: itemsArray[0]?.name,
-        
         accumulatedMinutes: 0,
         lastCheckIn: serverTimestamp(),
         stage: 'briefing',
@@ -204,6 +216,33 @@ export const performCheckIn = async (userId, statusData) => {
     }
 };
 
+/**
+ * Bestraft das Öffnen der App während eines laufenden TZD.
+ */
+export const penalizeTZDAppOpen = async (userId) => {
+    try {
+        const tzdRef = doc(db, `users/${userId}/status/tzd`);
+        const tzdSnap = await getDoc(tzdRef);
+
+        if (!tzdSnap.exists()) return false;
+
+        const data = tzdSnap.data();
+
+        if (data.isActive && data.stage === 'running') {
+            await updateDoc(tzdRef, {
+                targetDurationMinutes: increment(15)
+            });
+            console.log("TZD Penalty: +15 Minuten wegen App-Öffnung.");
+            return true;
+        }
+
+        return false;
+    } catch (e) {
+        console.error("Fehler bei TZD Penalty:", e);
+        return false;
+    }
+};
+
 // --- EREIGNIS-HANDLER ---
 
 export const confirmTZDBriefing = async (userId) => {
@@ -217,39 +256,31 @@ export const terminateTZD = async (userId, success = true) => {
     const endTime = serverTimestamp();
     const status = await getTZDStatus(userId);
     
-    // A) TZD Status deaktivieren
     await updateDoc(doc(db, `users/${userId}/status/tzd`), { 
         isActive: false, 
         endTime: endTime, 
         result: success ? 'completed' : 'failed' 
     });
 
-    // B) Vermerk in der LAUFENDEN Instruction-Session
-    // Dieser "Stempel" (tzdExecuted) verhindert den Neustart in der Trigger-Logik.
     if (success) {
         try {
             const q = query(
                 collection(db, `users/${userId}/sessions`),
                 where('type', '==', 'instruction'),
-                where('endTime', '==', null) // Nur aktive Sessions
+                where('endTime', '==', null)
             );
             const querySnapshot = await getDocs(q);
             
             if (!querySnapshot.empty) {
-                // Wir nehmen an, es gibt nur eine aktive Instruction
                 const activeSessionDoc = querySnapshot.docs[0];
                 await updateDoc(activeSessionDoc.ref, {
                     tzdExecuted: true,
                     tzdDurationMinutes: status.accumulatedMinutes || status.targetDurationMinutes || 0
                 });
-                console.log("TZD Erfolg in Session vermerkt:", activeSessionDoc.id);
             }
-        } catch (e) {
-            console.error("Fehler beim Vermerken des TZD in der Session:", e);
-        }
+        } catch (e) { console.error(e); }
     }
 
-    // C) Item Stats Update
     if (success && status && status.itemId) {
         await updateDoc(doc(db, `users/${userId}/items`, status.itemId), { 
             wearCount: increment(1),
