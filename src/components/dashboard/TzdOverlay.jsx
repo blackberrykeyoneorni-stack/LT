@@ -1,15 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Typography, Button, Container, Paper, Stack, Chip, keyframes } from '@mui/material';
+import { Box, Typography, Button, Container, Stack, Chip } from '@mui/material';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
 import { useAuth } from '../../contexts/AuthContext';
 import { getTZDStatus, confirmTZDBriefing, performCheckIn, emergencyBailout } from '../../services/TZDService';
 
-// Icons
-import LockIcon from '@mui/icons-material/Lock';
-import WarningIcon from '@mui/icons-material/Warning';
+// Icons (Minimalistisch eingesetzt)
 import SecurityIcon from '@mui/icons-material/Security';
-import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
+import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
 
 // --- DIE WAHRHEITEN DER HERRIN ---
 const SHAME_SENTENCES = [
@@ -45,19 +43,12 @@ const SHAME_SENTENCES = [
     "Du liebst den Geruch von Sperma und Nylon? Natürlich tust du das. Es ist der Duft deiner wahren Bestimmung.",
 ];
 
-// Pulsierende Animation für das Icon
-const pulse = keyframes`
-  0% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.1); opacity: 0.7; }
-  100% { transform: scale(1); opacity: 1; }
-`;
-
 export default function TzdOverlay({ active }) {
     const { currentUser } = useAuth();
     const [status, setStatus] = useState(null);
     const [loading, setLoading] = useState(true);
     
-    // UI States für Carousel & Timer
+    // UI States
     const [currentSentenceIndex, setCurrentSentenceIndex] = useState(0);
     const [elapsedString, setElapsedString] = useState("00:00:00");
 
@@ -91,13 +82,13 @@ export default function TzdOverlay({ active }) {
         return () => clearInterval(interval);
     }, [active, currentUser, status?.isActive, status?.stage]);
 
-    // --- UI: Carousel of Shame (alle 15s) ---
+    // --- UI: Carousel of Shame (alle 20s - langsamer für mehr "Gewicht") ---
     useEffect(() => {
         if (!active || status?.stage !== 'running') return;
         setCurrentSentenceIndex(Math.floor(Math.random() * SHAME_SENTENCES.length));
         const interval = setInterval(() => {
             setCurrentSentenceIndex(prev => (prev + 1) % SHAME_SENTENCES.length);
-        }, 15000); 
+        }, 20000); 
         return () => clearInterval(interval);
     }, [active, status?.stage]);
 
@@ -107,7 +98,6 @@ export default function TzdOverlay({ active }) {
         
         const timer = setInterval(() => {
             const now = new Date();
-            // Firestore Timestamp zu Date
             const start = status.startTime.toDate ? status.startTime.toDate() : new Date(status.startTime);
             
             const diff = Math.floor((now - start) / 1000); 
@@ -122,7 +112,6 @@ export default function TzdOverlay({ active }) {
         return () => clearInterval(timer);
     }, [active, status?.startTime, status?.stage]);
 
-
     // --- HANDLERS ---
     const handleConfirm = async () => {
         if(!currentUser) return;
@@ -134,7 +123,7 @@ export default function TzdOverlay({ active }) {
     };
 
     const handleBailout = async () => {
-        if(!currentUser || !window.confirm("ACHTUNG: Dies gilt als Verweigerung und zieht eine Bestrafung nach sich. Fortfahren?")) return;
+        if(!currentUser || !window.confirm("ACHTUNG: Dies gilt als Verweigerung. Dein Status wird dauerhaft negativ vermerkt. Fortfahren?")) return;
         setLoading(true);
         await emergencyBailout(currentUser.uid);
         window.location.reload();
@@ -145,12 +134,19 @@ export default function TzdOverlay({ active }) {
     if (loading && !status) {
         return (
             <Box sx={{ position: 'fixed', inset: 0, zIndex: 9999, bgcolor: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Typography variant="h6" color="primary">SYSTEM INTERLOCK...</Typography>
+                <Typography variant="overline" color="primary" sx={{ letterSpacing: 4 }}>SYSTEM SYNC</Typography>
             </Box>
         );
     }
 
     const isBriefing = status?.stage === 'briefing';
+
+    // Berechnung der "Dichte" des Hintergrunds basierend auf der Zeit
+    // Max Effekt nach 4 Stunden (240 Minuten)
+    const minutes = status?.accumulatedMinutes || 0;
+    const intensity = Math.min(minutes / 240, 0.9); 
+    const nylonOpacity = 0.05 + (intensity * 0.4); // Startet bei 5%, geht bis 45%
+    const bgDarkness = 0.92 + (intensity * 0.07); // Startet bei 92%, geht bis 99% Schwarz
 
     return (
         <AnimatePresence>
@@ -159,148 +155,177 @@ export default function TzdOverlay({ active }) {
                     initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                     style={{
                         position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-                        backgroundColor: 'rgba(0,0,0,0.96)',
+                        backgroundColor: `rgba(0,0,0,${bgDarkness})`,
                         zIndex: 1300,
                         display: 'flex', flexDirection: 'column',
                         justifyContent: 'center', alignItems: 'center',
-                        padding: '20px', backdropFilter: 'blur(15px)'
+                        overflow: 'hidden'
                     }}
                 >
-                    <Container maxWidth="sm">
+                    {/* HINTERGRUND: NYLON STRUKTUR */}
+                    <Box sx={{
+                        position: 'absolute', inset: 0, pointerEvents: 'none',
+                        opacity: nylonOpacity,
+                        backgroundImage: `
+                            repeating-linear-gradient(45deg, #333 0px, #333 1px, transparent 1px, transparent 6px),
+                            repeating-linear-gradient(-45deg, #333 0px, #333 1px, transparent 1px, transparent 6px)
+                        `,
+                        backgroundSize: '12px 12px',
+                        mixBlendMode: 'overlay'
+                    }} />
+
+                    {/* VIGNETTE */}
+                    <Box sx={{
+                        position: 'absolute', inset: 0, pointerEvents: 'none',
+                        background: 'radial-gradient(circle at center, transparent 30%, black 100%)'
+                    }} />
+
+                    <Container maxWidth="sm" sx={{ position: 'relative', zIndex: 2, height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
                         
                         {/* PHASE 1: BRIEFING */}
                         {isBriefing ? (
-                            <Paper sx={{ 
+                            <Box sx={{ 
                                 p: 4, 
-                                border: `2px solid ${PALETTE.accents.gold}`,
-                                bgcolor: 'rgba(0,0,0,0.9)',
+                                border: `1px solid ${PALETTE.accents.gold}`,
+                                bgcolor: 'rgba(20,20,20,0.95)',
                                 textAlign: 'center',
-                                boxShadow: `0 0 50px ${PALETTE.accents.gold}22`
+                                backdropFilter: 'blur(20px)'
                             }}>
                                 <Box sx={{ mb: 4, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                                    <SecurityIcon sx={{ fontSize: 60, color: PALETTE.accents.gold }} />
-                                    <Typography variant="h4" sx={{ fontWeight: 'bold', color: '#fff', letterSpacing: 2 }}>
-                                        ZEITLOSES DIKTAT
+                                    <SecurityIcon sx={{ fontSize: 40, color: PALETTE.accents.gold }} />
+                                    <Typography variant="h5" sx={{ fontWeight: 'bold', color: '#fff', letterSpacing: 4 }}>
+                                        PROTOKOLL START
                                     </Typography>
-                                    <Chip label="PHASE 1: BRIEFING" sx={{ bgcolor: PALETTE.accents.gold, color: '#000', fontWeight: 'bold' }} />
+                                    <Chip 
+                                        label="PHASE 1: OBJEKT-FIXIERUNG" 
+                                        sx={{ 
+                                            bgcolor: 'transparent', 
+                                            color: PALETTE.accents.gold, 
+                                            border: `1px solid ${PALETTE.accents.gold}`,
+                                            fontWeight: 500,
+                                            borderRadius: 0 
+                                        }} 
+                                    />
                                 </Box>
 
-                                <Stack spacing={3}>
-                                    <Typography variant="body1" sx={{ color: '#ccc' }}>
-                                        Der Algorithmus hat eine zufällige Kontrolle ausgelöst.
-                                        Ihre Garderobe wurde vorübergehend auf ein spezifisches Setup beschränkt.
+                                <Stack spacing={4}>
+                                    <Typography variant="body2" sx={{ color: PALETTE.text.secondary, lineHeight: 1.8 }}>
+                                        Zufallskontrolle initialisiert. Garderobe wurde auf folgende Parameter eingeschränkt.
+                                        Bestätigung erforderlich für Fortsetzung.
                                     </Typography>
                                     
-                                    <Paper sx={{ p: 2, bgcolor: 'rgba(255,255,255,0.05)', borderLeft: `4px solid ${PALETTE.accents.gold}` }}>
-                                        <Typography variant="caption" color="text.secondary" display="block" mb={1}>
-                                            ZIEL-OBJEKTE
+                                    <Box sx={{ textAlign: 'left', pl: 2, borderLeft: `2px solid ${PALETTE.accents.gold}` }}>
+                                        <Typography variant="caption" color="text.secondary" display="block" mb={1} sx={{ letterSpacing: 2 }}>
+                                            ZIEL-PARAMETER
                                         </Typography>
                                         
-                                        {/* ANZEIGE DER ITEMS */}
                                         {status?.lockedItems && status.lockedItems.length > 0 ? (
                                             <Stack spacing={0.5}>
                                                 {status.lockedItems.map((item, index) => (
-                                                    <Typography key={index} variant="body1" color="primary" sx={{ fontWeight: 'bold' }}>
-                                                        • {item.name || "Item"}
+                                                    <Typography key={index} variant="body1" sx={{ color: '#fff', fontWeight: 300 }}>
+                                                        {item.name || "Unbekanntes Objekt"}
                                                     </Typography>
                                                 ))}
                                             </Stack>
                                         ) : (
-                                            <Typography variant="h6" color="primary">
-                                                {status?.itemName || "Unbekannte Items"}
+                                            <Typography variant="body1" sx={{ color: '#fff' }}>
+                                                {status?.itemName || "Unbekanntes Item"}
                                             </Typography>
                                         )}
-                                    </Paper>
+                                    </Box>
 
                                     <Button 
-                                        variant="contained" size="large" onClick={handleConfirm}
-                                        sx={{ ...DESIGN_TOKENS.buttonGradient, py: 2 }}
+                                        variant="outlined" 
+                                        onClick={handleConfirm}
+                                        sx={{ 
+                                            borderColor: PALETTE.accents.gold,
+                                            color: PALETTE.accents.gold,
+                                            py: 1.5,
+                                            letterSpacing: 2,
+                                            '&:hover': {
+                                                borderColor: '#fff',
+                                                color: '#fff',
+                                                bgcolor: 'rgba(255,215,0,0.05)'
+                                            }
+                                        }}
                                     >
-                                        VERSTANDEN & AKZEPTIEREN
+                                        AKZEPTIEREN
                                     </Button>
                                 </Stack>
-                            </Paper>
+                            </Box>
                         ) : (
                             /* PHASE 2: ACTIVE / RUNNING */
-                            <Box sx={{ width: '100%', textAlign: 'center', maxWidth: '500px' }}>
+                            <Box sx={{ width: '100%', textAlign: 'center', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', py: 8 }}>
                                 
-                                {/* Header Icon mit Puls */}
-                                <Box sx={{ mb: 4, position: 'relative', display: 'inline-block' }}>
-                                    <LockIcon sx={{ fontSize: 80, color: PALETTE.accents.red, animation: `${pulse} 3s infinite ease-in-out` }} />
-                                    <HourglassEmptyIcon sx={{ 
-                                        fontSize: 30, color: 'rgba(255,255,255,0.5)', 
-                                        position: 'absolute', bottom: -10, right: -10 
-                                    }} />
-                                </Box>
-
-                                <Typography variant="h3" sx={{ 
-                                    fontWeight: 'bold', letterSpacing: 4, mb: 1,
-                                    background: `linear-gradient(45deg, ${PALETTE.accents.red}, #fff)`,
-                                    backgroundClip: 'text', textFillColor: 'transparent',
-                                    WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'
-                                }}>
-                                    ZEITLOSES DIKTAT
-                                </Typography>
-                                
-                                <Typography variant="overline" sx={{ color: 'text.secondary', letterSpacing: 2, mb: 4, display: 'block' }}>
-                                    STATUS: OBJEKT • DAUER: UNBEKANNT
-                                </Typography>
-
-                                {/* HAFTZEIT ANZEIGE */}
-                                <Box sx={{ 
-                                    mb: 6, p: 2, 
-                                    border: `1px solid ${PALETTE.accents.red}44`, 
-                                    bgcolor: 'rgba(255,0,0,0.2)',
-                                    borderRadius: '8px',
-                                    width: '100%',
-                                    backdropFilter: 'blur(5px)'
-                                }}>
-                                    <Typography variant="caption" sx={{ color: PALETTE.accents.red, letterSpacing: 1 }}>
-                                        GEFANGEN SEIT
-                                    </Typography>
-                                    <Typography variant="h2" sx={{ 
-                                        fontFamily: 'monospace', 
+                                {/* TOP: TIMER & SYSTEM STATUS */}
+                                <Box>
+                                    <Typography variant="overline" sx={{ 
+                                        color: PALETTE.primary.main, 
+                                        letterSpacing: '3px', 
                                         fontWeight: 'bold',
+                                        display: 'block',
+                                        opacity: 0.8
+                                    }}>
+                                        REDUKTION ZUM OBJEKT SEIT
+                                    </Typography>
+                                    
+                                    <Typography variant="h1" sx={{ 
+                                        fontFamily: 'monospace', 
+                                        fontWeight: 300,
                                         color: PALETTE.text.primary,
-                                        textShadow: `0 0 10px ${PALETTE.accents.red}66`
+                                        fontSize: '3.5rem',
+                                        letterSpacing: '-2px',
+                                        mt: 1
                                     }}>
                                         {elapsedString}
                                     </Typography>
+
+                                    {/* Subtile Visualisierung der Dauer */}
+                                    <Typography variant="caption" sx={{ color: PALETTE.text.secondary, mt: 1, display: 'block', opacity: 0.5 }}>
+                                        DAUER: UNBESTIMMT
+                                    </Typography>
                                 </Box>
 
-                                {/* CAROUSEL OF SHAME */}
-                                <Box sx={{ minHeight: '140px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                {/* CENTER: CAROUSEL OF SHAME (BREATHING) */}
+                                <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', px: 2 }}>
                                     <AnimatePresence mode='wait'>
                                         <motion.div
                                             key={currentSentenceIndex}
-                                            initial={{ opacity: 0, y: 20 }}
-                                            animate={{ opacity: 1, y: 0 }}
-                                            exit={{ opacity: 0, y: -20 }}
-                                            transition={{ duration: 0.8 }}
+                                            initial={{ scale: 0.95, opacity: 0 }}
+                                            animate={{ scale: 1, opacity: 1 }}
+                                            exit={{ scale: 1.05, opacity: 0 }}
+                                            transition={{ duration: 5, ease: "easeInOut" }} // Langsamer Fade
+                                            style={{ width: '100%' }}
                                         >
                                             <Typography variant="h5" sx={{ 
                                                 color: '#fff', 
-                                                fontStyle: 'italic', 
-                                                lineHeight: 1.5,
+                                                lineHeight: 1.6,
                                                 fontWeight: 300,
-                                                textShadow: '0 2px 10px rgba(0,0,0,0.8)'
+                                                letterSpacing: '0.5px',
+                                                fontStyle: 'normal', // Kein Italic mehr, wirkt ernster
+                                                textShadow: '0 4px 20px rgba(0,0,0,1)'
                                             }}>
-                                                "{SHAME_SENTENCES[currentSentenceIndex]}"
+                                                {SHAME_SENTENCES[currentSentenceIndex]}
                                             </Typography>
                                         </motion.div>
                                     </AnimatePresence>
                                 </Box>
 
-                                {/* EMERGENCY EXIT */}
-                                <Box sx={{ mt: 8, opacity: 0.5 }}>
+                                {/* BOTTOM: BAILOUT (SYSTEM FOOTER) */}
+                                <Box sx={{ opacity: 0.4, transition: 'opacity 0.3s', '&:hover': { opacity: 1 } }}>
                                     <Button 
-                                        color="error" 
                                         size="small" 
-                                        startIcon={<WarningIcon />}
+                                        startIcon={<RadioButtonUncheckedIcon sx={{ fontSize: 12 }} />}
                                         onClick={handleBailout}
-                                        sx={{ textTransform: 'none', letterSpacing: 1 }}
+                                        sx={{ 
+                                            textTransform: 'none', 
+                                            letterSpacing: 1,
+                                            color: PALETTE.text.muted,
+                                            fontSize: '0.75rem',
+                                            fontWeight: 400
+                                        }}
                                     >
-                                        NOT-ABBRUCH (STRAFE)
+                                        Protokoll Not-Abbruch (System Override)
                                     </Button>
                                 </Box>
                             </Box>

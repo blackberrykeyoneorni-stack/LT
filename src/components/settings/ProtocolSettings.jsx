@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Typography, Slider, Paper, Grid, LinearProgress } from '@mui/material';
+import { Box, Typography, Slider, Paper, Grid } from '@mui/material';
 import { PALETTE } from '../../theme/obsidianDesign';
 import { DEFAULT_PROTOCOL_RULES } from '../../config/defaultRules';
 

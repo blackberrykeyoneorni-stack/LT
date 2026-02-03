@@ -1,5 +1,5 @@
 import { db } from '../firebase';
-import { doc, updateDoc, serverTimestamp, setDoc, getDoc, increment, query, collection, where, getDocs } from 'firebase/firestore';
+import { doc, updateDoc, serverTimestamp, setDoc, getDoc, increment, query, collection, where, getDocs, writeBatch } from 'firebase/firestore';
 import { safeDate } from '../utils/dateUtils';
 import { registerPunishment } from './PunishmentService';
 import { DEFAULT_PROTOCOL_RULES } from '../config/defaultRules';
@@ -137,10 +137,9 @@ export const checkForTZDTrigger = async (userId, activeSessions, items) => {
     }
 
     const roll = Math.random();
-    // console.log(`TZD Check: Roll ${roll.toFixed(3)} vs Chance ${currentChance}`);
-
+    
     if (roll < currentChance) {
-        // HIER: Dynamische Generierung der Matrix basierend auf MaxHours
+        // Dynamische Generierung der Matrix basierend auf MaxHours
         const dynamicMatrix = generateTZDMatrix(currentMaxHours);
         await startTZD(userId, relevantItems, dynamicMatrix);
         return true;
@@ -256,41 +255,72 @@ export const terminateTZD = async (userId, success = true) => {
     const endTime = serverTimestamp();
     const status = await getTZDStatus(userId);
     
+    // A) TZD Status deaktivieren (IMMER)
     await updateDoc(doc(db, `users/${userId}/status/tzd`), { 
         isActive: false, 
         endTime: endTime, 
         result: success ? 'completed' : 'failed' 
     });
 
-    if (success) {
-        try {
-            const q = query(
-                collection(db, `users/${userId}/sessions`),
-                where('type', '==', 'instruction'),
-                where('endTime', '==', null)
-            );
-            const querySnapshot = await getDocs(q);
-            
-            if (!querySnapshot.empty) {
-                const activeSessionDoc = querySnapshot.docs[0];
-                await updateDoc(activeSessionDoc.ref, {
-                    tzdExecuted: true,
-                    tzdDurationMinutes: status.accumulatedMinutes || status.targetDurationMinutes || 0
-                });
-            }
-        } catch (e) { console.error(e); }
+    // B) Vermerk in der LAUFENDEN Instruction-Session (IMMER, auch bei Fail)
+    // FIX: Das Flag wird nun unabhängig von success gesetzt, um Loops zu verhindern.
+    try {
+        const q = query(
+            collection(db, `users/${userId}/sessions`),
+            where('type', '==', 'instruction'),
+            where('endTime', '==', null)
+        );
+        const querySnapshot = await getDocs(q);
+        
+        if (!querySnapshot.empty) {
+            const activeSessionDoc = querySnapshot.docs[0];
+            await updateDoc(activeSessionDoc.ref, {
+                tzdExecuted: true, // WICHTIG: Verhindert erneutes Triggern in dieser Session
+                tzdResult: success ? 'completed' : 'failed',
+                tzdDurationMinutes: status.accumulatedMinutes || status.targetDurationMinutes || 0
+            });
+            console.log(`TZD in Session vermerkt (Erfolg: ${success})`);
+        }
+    } catch (e) { 
+        console.error("Fehler beim Vermerken des TZD in der Session:", e); 
     }
 
-    if (success && status && status.itemId) {
-        await updateDoc(doc(db, `users/${userId}/items`, status.itemId), { 
-            wearCount: increment(1),
-            totalMinutes: increment(status.accumulatedMinutes || 0),
-            lastWorn: endTime
-        });
+    // C) Item Stats Update (NUR bei Erfolg)
+    // FIX: Multi-Item Support für korrekte Data-History
+    if (success && status) {
+        try {
+            const batch = writeBatch(db);
+            
+            // Bestimme alle betroffenen Items (LockedItems Array bevorzugt, Fallback auf Einzel-ID)
+            let itemsToUpdate = [];
+            if (status.lockedItems && Array.isArray(status.lockedItems)) {
+                itemsToUpdate = status.lockedItems;
+            } else if (status.itemId) {
+                itemsToUpdate = [{ id: status.itemId }];
+            }
+
+            itemsToUpdate.forEach(item => {
+                if (item.id) {
+                    const itemRef = doc(db, `users/${userId}/items`, item.id);
+                    batch.update(itemRef, {
+                        wearCount: increment(1),
+                        totalMinutes: increment(status.accumulatedMinutes || 0),
+                        lastWorn: endTime // Wichtig für Recovery-Logik
+                    });
+                }
+            });
+
+            await batch.commit();
+            console.log(`Stats für ${itemsToUpdate.length} Items aktualisiert.`);
+
+        } catch (e) {
+            console.error("Fehler beim Aktualisieren der Item-Stats:", e);
+        }
     }
 };
 
 export const emergencyBailout = async (userId) => {
     await registerPunishment(userId, "NOT-ABBRUCH: Zeitloses Diktat verweigert", 90);
+    // terminateTZD wird mit success=false aufgerufen -> Setzt tzdExecuted=true -> Loop beendet.
     await terminateTZD(userId, false);
 };
