@@ -1,25 +1,25 @@
 import { db } from '../firebase';
-import { collection, doc, writeBatch, serverTimestamp, getDoc, increment } from 'firebase/firestore';
+import { collection, doc, writeBatch, serverTimestamp, getDoc } from 'firebase/firestore';
 
 /**
  * Zentraler Service zum Starten von Sessions.
  * Verhindert Redundanz zwischen Dashboard, ItemDetail und NFC-Dialog.
  */
 export const startSession = async (userId, params) => {
-    const {
+    const { 
         items,      // Array von Items (bei Multi-Start / Instruction)
         itemId,     // Einzelne Item-ID (bei Single-Start)
-        type = 'voluntary',
-        periodId,
+        type = 'voluntary', 
+        periodId, 
         acceptedAt, // Timestamp/String wann die Instruction akzeptiert wurde (für Lag)
-        note = '',
-        verifiedViaNfc = false
+        note = '', 
+        verifiedViaNfc = false 
     } = params;
 
     if (!userId) throw new Error("User ID fehlt.");
 
     const batch = writeBatch(db);
-
+    
     // 1. Berechne Compliance Lag
     let lagMinutes = 0;
     if (type === 'instruction' && acceptedAt) {
@@ -45,7 +45,7 @@ export const startSession = async (userId, params) => {
     // 3. Batch Operationen erstellen
     itemsToProcess.forEach(item => {
         const sessionRef = doc(collection(db, `users/${userId}/sessions`));
-
+        
         const sessionData = {
             itemId: item.id,
             type,
@@ -75,7 +75,7 @@ export const startSession = async (userId, params) => {
 
 /**
  * Beendet eine Session und setzt den Item-Status zurück.
- * FIX: Aktualisiert jetzt auch 'lastWorn' sowie wearCount und totalMinutes.
+ * FIX: Aktualisiert jetzt auch 'lastWorn', damit der Recovery-Timer startet.
  */
 export const stopSession = async (userId, sessionId, feedback = {}) => {
     if (!userId || !sessionId) throw new Error("Parameter fehlen.");
@@ -97,10 +97,13 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
     const isNight = sessionData.period && sessionData.period.toLowerCase().includes('night');
 
     if (isInstruction && !isNight) {
-        nightSuccess = false;
-        const sessionDate = sessionData.startTime && sessionData.startTime.toDate
-            ? sessionData.startTime.toDate()
-            : new Date();
+        nightSuccess = false; 
+        
+        // FIX: Wir nutzen hier 'new Date()' (Endzeitpunkt), statt 'startTime'.
+        // Damit wird die Compliance dem Tag zugeordnet, an dem die Session ENDET.
+        // Das löst das Problem bei Sessions über Mitternacht.
+        const sessionDate = new Date();
+
         const offset = sessionDate.getTimezoneOffset() * 60000;
         const dateKey = new Date(sessionDate.getTime() - offset).toISOString().split('T')[0];
 
@@ -116,17 +119,9 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
         } catch (e) { console.error(e); }
     }
 
-    // --- UPDATE ITEM STATS (Duration) ---
-    const startTimeResult = sessionData.startTime && sessionData.startTime.toDate
-        ? sessionData.startTime.toDate()
-        : new Date();
-    const now = new Date();
-    const durationMinutes = Math.max(0, Math.floor((now - startTimeResult) / 60000));
-
     // 1. Session beenden
     const updateData = {
         endTime: serverTimestamp(),
-        durationMinutes, // Store duration in session as well
         feelings: feedback.feelings || [],
         finalNote: feedback.note || ''
     };
@@ -135,12 +130,11 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
     }
     batch.update(sessionRef, updateData);
 
-    // 2. Item Status zurücksetzen & UPDATE STATS
-    const updatePayload = {
+    // 2. Item Status zurücksetzen & LAST WORN AKTUALISIEREN
+    // Das fehlte vorher, weshalb der Timer nicht startete.
+    const updatePayload = { 
         status: 'active',
-        lastWorn: serverTimestamp(),
-        wearCount: increment(1),
-        totalMinutes: increment(durationMinutes)
+        lastWorn: serverTimestamp() // FIX: Wichtig für Elasthan Recovery
     };
 
     if (sessionData.itemIds && Array.isArray(sessionData.itemIds) && sessionData.itemIds.length > 0) {

@@ -5,7 +5,7 @@ import { materialTheme } from './theme/materialTheme'; // Neues Theme
 
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ItemProvider } from './contexts/ItemContext';
-import { SecurityProvider, useSecurity } from './contexts/SecurityContext';
+import { SecurityProvider } from './contexts/SecurityContext';
 import { NFCGlobalProvider } from './contexts/NFCContext';
 
 // COMPONENTS & PAGES
@@ -24,13 +24,19 @@ import SecurityLock from './components/SecurityLock';
 
 function PrivateRoute({ children }) {
   const { currentUser, loading } = useAuth();
-  const { isLocked, isAuthenticated } = useSecurity();
+  
+  // FIX: Wir prüfen hier nicht mehr manuell auf isLocked/isAuthenticated.
+  // Stattdessen wrappen wir den Inhalt in <SecurityLock>. 
+  // Das verhindert den "White Screen", da SecurityLock sich selbst um die Anzeige kümmert.
 
   if (loading) return null; 
   if (!currentUser) return <Navigate to="/login" />;
-  if (isLocked && !isAuthenticated) return <SecurityLock />;
 
-  return children;
+  return (
+    <SecurityLock>
+      {children}
+    </SecurityLock>
+  );
 }
 
 export default function App() {
