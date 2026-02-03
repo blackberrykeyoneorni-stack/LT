@@ -71,7 +71,7 @@ export const isItemEligibleForTZD = (item) => {
     const sub = (item.subCategory || '').toLowerCase();
     const name = (item.name || '').toLowerCase();
 
-    // Nur Strumpfhosen/Tights
+    // Nur Strumpfhosen/Tights triggern das Event
     if (cat.includes('strumpfhose') || sub.includes('strumpfhose') || name.includes('strumpfhose') || 
         cat.includes('tights') || sub.includes('tights')) {
         return true;
@@ -105,15 +105,23 @@ export const checkForTZDTrigger = async (userId, activeSessions, items) => {
     );
     if (instructionSessions.length === 0) return false;
 
-    // 3. Item Prüfung
+    // 3. Item Prüfung (KORRIGIERT: Ganzes Outfit erfassen)
     const activeItemIds = new Set();
     instructionSessions.forEach(s => {
         if (s.itemId) activeItemIds.add(s.itemId);
         if (s.itemIds) s.itemIds.forEach(id => activeItemIds.add(id));
     });
 
-    const relevantItems = items.filter(i => activeItemIds.has(i.id) && isItemEligibleForTZD(i));
-    if (relevantItems.length === 0) return false;
+    // Alle Items der Session laden
+    const sessionItems = items.filter(i => activeItemIds.has(i.id));
+
+    // Prüfen, ob MINDESTENS EIN Item (z.B. Strumpfhose) das TZD auslösen darf
+    const hasTriggerItem = sessionItems.some(i => isItemEligibleForTZD(i));
+
+    if (!hasTriggerItem) return false;
+
+    // Wenn Trigger gültig, werden ALLE Items der Session ins TZD übernommen (nicht nur die Strumpfhose)
+    const relevantItems = sessionItems;
 
     // 4. Wahrscheinlichkeit & MaxHours laden
     let currentChance = DEFAULT_PROTOCOL_RULES.tzd.triggerChance;
@@ -155,6 +163,8 @@ export const startTZD = async (userId, targetItems, durationMatrix) => {
     const targetDuration = determineSecretDuration(durationMatrix);
     const itemsArray = Array.isArray(targetItems) ? targetItems : [targetItems];
 
+    // SSoT Bereinigung: Keine redundanten 'itemId'/'itemName' Felder mehr auf Root-Ebene.
+    // Nur noch 'lockedItems' ist die Quelle der Wahrheit.
     const tzdData = {
         isActive: true,
         startTime: serverTimestamp(),
@@ -165,8 +175,7 @@ export const startTZD = async (userId, targetItems, durationMatrix) => {
             customId: i.customId || 'N/A',
             brand: i.brand
         })),
-        itemId: itemsArray[0]?.id, 
-        itemName: itemsArray[0]?.name,
+        // itemId/itemName entfernt -> siehe lockedItems
         accumulatedMinutes: 0,
         lastCheckIn: serverTimestamp(),
         stage: 'briefing',
@@ -262,8 +271,8 @@ export const terminateTZD = async (userId, success = true) => {
         result: success ? 'completed' : 'failed' 
     });
 
-    // B) Vermerk in der LAUFENDEN Instruction-Session (IMMER, auch bei Fail)
-    // FIX: Das Flag wird nun unabhängig von success gesetzt, um Loops zu verhindern.
+    // B) Vermerk in ALLEN LAUFENDEN Instruction-Sessions
+    // KORREKTUR: Iteration über alle gefundenen Docs, um Loops zu verhindern.
     try {
         const q = query(
             collection(db, `users/${userId}/sessions`),
@@ -273,33 +282,30 @@ export const terminateTZD = async (userId, success = true) => {
         const querySnapshot = await getDocs(q);
         
         if (!querySnapshot.empty) {
-            const activeSessionDoc = querySnapshot.docs[0];
-            await updateDoc(activeSessionDoc.ref, {
-                tzdExecuted: true, // WICHTIG: Verhindert erneutes Triggern in dieser Session
-                tzdResult: success ? 'completed' : 'failed',
-                tzdDurationMinutes: status.accumulatedMinutes || status.targetDurationMinutes || 0
+            const sessionUpdates = [];
+            
+            querySnapshot.forEach((docSnap) => {
+                sessionUpdates.push(updateDoc(docSnap.ref, {
+                    tzdExecuted: true, // Verhindert erneutes Triggern
+                    tzdResult: success ? 'completed' : 'failed',
+                    tzdDurationMinutes: status.accumulatedMinutes || status.targetDurationMinutes || 0
+                }));
             });
-            console.log(`TZD in Session vermerkt (Erfolg: ${success})`);
+            
+            await Promise.all(sessionUpdates);
+            console.log(`TZD in ${sessionUpdates.length} Session(s) vermerkt.`);
         }
     } catch (e) { 
-        console.error("Fehler beim Vermerken des TZD in der Session:", e); 
+        console.error("Fehler beim Vermerken des TZD in den Sessions:", e); 
     }
 
     // C) Item Stats Update (NUR bei Erfolg)
-    // FIX: Multi-Item Support für korrekte Data-History
-    if (success && status) {
+    // SSoT: Ausschließlich lockedItems nutzen. Keine Fallbacks auf veraltete Root-IDs.
+    if (success && status && status.lockedItems && Array.isArray(status.lockedItems)) {
         try {
             const batch = writeBatch(db);
             
-            // Bestimme alle betroffenen Items (LockedItems Array bevorzugt, Fallback auf Einzel-ID)
-            let itemsToUpdate = [];
-            if (status.lockedItems && Array.isArray(status.lockedItems)) {
-                itemsToUpdate = status.lockedItems;
-            } else if (status.itemId) {
-                itemsToUpdate = [{ id: status.itemId }];
-            }
-
-            itemsToUpdate.forEach(item => {
+            status.lockedItems.forEach(item => {
                 if (item.id) {
                     const itemRef = doc(db, `users/${userId}/items`, item.id);
                     batch.update(itemRef, {
@@ -311,7 +317,7 @@ export const terminateTZD = async (userId, success = true) => {
             });
 
             await batch.commit();
-            console.log(`Stats für ${itemsToUpdate.length} Items aktualisiert.`);
+            console.log(`Stats für ${status.lockedItems.length} Items aktualisiert.`);
 
         } catch (e) {
             console.error("Fehler beim Aktualisieren der Item-Stats:", e);
@@ -321,6 +327,6 @@ export const terminateTZD = async (userId, success = true) => {
 
 export const emergencyBailout = async (userId) => {
     await registerPunishment(userId, "NOT-ABBRUCH: Zeitloses Diktat verweigert", 90);
-    // terminateTZD wird mit success=false aufgerufen -> Setzt tzdExecuted=true -> Loop beendet.
+    // terminateTZD wird mit success=false aufgerufen -> Setzt tzdExecuted=true in Sessions -> Loop beendet.
     await terminateTZD(userId, false);
 };
