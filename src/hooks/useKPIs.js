@@ -141,7 +141,7 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput = []) {
             ? historySessionsInput 
             : (activeSessionsInput || []);
 
-        // --- FILTERUNG AB 15.12.2025 ---
+        // --- FILTERUNG AB 15.12.2025 (Für Core Metrics & History) ---
         const historySessions = allSessions.filter(s => {
             const d = s.startTime.toDate ? s.startTime.toDate() : new Date(s.startTime);
             return d >= HISTORY_START_DATE;
@@ -164,17 +164,68 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput = []) {
         });
         const avgCPW = totalWears > 0 ? (totalCost / totalWears) : 0;
 
-        // C. NYLON INDEX & CPNH - Item-basiert
+        // C. NYLON INDEX (30 TAGE ROLLING) & CPNH
+        // Definition Nylon Items:
         const tightsItems = items.filter(i => 
-            i.status !== 'archived' && i.subCategory && typeof i.subCategory === 'string' &&
-            (i.subCategory.toLowerCase().includes('strumpfhose') || i.mainCategory?.toLowerCase().includes('nylon'))
+            i.status !== 'archived' && (
+                (i.mainCategory && i.mainCategory === 'Nylons') ||
+                (i.subCategory && i.subCategory.toLowerCase().includes('strumpfhose'))
+            )
         );
-        const totalTightsMinutes = tightsItems.reduce((acc, curr) => acc + (Number(curr.totalMinutes) || 0), 0);
-        const nylonIndexVal = tightsItems.length > 0 ? (totalTightsMinutes / tightsItems.length / 60) : 0;
+
+        // 1. Rolling 30 Days Calculation
+        const now = new Date();
+        const cutoffDate = new Date();
+        cutoffDate.setDate(now.getDate() - 30);
+
+        // Filtere Sessions der letzten 30 Tage (basierend auf endTime)
+        // Laufende Sessions (endTime = null) werden als "bis jetzt" gewertet
+        const recentSessions = allSessions.filter(s => {
+            const end = s.endTime ? (s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime)) : new Date();
+            return end >= cutoffDate;
+        });
+
+        let totalRollingMinutes = 0;
+
+        recentSessions.forEach(s => {
+            // Prüfen ob Session Nylon enthält
+            const sItemIds = s.itemIds || (s.itemId ? [s.itemId] : []);
+            const hasNylon = sItemIds.some(id => {
+                const item = items.find(i => i.id === id);
+                if (!item) return false;
+                const main = item.mainCategory || '';
+                const sub = (item.subCategory || '').toLowerCase();
+                return main === 'Nylons' || sub.includes('strumpfhose');
+            });
+
+            if (hasNylon) {
+                const start = s.startTime.toDate ? s.startTime.toDate() : new Date(s.startTime);
+                const end = s.endTime ? (s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime)) : new Date();
+                
+                // Wir zählen nur den Anteil, der innerhalb der letzten 30 Tage liegt
+                const effectiveStart = start < cutoffDate ? cutoffDate : start;
+                const effectiveEnd = end; // Ende ist per Definition >= cutoffDate durch Filter oben
+
+                if (effectiveEnd > effectiveStart) {
+                    const durationMs = effectiveEnd - effectiveStart;
+                    totalRollingMinutes += (durationMs / 60000);
+                }
+            }
+        });
+
+        // Formel: (Summe_Minuten_30d / Anzahl_Nylon_Items) / 60
+        // Ergebnis: Durchschnittliche Stunden pro Item in den letzten 30 Tagen
+        const nylonIndexVal = tightsItems.length > 0 
+            ? (totalRollingMinutes / tightsItems.length) / 60 
+            : 0;
         
+        // CPNH Berechnung (bleibt Item-basiert oder adaptieren? Hier Item-basiert gelassen wie vorher, da "Cost per Nylon Hour" meist Lifetime ist)
+        // Um Konsistenz zu wahren, nutzen wir hier weiterhin die Lifetime-Minutes aus den Items für die Kosten-Relation, 
+        // da Kosten auch Lifetime sind.
+        const lifetimeTightsMinutes = tightsItems.reduce((acc, curr) => acc + (Number(curr.totalMinutes) || 0), 0);
         const totalNylonCost = tightsItems.reduce((acc, i) => acc + (Number(i.cost) || 0), 0);
-        const totalNylonHours = totalTightsMinutes / 60;
-        const cpnh = totalNylonHours > 0 ? parseFloat((totalNylonCost / totalNylonHours).toFixed(2)) : 0;
+        const totalNylonHoursLifetime = lifetimeTightsMinutes / 60;
+        const cpnh = totalNylonHoursLifetime > 0 ? parseFloat((totalNylonCost / totalNylonHoursLifetime).toFixed(2)) : 0;
 
         // D. CORE METRICS (Historisch ab 15.12.2025)
         
@@ -185,7 +236,6 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput = []) {
         // 2. Nocturnal (Präzise Berechnung: Jeden Tag 02:00 Uhr prüfen)
         let daysCount = 0;
         let nocturnalSuccessCount = 0;
-        const now = new Date();
         const loopDate = new Date(HISTORY_START_DATE);
 
         // Iteriere von Startdatum bis heute
@@ -230,7 +280,7 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput = []) {
         const punishments = historySessions.filter(s => s.type === 'punishment');
         const resistance = historySessions.length > 0 ? Math.round((punishments.length / historySessions.length) * 100) : 0;
 
-        // --- ENDURANCE BERECHNUNG (NEU: Split & Accessoire-Filter) ---
+        // --- ENDURANCE BERECHNUNG ---
         const closedSessions = historySessions.filter(s => s.endTime && s.startTime);
         
         let globalDuration = 0;
@@ -303,6 +353,8 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput = []) {
         };
 
         // F. FEM INDEX
+        // Da NylonIndex nun "Stunden pro Item pro Monat" ist, passen wir den Faktor leicht an, 
+        // damit der Score nicht explodiert (z.B. 10h/Item * 2 = 20 Punkte -> OK).
         const femScore = Math.round((enclosure * 0.3) + (nocturnal * 0.2) + (nylonIndexVal * 2));
 
         // G. BASICS WORN TODAY
@@ -329,13 +381,13 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput = []) {
                 nocturnal, 
                 nylonGap: parseFloat(avgGap.toFixed(1)),
                 cpnh, 
-                complianceLag: 12, // Placeholder
-                exposure: 45, // Placeholder/Old logic
+                complianceLag: 12, 
+                exposure: 45, 
                 resistance,
                 voluntarism, 
                 endurance, 
-                enduranceNylon, // NEU
-                enduranceDessous, // NEU
+                enduranceNylon, 
+                enduranceDessous,
                 submission: 85, 
                 denial: 12, 
                 chastity: enclosure
