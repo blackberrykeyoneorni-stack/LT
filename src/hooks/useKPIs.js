@@ -106,11 +106,20 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput) {
         usage: { nylonIndex: 0 },
         spermaScore: { rate: 0, total: 0, count: 0 },
         coreMetrics: {
-            enclosure: 0, nocturnal: 0, nylonGap: 0, cpnh: 0,
-            complianceLag: 0, exposure: 0, resistance: 0,
-            voluntarism: 0, endurance: 0, enduranceNylon: 0, enduranceDessous: 0,
+            nylonEnclosure: 0, // Umbenannt von enclosure
+            nocturnal: 0, 
+            nylonGap: 0, 
+            cpnh: 0,
+            complianceLag: 0, 
+            exposure: 0, 
+            resistance: 0,
+            voluntarism: 0, 
+            endurance: 0, 
+            enduranceNylon: 0, 
+            enduranceDessous: 0,
             submission: 85,
-            denial: 12, chastity: 0
+            denial: 12, 
+            chastity: 0
         },
         femIndex: { score: 0, trend: 'neutral' },
         basics: { activeItems: 0, washing: 0, wornToday: 0, archived: 0 }
@@ -139,7 +148,7 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput) {
 
             return () => unsub();
         }
-    }, [currentUser, historySessionsInput]); // Abhängigkeit von historySessionsInput ist wichtig
+    }, [currentUser, historySessionsInput]); 
 
     // 1. LISTENER für Release-Daten
     useEffect(() => {
@@ -165,9 +174,6 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput) {
         if (!Array.isArray(items)) return;
 
         // Entscheiden, welche Quelle genutzt wird
-        // Falls historySessionsInput undefined ist, nutzen wir internalHistory (die auch aktive Sessions enthält)
-        // Falls historySessionsInput existiert (Stats Page), nutzen wir diese.
-        // Falls beides leer/nicht da, Fallback auf activeSessionsInput (Initial Load Dashboard)
         let allSessions = [];
         
         if (historySessionsInput !== undefined) {
@@ -186,13 +192,13 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput) {
 
         // --- BERECHNUNGEN ---
 
-        // A. ITEMS & ORPHANS (Snapshot - basiert auf aktuellem Item-Status)
+        // A. ITEMS & ORPHANS (Snapshot)
         const activeItems = items.filter(i => i.status === 'active');
         const washingItems = items.filter(i => i.status === 'washing');
         const archivedItems = items.filter(i => i.status === 'archived');
         const orphanCount = items.filter(i => i.status === 'active' && (!i.wearCount || i.wearCount === 0)).length;
 
-        // B. FINANCIALS (CPW) - Item-basiert (Lifetime)
+        // B. FINANCIALS (CPW)
         let totalCost = 0; 
         let totalWears = 0;
         items.forEach(i => { 
@@ -202,7 +208,6 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput) {
         const avgCPW = totalWears > 0 ? (totalCost / totalWears) : 0;
 
         // C. NYLON INDEX (30 TAGE ROLLING) & CPNH
-        // Definition Nylon Items (für CPNH Kosten Berechnung):
         const tightsItems = items.filter(i => 
             i.status !== 'archived' && (
                 (i.mainCategory && i.mainCategory === 'Nylons') ||
@@ -210,22 +215,20 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput) {
             )
         );
 
-        // 1. Rolling 30 Days Calculation
+        // Rolling 30 Days Calculation
         const now = new Date();
         const cutoffDate = new Date();
         cutoffDate.setDate(now.getDate() - 30);
 
-        // Filtere Sessions der letzten 30 Tage (basierend auf endTime)
         const recentSessions = allSessions.filter(s => {
             const end = s.endTime ? (s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime)) : new Date();
             return end >= cutoffDate;
         });
 
         let totalRollingMinutes = 0;
-        const uniqueNylonItemsWorn = new Set(); // Set für eindeutige getragene Items
+        const uniqueNylonItemsWorn = new Set(); 
 
         recentSessions.forEach(s => {
-            // Check Session Items
             const sItemIds = s.itemIds || (s.itemId ? [s.itemId] : []);
             let sessionHasNylon = false;
 
@@ -239,7 +242,7 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput) {
 
                 if (isNylon) {
                     sessionHasNylon = true;
-                    uniqueNylonItemsWorn.add(id); // Item zur Liste der getragenen Items hinzufügen
+                    uniqueNylonItemsWorn.add(id); 
                 }
             });
 
@@ -247,7 +250,6 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput) {
                 const start = s.startTime.toDate ? s.startTime.toDate() : new Date(s.startTime);
                 const end = s.endTime ? (s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime)) : new Date();
                 
-                // Wir zählen nur den Anteil, der innerhalb der letzten 30 Tage liegt
                 const effectiveStart = start < cutoffDate ? cutoffDate : start;
                 const effectiveEnd = end; 
 
@@ -258,13 +260,11 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput) {
             }
         });
 
-        // Formel NEU: (Summe_Minuten_30d / Anzahl_GETRAGENER_Nylon_Items) / 60
-        // Ergebnis: Durchschnittliche Tragedauer pro aktiv genutztem Item in den letzten 30 Tagen
         const nylonIndexVal = uniqueNylonItemsWorn.size > 0 
             ? (totalRollingMinutes / uniqueNylonItemsWorn.size) / 60 
             : 0;
         
-        // CPNH Berechnung (bleibt Item-basiert - Lifetime Kosten / Lifetime Hours)
+        // CPNH Berechnung
         const lifetimeTightsMinutes = tightsItems.reduce((acc, curr) => acc + (Number(curr.totalMinutes) || 0), 0);
         const totalNylonCost = tightsItems.reduce((acc, i) => acc + (Number(i.cost) || 0), 0);
         const totalNylonHoursLifetime = lifetimeTightsMinutes / 60;
@@ -272,11 +272,7 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput) {
 
         // D. CORE METRICS (Historisch ab 15.12.2025)
         
-        // 1. Enclosure (Snapshot)
-        const totalActive = activeItems.length + washingItems.length + items.filter(i=>i.status==='wearing').length;
-        const enclosure = totalActive > 0 ? Math.round((tightsItems.length / totalActive) * 100) : 0;
-
-        // 2. Nocturnal (Präzise Berechnung: Jeden Tag 02:00 Uhr prüfen)
+        // 1. Nocturnal
         let daysCount = 0;
         let nocturnalSuccessCount = 0;
         const loopDate = new Date(HISTORY_START_DATE);
@@ -295,7 +291,7 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput) {
         }
         const nocturnal = daysCount > 0 ? Math.round((nocturnalSuccessCount / daysCount) * 100) : 0;
 
-        // 3. Nylon Gap (Präzise Berechnung: Ø Stunden ohne Nylon pro Tag)
+        // 2. Nylon Gap
         let totalGapHours = 0;
         let gapDaysCount = 0;
         const gapLoopDate = new Date(HISTORY_START_DATE);
@@ -303,20 +299,33 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput) {
         while (gapLoopDate <= now) {
             gapDaysCount++;
             const wornMinutes = calculateDailyNylonMinutes(gapLoopDate, allSessions, items);
-            const gapMinutes = 1440 - wornMinutes; // 1440 min = 24h
+            const gapMinutes = 1440 - wornMinutes; 
             totalGapHours += (gapMinutes / 60);
             gapLoopDate.setDate(gapLoopDate.getDate() + 1);
         }
         const avgGap = gapDaysCount > 0 ? (totalGapHours / gapDaysCount) : 24;
 
-        // 4. Voluntarism, Resistance
-        const voluntary = historySessions.filter(s => s.type === 'voluntary').length;
-        const voluntarism = historySessions.length > 0 ? Math.round((voluntary / historySessions.length) * 100) : 0;
+        // 3. Voluntarism (ZEIT-BASIERT) & Resistance
+        let totalDurationMs = 0;
+        let voluntaryDurationMs = 0;
+
+        historySessions.forEach(s => {
+            const start = s.startTime.toDate ? s.startTime.toDate() : new Date(s.startTime);
+            const end = s.endTime ? (s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime)) : new Date();
+            
+            const duration = Math.max(0, end.getTime() - start.getTime());
+            totalDurationMs += duration;
+            
+            if (s.type === 'voluntary') {
+                voluntaryDurationMs += duration;
+            }
+        });
         
+        const voluntarism = totalDurationMs > 0 ? Math.round((voluntaryDurationMs / totalDurationMs) * 100) : 0;
         const punishments = historySessions.filter(s => s.type === 'punishment');
         const resistance = historySessions.length > 0 ? Math.round((punishments.length / historySessions.length) * 100) : 0;
 
-        // --- ENDURANCE BERECHNUNG ---
+        // --- ENDURANCE & NYLON ENCLOSURE BERECHNUNG ---
         const closedSessions = historySessions.filter(s => s.endTime && s.startTime);
         
         let globalDuration = 0;
@@ -373,6 +382,10 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput) {
         const enduranceNylon = nylonCount > 0 ? parseFloat((nylonDuration / nylonCount).toFixed(1)) : 0;
         const enduranceDessous = dessousCount > 0 ? parseFloat((dessousDuration / dessousCount).toFixed(1)) : 0;
 
+        // 4. NYLON ENCLOSURE (Neu: Zeitbasiert)
+        // Berechnet den Anteil der Zeit, in der Nylon getragen wurde, an der gesamten Tragezeit.
+        const nylonEnclosure = globalDuration > 0 ? Math.round((nylonDuration / globalDuration) * 100) : 0;
+
         // E. SPERMA SCORE
         const spermaRate = releaseStats.totalReleases > 0 
             ? Math.round((releaseStats.cleanReleases / releaseStats.totalReleases) * 100) 
@@ -384,7 +397,8 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput) {
         };
 
         // F. FEM INDEX
-        const femScore = Math.round((enclosure * 0.3) + (nocturnal * 0.2) + (nylonIndexVal * 2));
+        // Nutzt nun die zeitbasierte NylonEnclosure
+        const femScore = Math.round((nylonEnclosure * 0.3) + (nocturnal * 0.2) + (nylonIndexVal * 2));
 
         // G. BASICS WORN TODAY
         const startOfToday = new Date();
@@ -406,7 +420,7 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput) {
             usage: { nylonIndex: parseFloat(nylonIndexVal.toFixed(1)) },
             spermaScore,
             coreMetrics: {
-                enclosure, 
+                nylonEnclosure, // NEU: Zeitbasiert
                 nocturnal, 
                 nylonGap: parseFloat(avgGap.toFixed(1)),
                 cpnh, 
@@ -419,7 +433,7 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput) {
                 enduranceDessous,
                 submission: 85, 
                 denial: 12, 
-                chastity: enclosure
+                chastity: nylonEnclosure // Nutzt ebenfalls den neuen Wert
             },
             femIndex: { score: Math.min(100, femScore), trend: 'stable' },
             basics: {
