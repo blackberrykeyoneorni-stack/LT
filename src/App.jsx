@@ -13,17 +13,35 @@ import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
 import SecurityLock from './components/SecurityLock';
 
+// --- HELPER FÜR STABILE LAZY LOADS ---
+// Fängt "Failed to fetch dynamically imported module" ab und erzwingt Reload
+const lazyRetry = (importFn) => {
+  return lazy(async () => {
+    try {
+      return await importFn();
+    } catch (error) {
+      // Prüfen, ob es sich um den Versions-Fehler handelt
+      if (error.message && (error.message.includes('dynamically imported module') || error.message.includes('Importing a module script failed'))) {
+        // Seite neu laden, um die neue Version (neue Chunks) vom Server zu holen
+        window.location.reload();
+      }
+      // Andere Fehler weiterwerfen, damit ErrorBoundary sie fängt
+      throw error;
+    }
+  });
+};
+
 // LAZY LOADING PAGES
-// Performance-Optimierung: Seiten werden nur geladen, wenn sie benötigt werden.
-const Login = lazy(() => import('./pages/Login'));
-const Dashboard = lazy(() => import('./pages/Dashboard'));
-const Inventory = lazy(() => import('./pages/Inventory'));
-const ItemDetail = lazy(() => import('./pages/ItemDetail'));
-const Stats = lazy(() => import('./pages/Stats'));
-const Settings = lazy(() => import('./pages/Settings'));
-const CalendarPage = lazy(() => import('./pages/Calendar'));
-const Wishlist = lazy(() => import('./pages/Wishlist'));
-const Budget = lazy(() => import('./pages/Budget'));
+// Verwendung von lazyRetry statt lazy pur
+const Login = lazyRetry(() => import('./pages/Login'));
+const Dashboard = lazyRetry(() => import('./pages/Dashboard'));
+const Inventory = lazyRetry(() => import('./pages/Inventory'));
+const ItemDetail = lazyRetry(() => import('./pages/ItemDetail'));
+const Stats = lazyRetry(() => import('./pages/Stats'));
+const Settings = lazyRetry(() => import('./pages/Settings'));
+const CalendarPage = lazyRetry(() => import('./pages/Calendar'));
+const Wishlist = lazyRetry(() => import('./pages/Wishlist'));
+const Budget = lazyRetry(() => import('./pages/Budget'));
 
 // Loading Screen für Suspense Fallback
 const PageLoader = () => (

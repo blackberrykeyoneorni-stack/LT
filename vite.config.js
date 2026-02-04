@@ -10,7 +10,10 @@ export default defineConfig({
       // PWA-FIX: Caching-Strategie
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
-        maximumFileSizeToCacheInBytes: 3000000 
+        maximumFileSizeToCacheInBytes: 3000000,
+        cleanupOutdatedCaches: true, // WICHTIG: Löscht alte Chunks sofort
+        clientsClaim: true,          // WICHTIG: Übernimmt sofort die Kontrolle
+        skipWaiting: true            // WICHTIG: Wartet nicht auf Tab-Schließung
       },
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
       manifest: {
