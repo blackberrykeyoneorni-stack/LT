@@ -1,42 +1,16 @@
 import { db } from '../firebase';
 import { doc, getDoc, updateDoc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { DEFAULT_PROTOCOL_RULES } from '../config/defaultRules';
-
-// Konstanten für das Straf-Item
-const PUNISHMENT_ITEM_CATEGORY = 'Accessoires';
-const PUNISHMENT_ITEM_SUBCATEGORY = 'Buttplug';
-
-// Zeitfenster aus der Config (SSOT)
-// Wir greifen direkt auf die Config zu, statt lokale Konstanten zu pflegen.
-const { time, punishment } = DEFAULT_PROTOCOL_RULES;
-
-// Konstanten für Bailout
-const BAILOUT_PROBABILITY = 0.25; // 25% Risiko bei Abbruch
-
-// Konstanten für Strafmaß (Limits)
-const MIN_PUNISHMENT_MINUTES = 15;
-const MAX_PUNISHMENT_MINUTES = 180; // Angehoben, da Config höhere Werte erlauben könnte
-const BAILOUT_PENALTY_FACTOR = 0.5; // Verhältnis: 1h verpasste Tragezeit = 30min Strafe
+import { PUNISHMENT_CONFIG } from '../utils/constants';
 
 // Prüft, ob wir uns im erlaubten nächtlichen Zeitfenster für den Vollzug befinden
 export const isPunishmentWindowOpen = () => {
     const d = new Date();
     const h = d.getHours();
-    // Fenster definiert in defaultRules.js
-    // Wir ignorieren hier Minuten für die Grob-Prüfung, wie im Original
-    const start = time.nightStartHour;
-    const end = time.dayStartHour;
-    
-    // Logik für Zeitfenster über Mitternacht (z.B. 23 bis 7)
-    if (start > end) {
-        return (h >= start || h < end);
-    } else {
-        // Fallback für Fenster am gleichen Tag (z.B. 01 bis 06)
-        return (h >= start && h < end);
-    }
+    // Nutzt zentral konfigurierte Zeiten
+    return (h >= PUNISHMENT_CONFIG.START_HOUR || h <= PUNISHMENT_CONFIG.END_HOUR);
 };
 
-// Lädt den aktuellen Straf-Status (umbenannt zu getActivePunishment für Kompatibilität)
+// Lädt den aktuellen Straf-Status
 export const getActivePunishment = async (userId) => {
     const statusRef = doc(db, `users/${userId}/status/punishment`);
     const statusSnap = await getDoc(statusRef);
@@ -62,8 +36,6 @@ export const getActivePunishment = async (userId) => {
         }
     }
 
-    // WICHTIG: Wenn Strafe nicht aktiv ist, geben wir null zurück,
-    // damit das Dashboard den Dialog NICHT öffnet.
     if (!data.active) {
         return null;
     }
@@ -76,18 +48,15 @@ export const getPunishmentStatus = getActivePunishment;
 
 /**
  * Registriert eine Strafe mit definierter Dauer.
- * @param {string} userId 
- * @param {string} reason 
- * @param {number} durationMinutes - Die errechnete Dauer der Strafe
  */
-export const registerPunishment = async (userId, reason, durationMinutes = null) => {
+export const registerPunishment = async (userId, reason, durationMinutes = 30) => {
     const statusRef = doc(db, `users/${userId}/status/punishment`);
     
-    // Fallback auf Config-Standard, falls keine Dauer übergeben
-    const duration = durationMinutes || punishment.defaultDurationMinutes;
-
-    // Limits anwenden
-    const finalDuration = Math.min(Math.max(duration, MIN_PUNISHMENT_MINUTES), MAX_PUNISHMENT_MINUTES);
+    // Limits anwenden (aus Config)
+    const finalDuration = Math.min(
+        Math.max(durationMinutes, PUNISHMENT_CONFIG.MIN_DURATION), 
+        PUNISHMENT_CONFIG.MAX_DURATION
+    );
     
     const active = isPunishmentWindowOpen();
     
@@ -95,7 +64,7 @@ export const registerPunishment = async (userId, reason, durationMinutes = null)
         active: active, // Sofort aktiv, wenn Nachtfenster offen
         deferred: !active, // Aufgeschoben, wenn Tag
         reason: reason,
-        durationMinutes: finalDuration, 
+        durationMinutes: finalDuration,
         registeredAt: serverTimestamp(),
     }, { merge: true });
     
@@ -106,8 +75,8 @@ export const registerPunishment = async (userId, reason, durationMinutes = null)
 export const findPunishmentItem = (allItems) => {
     if (!allItems || !Array.isArray(allItems)) return null;
     return allItems.find(item => 
-        item.mainCategory === PUNISHMENT_ITEM_CATEGORY && 
-        item.subCategory === PUNISHMENT_ITEM_SUBCATEGORY &&
+        item.mainCategory === PUNISHMENT_CONFIG.ITEM_CATEGORY && 
+        item.subCategory === PUNISHMENT_CONFIG.ITEM_SUBCATEGORY &&
         item.status === 'active'
     );
 };
@@ -128,8 +97,8 @@ export const clearPunishment = async (userId) => {
 export const checkAndRegisterBailout = async (userId, session) => {
     if (!session || !session.startTime || !session.endTime) return false;
 
-    // 1. Wahrscheinlichkeits-Check (Roulette)
-    if (Math.random() > BAILOUT_PROBABILITY) {
+    // 1. Wahrscheinlichkeits-Check
+    if (Math.random() > PUNISHMENT_CONFIG.BAILOUT_PROBABILITY) {
         return false; 
     }
     
@@ -145,16 +114,17 @@ export const checkAndRegisterBailout = async (userId, session) => {
     const end = session.endTime.toDate ? session.endTime.toDate() : new Date(session.endTime);
     const durationMinutes = Math.floor((end.getTime() - start.getTime()) / 60000);
     
-    // 3. Prüfen auf Unterfüllung
+    // 3. Prüfen auf Unterfüllung (< 80% des Ziels)
     const threshold = targetMinutes * 0.8; 
 
     if (durationMinutes < threshold) {
         // BERECHNUNG DER STRAFDAUER
         const missingMinutes = targetMinutes - durationMinutes;
-        const penaltyDuration = Math.ceil(missingMinutes * BAILOUT_PENALTY_FACTOR);
+        const penaltyDuration = Math.ceil(missingMinutes * PUNISHMENT_CONFIG.BAILOUT_PENALTY_FACTOR);
 
         const reason = `Bailout (${durationMinutes}m von ${targetMinutes}m). Fehlzeit: ${missingMinutes}m.`;
         
+        // 4. Strafe registrieren
         await registerPunishment(userId, reason, penaltyDuration);
         return true; 
     }
@@ -164,8 +134,5 @@ export const checkAndRegisterBailout = async (userId, session) => {
 
 // Hilfsfunktion für den Oath-Decline im Dashboard
 export const registerOathRefusal = async (userId) => {
-    // SSOT: Berechnung basierend auf Config
-    // Formel: Standard-Dauer * Multiplikator
-    const penaltyMinutes = Math.round(punishment.defaultDurationMinutes * punishment.refusalMultiplier);
-    await registerPunishment(userId, "Blind Oath verweigert.", penaltyMinutes);
+    await registerPunishment(userId, "Blind Oath verweigert.", PUNISHMENT_CONFIG.OATH_REFUSAL_PENALTY);
 };

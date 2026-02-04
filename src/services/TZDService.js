@@ -1,67 +1,45 @@
 import { db } from '../firebase';
-import { doc, updateDoc, serverTimestamp, setDoc, getDoc, increment, query, collection, where, getDocs, writeBatch } from 'firebase/firestore';
+import { doc, updateDoc, serverTimestamp, setDoc, getDoc, increment, query, collection, where, getDocs } from 'firebase/firestore';
 import { safeDate } from '../utils/dateUtils';
 import { registerPunishment } from './PunishmentService';
-import { DEFAULT_PROTOCOL_RULES } from '../config/defaultRules';
+import { TZD_CONFIG } from '../utils/constants'; // Falls du constants nutzt, sonst Fallback unten
 
-// --- CORE LOGIK: Matrix Berechnung ---
-/**
- * Leitet die drei Zonen mathematisch aus der Maximaldauer ab.
- * Bait:     1/6 bis 1/3 von Max
- * Standard: 1/3 bis 2/3 von Max
- * Wall:     2/3 bis 1/1 von Max
- */
-export const generateTZDMatrix = (maxHours) => {
-    // Fallback auf Default, falls ungültig
-    const safeMax = (typeof maxHours === 'number' && maxHours >= 6) ? maxHours : DEFAULT_PROTOCOL_RULES.tzd.tzdMaxHours;
-    const weights = DEFAULT_PROTOCOL_RULES.tzd.zoneWeights;
+// --- FALLBACK KONSTANTEN (Falls keine Settings geladen werden können) ---
+const FALLBACK_TRIGGER_CHANCE = 0.12; 
 
-    return [
-        { 
-            label: 'The Bait', 
-            min: safeMax / 6, 
-            max: safeMax / 3, 
-            weight: weights[0] 
-        },
-        { 
-            label: 'The Standard', 
-            min: safeMax / 3, 
-            max: (safeMax * 2) / 3, 
-            weight: weights[1] 
-        },
-        { 
-            label: 'The Wall', 
-            min: (safeMax * 2) / 3, 
-            max: safeMax, 
-            weight: weights[2] 
-        }
-    ];
-};
+// Fallback Matrix mit Weights (passend zur Logik der Settings)
+const FALLBACK_MATRIX = [
+    { label: 'The Bait', min: 2, max: 4, weight: 0.20 },
+    { label: 'The Standard', min: 4, max: 8, weight: 0.70 }, 
+    { label: 'The Wall', min: 8, max: 12, weight: 0.10 }
+];
 
 // --- HELPER ---
+/**
+ * Berechnet die Dauer basierend auf der übergebenen Matrix.
+ */
 const determineSecretDuration = (matrix) => {
-    // Sicherheitsnetz
-    if (!matrix || matrix.length === 0) return 12 * 60;
-
+    const durationMatrix = (matrix && matrix.length > 0) ? matrix : FALLBACK_MATRIX;
     const rand = Math.random();
+    
     let cumulative = 0;
     
-    for (const zone of matrix) {
+    for (const zone of durationMatrix) {
         const weight = zone.weight || 0;
         cumulative += weight;
         
         if (rand < cumulative) {
-            // Min/Max sind in Stunden -> Umrechnung in Minuten
-            const minMin = zone.min * 60;
-            const maxMin = zone.max * 60;
-            const range = maxMin - minMin;
+            const min = zone.minHours !== undefined ? zone.minHours : zone.min;
+            const max = zone.maxHours !== undefined ? zone.maxHours : zone.max;
             
-            const randomOffsetMinutes = Math.floor(Math.random() * (range + 1));
-            return minMin + randomOffsetMinutes;
+            const range = max - min;
+            const randomOffsetMinutes = Math.floor(Math.random() * (range * 60 + 1));
+            
+            return (min * 60) + randomOffsetMinutes;
         }
     }
     
-    return matrix[0].max * 60; // Fallback
+    return 12 * 60; // Fallback
 };
 
 // --- ELIGIBILITY CHECK ---
@@ -71,7 +49,7 @@ export const isItemEligibleForTZD = (item) => {
     const sub = (item.subCategory || '').toLowerCase();
     const name = (item.name || '').toLowerCase();
 
-    // Nur Strumpfhosen/Tights triggern das Event
+    // Änderung: Nur noch Strumpfhosen lösen das Diktat aus.
     if (cat.includes('strumpfhose') || sub.includes('strumpfhose') || name.includes('strumpfhose') || 
         cat.includes('tights') || sub.includes('tights')) {
         return true;
@@ -80,9 +58,9 @@ export const isItemEligibleForTZD = (item) => {
     return false;
 };
 
-// --- TRIGGER LOGIK ---
+// --- TRIGGER LOGIK (Für Dashboard) ---
 export const checkForTZDTrigger = async (userId, activeSessions, items) => {
-    // 1. Zeitfenster Prüfung (So 23:30 - Do 12:30)
+    // 1. Zeitfenster Prüfung (Sonntag 23:30 - Donnerstag 12:30)
     const now = new Date();
     const day = now.getDay(); 
     const hour = now.getHours();
@@ -99,33 +77,27 @@ export const checkForTZDTrigger = async (userId, activeSessions, items) => {
 
     if (!inWindow) return false;
 
-    // 2. Session Prüfung
+    // 2. Session Prüfung: Läuft eine INSTRUCTION Session?
     const instructionSessions = activeSessions.filter(s => 
         s.type === 'instruction' && !s.tzdExecuted
     );
+    
     if (instructionSessions.length === 0) return false;
 
-    // 3. Item Prüfung (KORRIGIERT: Ganzes Outfit erfassen)
+    // 3. Item Prüfung
     const activeItemIds = new Set();
     instructionSessions.forEach(s => {
         if (s.itemId) activeItemIds.add(s.itemId);
         if (s.itemIds) s.itemIds.forEach(id => activeItemIds.add(id));
     });
 
-    // Alle Items der Session laden
-    const sessionItems = items.filter(i => activeItemIds.has(i.id));
+    const relevantItems = items.filter(i => activeItemIds.has(i.id) && isItemEligibleForTZD(i));
+    
+    if (relevantItems.length === 0) return false;
 
-    // Prüfen, ob MINDESTENS EIN Item (z.B. Strumpfhose) das TZD auslösen darf
-    const hasTriggerItem = sessionItems.some(i => isItemEligibleForTZD(i));
-
-    if (!hasTriggerItem) return false;
-
-    // Wenn Trigger gültig, werden ALLE Items der Session ins TZD übernommen (nicht nur die Strumpfhose)
-    const relevantItems = sessionItems;
-
-    // 4. Wahrscheinlichkeit & MaxHours laden
-    let currentChance = DEFAULT_PROTOCOL_RULES.tzd.triggerChance;
-    let currentMaxHours = DEFAULT_PROTOCOL_RULES.tzd.tzdMaxHours;
+    // 4. Wahrscheinlichkeit & Settings laden
+    let currentChance = FALLBACK_TRIGGER_CHANCE;
+    let currentMatrix = FALLBACK_MATRIX;
 
     try {
         const settingsSnap = await getDoc(doc(db, `users/${userId}/settings/protocol`));
@@ -135,21 +107,21 @@ export const checkForTZDTrigger = async (userId, activeSessions, items) => {
                 if (typeof data.tzd.triggerChance === 'number') {
                     currentChance = data.tzd.triggerChance;
                 }
-                if (typeof data.tzd.tzdMaxHours === 'number') {
-                    currentMaxHours = data.tzd.tzdMaxHours;
+                if (data.tzd.durationMatrix && Array.isArray(data.tzd.durationMatrix)) {
+                    currentMatrix = data.tzd.durationMatrix;
                 }
             }
         }
     } catch (e) {
-        console.error("Fehler beim Laden der TZD Settings, nutze Defaults", e);
+        console.error("Fehler beim Laden der TZD Settings, nutze Fallback", e);
     }
 
     const roll = Math.random();
     
+    console.log(`TZD Check: Roll ${roll.toFixed(3)} vs Chance ${currentChance}`);
+
     if (roll < currentChance) {
-        // Dynamische Generierung der Matrix basierend auf MaxHours
-        const dynamicMatrix = generateTZDMatrix(currentMaxHours);
-        await startTZD(userId, relevantItems, dynamicMatrix);
+        await startTZD(userId, relevantItems, currentMatrix);
         return true;
     }
 
@@ -163,8 +135,6 @@ export const startTZD = async (userId, targetItems, durationMatrix) => {
     const targetDuration = determineSecretDuration(durationMatrix);
     const itemsArray = Array.isArray(targetItems) ? targetItems : [targetItems];
 
-    // SSoT Bereinigung: Keine redundanten 'itemId'/'itemName' Felder mehr auf Root-Ebene.
-    // Nur noch 'lockedItems' ist die Quelle der Wahrheit.
     const tzdData = {
         isActive: true,
         startTime: serverTimestamp(),
@@ -175,7 +145,9 @@ export const startTZD = async (userId, targetItems, durationMatrix) => {
             customId: i.customId || 'N/A',
             brand: i.brand
         })),
-        // itemId/itemName entfernt -> siehe lockedItems
+        itemId: itemsArray[0]?.id, 
+        itemName: itemsArray[0]?.name,
+        
         accumulatedMinutes: 0,
         lastCheckIn: serverTimestamp(),
         stage: 'briefing',
@@ -224,34 +196,30 @@ export const performCheckIn = async (userId, statusData) => {
     }
 };
 
-/**
- * Bestraft das Öffnen der App während eines laufenden TZD.
- */
+// --- EREIGNIS-HANDLER ---
+
+// NEU HINZUGEFÜGT: Behebt den Build-Error in Layout.jsx
 export const penalizeTZDAppOpen = async (userId) => {
     try {
-        const tzdRef = doc(db, `users/${userId}/status/tzd`);
-        const tzdSnap = await getDoc(tzdRef);
-
-        if (!tzdSnap.exists()) return false;
-
-        const data = tzdSnap.data();
-
-        if (data.isActive && data.stage === 'running') {
-            await updateDoc(tzdRef, {
-                targetDurationMinutes: increment(15)
+        const status = await getTZDStatus(userId);
+        // Strafe nur, wenn TZD aktiv ist und bereits läuft (nicht mehr im Briefing)
+        if (status && status.isActive && status.stage === 'running') {
+            const penaltyMinutes = 15;
+            
+            await updateDoc(doc(db, `users/${userId}/status/tzd`), {
+                targetDurationMinutes: increment(penaltyMinutes),
+                penaltyCount: increment(1),
+                lastPenaltyAt: serverTimestamp()
             });
-            console.log("TZD Penalty: +15 Minuten wegen App-Öffnung.");
-            return true;
+            
+            return true; // Bestrafung erfolgt
         }
-
-        return false;
+        return false; // Keine Strafe notwendig
     } catch (e) {
-        console.error("Fehler bei TZD Penalty:", e);
+        console.error("Fehler bei TZD App Open Penalty:", e);
         return false;
     }
 };
-
-// --- EREIGNIS-HANDLER ---
 
 export const confirmTZDBriefing = async (userId) => {
     await updateDoc(doc(db, `users/${userId}/status/tzd`), { 
@@ -264,69 +232,46 @@ export const terminateTZD = async (userId, success = true) => {
     const endTime = serverTimestamp();
     const status = await getTZDStatus(userId);
     
-    // A) TZD Status deaktivieren (IMMER)
+    // A) TZD Status deaktivieren
     await updateDoc(doc(db, `users/${userId}/status/tzd`), { 
         isActive: false, 
         endTime: endTime, 
         result: success ? 'completed' : 'failed' 
     });
 
-    // B) Vermerk in ALLEN LAUFENDEN Instruction-Sessions
-    // KORREKTUR: Iteration über alle gefundenen Docs, um Loops zu verhindern.
-    try {
-        const q = query(
-            collection(db, `users/${userId}/sessions`),
-            where('type', '==', 'instruction'),
-            where('endTime', '==', null)
-        );
-        const querySnapshot = await getDocs(q);
-        
-        if (!querySnapshot.empty) {
-            const sessionUpdates = [];
+    // B) Vermerk in der Session
+    if (success) {
+        try {
+            const q = query(
+                collection(db, `users/${userId}/sessions`),
+                where('type', '==', 'instruction'),
+                where('endTime', '==', null)
+            );
+            const querySnapshot = await getDocs(q);
             
-            querySnapshot.forEach((docSnap) => {
-                sessionUpdates.push(updateDoc(docSnap.ref, {
-                    tzdExecuted: true, // Verhindert erneutes Triggern
-                    tzdResult: success ? 'completed' : 'failed',
+            if (!querySnapshot.empty) {
+                const activeSessionDoc = querySnapshot.docs[0];
+                await updateDoc(activeSessionDoc.ref, {
+                    tzdExecuted: true,
                     tzdDurationMinutes: status.accumulatedMinutes || status.targetDurationMinutes || 0
-                }));
-            });
-            
-            await Promise.all(sessionUpdates);
-            console.log(`TZD in ${sessionUpdates.length} Session(s) vermerkt.`);
+                });
+            }
+        } catch (e) {
+            console.error("Fehler beim Vermerken des TZD in der Session:", e);
         }
-    } catch (e) { 
-        console.error("Fehler beim Vermerken des TZD in den Sessions:", e); 
     }
 
-    // C) Item Stats Update (NUR bei Erfolg)
-    // SSoT: Ausschließlich lockedItems nutzen. Keine Fallbacks auf veraltete Root-IDs.
-    if (success && status && status.lockedItems && Array.isArray(status.lockedItems)) {
-        try {
-            const batch = writeBatch(db);
-            
-            status.lockedItems.forEach(item => {
-                if (item.id) {
-                    const itemRef = doc(db, `users/${userId}/items`, item.id);
-                    batch.update(itemRef, {
-                        wearCount: increment(1),
-                        totalMinutes: increment(status.accumulatedMinutes || 0),
-                        lastWorn: endTime // Wichtig für Recovery-Logik
-                    });
-                }
-            });
-
-            await batch.commit();
-            console.log(`Stats für ${status.lockedItems.length} Items aktualisiert.`);
-
-        } catch (e) {
-            console.error("Fehler beim Aktualisieren der Item-Stats:", e);
-        }
+    // C) Item Stats Update
+    if (success && status && status.itemId) {
+        await updateDoc(doc(db, `users/${userId}/items`, status.itemId), { 
+            wearCount: increment(1),
+            totalMinutes: increment(status.accumulatedMinutes || 0),
+            lastWorn: endTime
+        });
     }
 };
 
 export const emergencyBailout = async (userId) => {
     await registerPunishment(userId, "NOT-ABBRUCH: Zeitloses Diktat verweigert", 90);
-    // terminateTZD wird mit success=false aufgerufen -> Setzt tzdExecuted=true in Sessions -> Loop beendet.
     await terminateTZD(userId, false);
 };
