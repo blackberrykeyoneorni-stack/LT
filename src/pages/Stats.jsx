@@ -39,7 +39,7 @@ const safeDate = (val) => {
 };
 
 // Hilfsfunktion: Berechnet die effektiven Trage-Minuten (Union) für einen Tag
-// Identisch zur Logik in useKPIs für Konsistenz
+// Identisch zur Logik in useKPIs für Konsistenz (Nylon Gap)
 const calculateDailyNylonWearMinutes = (targetDate, sessions, items) => {
     const startOfDay = new Date(targetDate);
     startOfDay.setHours(0, 0, 0, 0);
@@ -208,9 +208,16 @@ export default function Statistics() {
                 }
             }
             else if (metricId === 'voluntarism') {
-                const vol = daySessions.filter(s => s.type === 'voluntary').length;
-                const instr = daySessions.filter(s => s.type === 'instruction').length;
-                val = instr > 0 ? (vol / instr) : vol; 
+                // NEU: Zeit-basiert statt Count-basiert
+                let totalMs = 0;
+                let volMs = 0;
+                daySessions.forEach(s => {
+                    const end = s.endTime || new Date();
+                    const dur = end - s.startTime;
+                    totalMs += dur;
+                    if(s.type === 'voluntary') volMs += dur;
+                });
+                val = totalMs > 0 ? (volMs / totalMs) * 100 : 0;
             }
             else if (metricId === 'endurance') {
                 let dMins = 0;
@@ -222,8 +229,27 @@ export default function Statistics() {
                 });
                 val = dCount > 0 ? (dMins / dCount / 60) : 0;
             }
-            else if (metricId === 'enclosure') {
-                 val = coreMetrics.enclosure; 
+            else if (metricId === 'nylonEnclosure') {
+                 // NEU: Zeit-basiert für den Trend (Nylon Zeit / Gesamt Zeit)
+                 let globalMs = 0;
+                 let nylonMs = 0;
+                 daySessions.forEach(s => {
+                     const end = s.endTime || new Date();
+                     const dur = end - s.startTime;
+                     globalMs += dur;
+
+                     const sItemIds = s.itemIds || (s.itemId ? [s.itemId] : []);
+                     const hasNylon = sItemIds.some(id => {
+                        const item = items.find(i => i.id === id);
+                        if (!item) return false;
+                        const cat = (item.mainCategory || '').toLowerCase();
+                        const sub = (item.subCategory || '').toLowerCase();
+                        return cat.includes('nylon') || sub.includes('strumpfhose') || sub.includes('stockings');
+                     });
+
+                     if(hasNylon) nylonMs += dur;
+                 });
+                 val = globalMs > 0 ? (nylonMs / globalMs) * 100 : 0;
             }
             else {
                 val = daySessions.length;
@@ -249,7 +275,7 @@ export default function Statistics() {
     };
 
     const handleCardClick = (metricId, title) => { 
-        if (['exposure', 'nocturnal', 'nylonGap', 'resistance', 'enclosure', 'compliance', 'voluntarism', 'endurance'].includes(metricId)) {
+        if (['exposure', 'nocturnal', 'nylonGap', 'resistance', 'nylonEnclosure', 'compliance', 'voluntarism', 'endurance'].includes(metricId)) {
             calculateTrend(metricId);
             setSelectedMetric({id: metricId, title}); 
         } else {
@@ -282,6 +308,8 @@ export default function Statistics() {
         if (metricId === 'endurance') return ' h';
         if (metricId === 'nylonGap') return ' h'; // Trend Einheit
         if (metricId === 'nocturnal') return ' %';
+        if (metricId === 'nylonEnclosure') return ' %';
+        if (metricId === 'voluntarism') return ' %';
         if (metricId === 'compliance') return ' m';
         return '';
     };
@@ -289,14 +317,15 @@ export default function Statistics() {
     if (loading) return <Box sx={{display:'flex', justifyContent:'center', mt:10}}><CircularProgress/></Box>;
 
     const metrics = [
-        { id: 'enclosure', title: 'Enclosure', val: `${coreMetrics.enclosure}%`, sub: 'Nylon-Quote', icon: Icons.Layers, color: PALETTE.accents.pink },
+        // UPDATE: Key von 'enclosure' zu 'nylonEnclosure'
+        { id: 'nylonEnclosure', title: 'Nylon Enclosure', val: `${coreMetrics.nylonEnclosure}%`, sub: 'Tragezeit-Anteil', icon: Icons.Layers, color: PALETTE.accents.pink },
         { id: 'nocturnal', title: 'Nocturnal', val: `${coreMetrics.nocturnal}%`, sub: 'Nacht-Quote', icon: Icons.Night, color: PALETTE.accents.purple },
         { id: 'nylonGap', title: 'Nylon Gap', val: coreMetrics.nylonGap, sub: 'Ø Lücke/Tag', icon: HourglassEmptyIcon, color: '#00e5ff' }, // Cyan Signalfarbe
         { id: 'cpnh', title: 'CPNH', val: `${coreMetrics.cpnh}€`, sub: 'Cost/Hour', icon: TrendingUpIcon, color: PALETTE.accents.green },
         { id: 'compliance', title: 'Compliance Lag', val: `${coreMetrics.complianceLag}m`, sub: 'Ø Verzögerung', icon: TimerIcon, color: PALETTE.accents.red },
         { id: 'exposure', title: 'Exposure', val: `${coreMetrics.exposure}%`, sub: 'Tragezeit-Ratio', icon: AccessTimeIcon, color: PALETTE.primary.main },
         { id: 'resistance', title: 'Resistance', val: `${coreMetrics.resistance}%`, sub: 'Straf-Quote', icon: SecurityIcon, color: PALETTE.accents.gold },
-        { id: 'voluntarism', title: 'Voluntarism', val: coreMetrics.voluntarism, sub: 'Wille / Befehl', icon: PsychologyIcon, color: PALETTE.accents.blue },
+        { id: 'voluntarism', title: 'Voluntarism', val: coreMetrics.voluntarism, sub: 'Zeit-Verhältnis', icon: PsychologyIcon, color: PALETTE.accents.blue },
         { id: 'endurance', title: 'Endurance', val: `${coreMetrics.endurance}h`, sub: `Nyl: ${coreMetrics.enduranceNylon || 0}h • Des: ${coreMetrics.enduranceDessous || 0}h`, icon: SpeedIcon, color: PALETTE.text.secondary },
     ];
 
