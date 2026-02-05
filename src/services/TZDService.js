@@ -2,6 +2,9 @@ import { db } from '../firebase';
 import { doc, updateDoc, serverTimestamp, setDoc, getDoc, increment, query, collection, where, getDocs } from 'firebase/firestore';
 import { safeDate } from '../utils/dateUtils';
 import { registerPunishment } from './PunishmentService';
+// Importiere setImmunity und isImmunityActive (Achtung: Zirkuläre Abhängigkeit vermeiden. 
+// Wir implementieren die Checks hier direkt oder lagern aus. Um es einfach zu halten, kopieren wir den Check bzw. importieren OfferService nur wo nötig.)
+import { setImmunity, isImmunityActive } from './OfferService'; 
 
 // --- FALLBACK KONSTANTEN ---
 const FALLBACK_TRIGGER_CHANCE = 0.12; 
@@ -35,13 +38,13 @@ const determineSecretDuration = (matrix) => {
 
 /**
  * Startet das Protokoll. 
- * Neu: Akzeptiert overrideDurationMinutes für Straf-Szenarien.
+ * Neu: Akzeptiert overrideDurationMinutes für Straf-Szenarien oder Gamble-Verlust.
  */
 export const startTZD = async (userId, targetItems, durationMatrix, overrideDurationMinutes = null) => {
     let targetDuration;
 
     if (overrideDurationMinutes) {
-        // Explizite Dauer (z.B. Strafaufschlag)
+        // Explizite Dauer (z.B. Strafaufschlag oder Gamble-Verlust)
         targetDuration = overrideDurationMinutes;
     } else {
         // Zufallsgenerator
@@ -59,7 +62,7 @@ export const startTZD = async (userId, targetItems, durationMatrix, overrideDura
             name: i.name,
             customId: i.customId || 'N/A',
             brand: i.brand,
-            img: i.imageUrl || (i.images && i.images[0]) || null // Bild wichtig für Overlay
+            img: i.imageUrl || (i.images && i.images[0]) || null
         })),
         itemId: itemsArray[0]?.id, 
         itemName: itemsArray[0]?.name,
@@ -76,33 +79,27 @@ export const startTZD = async (userId, targetItems, durationMatrix, overrideDura
 };
 
 /**
- * NEU: Bestrafung für Fluchtversuch (Blockade umgangen).
- * Startet TZD mit 150% der maximalen Wall-Dauer mit den ignorierten Items.
+ * Bestrafung für Fluchtversuch (Blockade umgangen).
+ * IGNORIERT Immunität.
  */
 export const triggerEvasionPenalty = async (userId, instructionItems) => {
     try {
-        // 1. Settings laden, um "The Wall" Max zu finden
-        let maxWallHours = 12; // Default Fallback
+        let maxWallHours = 12; 
         const settingsSnap = await getDoc(doc(db, `users/${userId}/settings/protocol`));
         
         if (settingsSnap.exists()) {
             const data = settingsSnap.data();
             if (data.tzd && Array.isArray(data.tzd.durationMatrix)) {
-                // Finde das höchste Maximum in der Matrix
                 const maxInMatrix = Math.max(...data.tzd.durationMatrix.map(z => z.max || z.maxHours || 0));
                 if (maxInMatrix > 0) maxWallHours = maxInMatrix;
             }
         }
 
-        // 2. Berechnung: 150% der Maximaldauer
         const penaltyMinutes = Math.round((maxWallHours * 1.5) * 60);
-        console.log(`Evasion Detected. Triggering TZD Penalty: ${penaltyMinutes} minutes (${maxWallHours}h * 150%).`);
+        console.log(`Evasion Detected. Triggering TZD Penalty: ${penaltyMinutes} minutes.`);
 
-        // 3. Starten des TZD mit Override
         await startTZD(userId, instructionItems, null, penaltyMinutes);
-        
-        // 4. Protokollieren als Strafe (für Statistik)
-        await registerPunishment(userId, "Fluchtversuch vor Anweisung (Blockade umgangen)", 0); // 0 Min, da TZD die Strafe ist
+        await registerPunishment(userId, "Fluchtversuch vor Anweisung (Blockade umgangen)", 0); 
 
         return true;
     } catch (e) {
@@ -110,9 +107,6 @@ export const triggerEvasionPenalty = async (userId, instructionItems) => {
         return false;
     }
 };
-
-// ... (Rest der Datei: checkForTZDTrigger, getTZDStatus, performCheckIn, etc. bleiben identisch) ...
-// Hier zur Sicherheit die unveränderten Exporte, damit der File-Inhalt komplett ist:
 
 export const isItemEligibleForTZD = (item) => {
     if (!item) return false;
@@ -126,7 +120,16 @@ export const isItemEligibleForTZD = (item) => {
     return false;
 };
 
+/**
+ * Regulärer TZD Trigger (Das "Spiel").
+ * PRÜFT auf Immunität (Cooldown).
+ */
 export const checkForTZDTrigger = async (userId, activeSessions, items) => {
+    // 0. Immunitäts-Check
+    const immune = await isImmunityActive(userId);
+    if (immune) return false;
+
+    // 1. Zeitfenster Prüfung (Sonntag 23:30 - Donnerstag 12:30)
     const now = new Date();
     const day = now.getDay(); 
     const hour = now.getHours();
@@ -259,6 +262,13 @@ export const terminateTZD = async (userId, success = true) => {
     });
 
     if (success) {
+        // NEU: COOLDOWN LOGIK
+        // Wenn TZD >= 24h (1440 Min) war und erfolgreich beendet wurde, gibt es 24h Immunität.
+        if (status && status.targetDurationMinutes >= 1440) {
+            await setImmunity(userId, 24);
+            console.log("24h TZD überstanden. Cooldown (Immunität) aktiviert.");
+        }
+
         try {
             const q = query(
                 collection(db, `users/${userId}/sessions`),

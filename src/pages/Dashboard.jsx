@@ -16,9 +16,12 @@ import { isAuditDue, initializeAudit, confirmAuditItem } from '../services/Audit
 import { getActivePunishment, clearPunishment, findPunishmentItem, registerOathRefusal, registerPunishment } from '../services/PunishmentService';
 import { loadMonthlyBudget } from '../services/BudgetService';
 import { generateAndSaveInstruction, getLastInstruction } from '../services/InstructionService';
+// NEU: Importiere triggerEvasionPenalty
 import { checkForTZDTrigger, getTZDStatus, triggerEvasionPenalty } from '../services/TZDService';
 import { registerRelease as apiRegisterRelease } from '../services/ReleaseService'; 
 import { startSession as startSessionService, stopSession as stopSessionService } from '../services/SessionService';
+// NEU: Importiere Gamble Services
+import { checkGambleTrigger, determineGambleStake, rollTheDice, isImmunityActive } from '../services/OfferService';
 
 // Hooks
 import useSessionProgress from '../hooks/dashboard/useSessionProgress';
@@ -28,6 +31,7 @@ import { useKPIs } from '../hooks/useKPIs';
 // Components
 import TzdOverlay from '../components/dashboard/TzdOverlay'; 
 import ForcedReleaseOverlay from '../components/dashboard/ForcedReleaseOverlay';
+import OfferDialog from '../components/dialogs/OfferDialog'; // NEU
 import ProgressBar from '../components/dashboard/ProgressBar';
 import FemIndexBar from '../components/dashboard/FemIndexBar';
 import ActionButtons from '../components/dashboard/ActionButtons';
@@ -53,6 +57,7 @@ import TimerIcon from '@mui/icons-material/Timer';
 import LinkOffIcon from '@mui/icons-material/LinkOff';
 import AnalyticsIcon from '@mui/icons-material/Analytics';
 import LockIcon from '@mui/icons-material/Lock'; 
+import ShieldIcon from '@mui/icons-material/Shield'; // NEU: Für Immunität
 
 const REFLECTION_TAGS = [
     "Sicher / Geborgen", "Erregt", "Gedemütigt", "Exponiert / Öffentlich", 
@@ -171,6 +176,12 @@ export default function Dashboard() {
   const [forcedReleaseOpen, setForcedReleaseOpen] = useState(false);
   const [forcedReleaseMethod, setForcedReleaseMethod] = useState(null);
 
+  // NEU: Gamble State
+  const [offerOpen, setOfferOpen] = useState(false);
+  const [gambleStake, setGambleStake] = useState([]);
+  const [hasGambledThisSession, setHasGambledThisSession] = useState(false);
+  const [immunityActive, setImmunityActive] = useState(false);
+
   // Derived State
   const isNight = currentPeriod ? currentPeriod.includes('night') : false;
   const isInstructionActive = activeSessions.some(s => s.type === 'instruction');
@@ -202,6 +213,11 @@ export default function Dashboard() {
 
             const susp = await checkActiveSuspension(currentUser.uid);
             setActiveSuspension(susp);
+
+            // NEU: Immunitäts-Check für UI Anzeige
+            const immune = await isImmunityActive(currentUser.uid);
+            setImmunityActive(immune);
+
         } catch(e) { console.error(e); } finally { setLoadingSuspension(false); }
     };
     initLoad();
@@ -214,7 +230,7 @@ export default function Dashboard() {
       if (items.length > 0) setPunishmentItem(findPunishmentItem(items));
   }, [items]);
 
-  // 3. TZD Check (UND CHECK AUF ANWEISUNGS-FLUCHT)
+  // 3. TZD Check + GAMBLE TRIGGER
   useEffect(() => {
     let interval;
     const checkTZD = async () => {
@@ -233,6 +249,24 @@ export default function Dashboard() {
                     setTzdActive(false); 
                     setTzdStartTime(null);
                 }
+                
+                // --- NEU: GAMBLE CHECK ---
+                // Nur wenn kein TZD, noch nicht gespielt und Items da
+                if (!hasGambledThisSession && items.length > 0) {
+                    // isInstructionActive wird hier geprüft
+                    const triggerGamble = await checkGambleTrigger(currentUser.uid, false, isInstructionActive);
+                    if (triggerGamble) {
+                        const stake = determineGambleStake(items);
+                        if (stake.length > 0) {
+                            setGambleStake(stake);
+                            setOfferOpen(true);
+                            setHasGambledThisSession(true); // Verhindert Loops
+                        }
+                    } else {
+                        setHasGambledThisSession(true); // Auch bei False markieren als "geprüft"
+                    }
+                }
+
                 // REGULÄRER TRIGGER (während einer Session)
                 if (isInstructionActive) { 
                     const triggered = await checkForTZDTrigger(currentUser.uid, activeSessions, items); 
@@ -254,7 +288,7 @@ export default function Dashboard() {
         interval = setInterval(checkTZD, 300000); 
     }
     return () => clearInterval(interval);
-  }, [currentUser, items, activeSessions, itemsLoading, tzdActive, isInstructionActive]);
+  }, [currentUser, items, activeSessions, itemsLoading, tzdActive, isInstructionActive, hasGambledThisSession]);
 
   // 4. Instruction / Period
   useEffect(() => {
@@ -277,21 +311,17 @@ export default function Dashboard() {
                             // UPDATED: Wenn Anweisung älter als 30 Min ist (war 15) und nicht akzeptiert -> FLUCHT
                             if (ageInMinutes > 30) {
                                 console.log("Flucht erkannt! Trigger 150% TZD.");
-                                // Das TZD wird hier explizit mit den Items der ignorierten Anweisung gestartet.
-                                // Unabhängig von Tag oder Uhrzeit.
                                 await triggerEvasionPenalty(currentUser.uid, instr.items);
                                 
-                                // Instruction markieren, damit sie nicht nochmal triggert
                                 await updateDoc(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), { 
                                     evasionPenaltyTriggered: true,
-                                    isAccepted: true, // "Zwangs-Akzeptanz" durch Strafe
+                                    isAccepted: true, 
                                     acceptedAt: new Date().toISOString()
                                 });
                                 
-                                setTzdActive(true); // Overlay sofort an
-                                setInstructionOpen(false); // Dialog weg
-                                
-                                instr = null; // Instruction nicht anzeigen, TZD übernimmt
+                                setTzdActive(true); 
+                                setInstructionOpen(false); 
+                                instr = null;
                             }
                         }
                         
@@ -334,6 +364,26 @@ export default function Dashboard() {
     setIsFreeDay(isWeekend || isHoliday);
     setFreeDayReason(isHoliday ? 'Holiday' : (isWeekend ? 'Weekend' : ''));
   }, [now]);
+
+  // HANDLERS (Gamble)
+  const handleGambleAccept = async () => {
+      const result = await rollTheDice(currentUser.uid, gambleStake);
+      setOfferOpen(false);
+      
+      if (result.win) {
+          showToast("GEWINN! 24h Immunität aktiviert.", "success");
+          setImmunityActive(true);
+      } else {
+          showToast("VERLOREN. Zeitloses Diktat aktiviert.", "error");
+          setTzdActive(true);
+          setTzdStartTime(new Date());
+      }
+  };
+
+  const handleGambleDecline = () => {
+      setOfferOpen(false);
+      showToast("Sicher ist sicher...", "info");
+  };
 
   // HANDLERS
   const handleStartRequest = async (itemsToStart) => { 
@@ -496,12 +546,27 @@ export default function Dashboard() {
           onConfirm={handleConfirmForcedRelease}
           onRefuse={handleRefuseForcedRelease}
       />
+      
+      {/* GAMBLE DIALOG */}
+      <OfferDialog 
+          open={offerOpen} 
+          stakeItems={gambleStake} 
+          onAccept={handleGambleAccept} 
+          onDecline={handleGambleDecline} 
+      />
 
       <Container maxWidth="md" sx={{ pt: 2, pb: 4 }}>
         <motion.div variants={MOTION.page} initial="initial" animate="animate" exit="exit">
             
             <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Typography variant="h4" sx={DESIGN_TOKENS.textGradient}>Dashboard</Typography>
+                {immunityActive && (
+                    <Chip 
+                        icon={<ShieldIcon sx={{color:'#000 !important'}}/>} 
+                        label="IMMUN" 
+                        sx={{ bgcolor: PALETTE.accents.green, color: '#000', fontWeight: 'bold' }} 
+                    />
+                )}
             </Box>
 
             <ProgressBar 
