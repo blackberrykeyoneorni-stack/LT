@@ -1,26 +1,40 @@
 import { db } from '../firebase';
-import { collection, doc, writeBatch, serverTimestamp, getDoc } from 'firebase/firestore';
+import { 
+    collection, doc, writeBatch, serverTimestamp, getDoc, addDoc, updateDoc 
+} from 'firebase/firestore';
+import { updateWearStats } from './ItemService';
+import { addCredits } from './TimeBankService';
 
 /**
  * Zentraler Service zum Starten von Sessions.
- * Verhindert Redundanz zwischen Dashboard, ItemDetail und NFC-Dialog.
+ * Aggregiert mehrere Items in eine Session für korrekte Time-Bank-Abrechnung.
  */
 export const startSession = async (userId, params) => {
     const { 
-        items,      // Array von Items (bei Multi-Start / Instruction)
-        itemId,     // Einzelne Item-ID (bei Single-Start)
+        items,      
+        itemId,     
         type = 'voluntary', 
         periodId, 
-        acceptedAt, // Timestamp/String wann die Instruction akzeptiert wurde (für Lag)
+        acceptedAt, 
         note = '', 
-        verifiedViaNfc = false 
+        verifiedViaNfc = false,
+        instructionDurationMinutes = null // Zielzeit für Time Bank Kalkulation
     } = params;
 
     if (!userId) throw new Error("User ID fehlt.");
 
-    const batch = writeBatch(db);
-    
-    // 1. Berechne Compliance Lag
+    // 1. Items vorbereiten
+    let itemsToProcess = [];
+    if (items && Array.isArray(items) && items.length > 0) {
+        itemsToProcess = items;
+    } else if (itemId) {
+        itemsToProcess = [{ id: itemId }];
+    }
+
+    if (itemsToProcess.length === 0) return;
+    const allItemIds = itemsToProcess.map(i => i.id);
+
+    // 2. Compliance Lag berechnen
     let lagMinutes = 0;
     if (type === 'instruction' && acceptedAt) {
         const acceptDate = new Date(acceptedAt);
@@ -30,52 +44,44 @@ export const startSession = async (userId, params) => {
         }
     }
 
-    // 2. Items vorbereiten
-    let itemsToProcess = [];
-    if (items && Array.isArray(items) && items.length > 0) {
-        itemsToProcess = items;
-    } else if (itemId) {
-        itemsToProcess = [{ id: itemId }];
+    // 3. Session Dokument erstellen (Aggregiert)
+    const sessionData = {
+        userId,
+        itemId: allItemIds[0], // Haupt-Item für Referenz
+        itemIds: allItemIds,   // Alle Items
+        type,
+        startTime: serverTimestamp(),
+        endTime: null,
+        isActive: true,
+        note,
+        targetDurationMinutes: instructionDurationMinutes || null, // Wichtig für Time Bank
+        complianceLagMinutes: lagMinutes
+    };
+
+    if (type === 'instruction') {
+        sessionData.periodId = periodId;
     }
 
-    if (itemsToProcess.length === 0) return;
+    if (verifiedViaNfc) {
+        sessionData.verifiedViaNfc = true;
+    }
 
-    const allItemIds = itemsToProcess.map(i => i.id);
+    // Wir nutzen addDoc für die Session, aber batch für die Item-Updates
+    const sessionRef = await addDoc(collection(db, `users/${userId}/sessions`), sessionData);
+    const batch = writeBatch(db);
 
-    // 3. Batch Operationen erstellen
-    itemsToProcess.forEach(item => {
-        const sessionRef = doc(collection(db, `users/${userId}/sessions`));
-        
-        const sessionData = {
-            itemId: item.id,
-            type,
-            startTime: serverTimestamp(),
-            endTime: null,
-            note
-        };
-
-        if (type === 'instruction') {
-            sessionData.itemIds = allItemIds;
-            sessionData.period = periodId;
-            sessionData.complianceLagMinutes = lagMinutes;
-        }
-
-        if (verifiedViaNfc) {
-            sessionData.verifiedViaNfc = true;
-        }
-
-        batch.set(sessionRef, sessionData);
-
-        // Update Item Status auf 'wearing'
-        batch.update(doc(db, `users/${userId}/items`, item.id), { status: 'wearing' });
+    // Update Item Status auf 'wearing' für ALLE Items
+    allItemIds.forEach(id => {
+        batch.update(doc(db, `users/${userId}/items`, id), { status: 'wearing' });
     });
 
     await batch.commit();
+
+    return { id: sessionRef.id, ...sessionData };
 };
 
 /**
- * Beendet eine Session und setzt den Item-Status zurück.
- * FIX: Aktualisiert jetzt auch 'lastWorn', damit der Recovery-Timer startet.
+ * Beendet eine Session, aktualisiert Stats und berechnet Time Bank Credits.
  */
 export const stopSession = async (userId, sessionId, feedback = {}) => {
     if (!userId || !sessionId) throw new Error("Parameter fehlen.");
@@ -90,22 +96,20 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
 
     const sessionData = sessionSnap.data();
     const batch = writeBatch(db);
+    const endTime = new Date();
+    // Falls startTime noch ein ServerTimestamp Placeholder ist, nutzen wir lokale Zeit als Fallback (selten)
+    const startTime = sessionData.startTime?.toDate ? sessionData.startTime.toDate() : new Date(); 
+    const durationMinutes = Math.round((endTime - startTime) / 60000);
 
-    // --- NACHT-COMPLIANCE CHECK ---
+    // --- NACHT-COMPLIANCE CHECK (Preserved Logic) ---
     let nightSuccess = null;
     const isInstruction = sessionData.type === 'instruction';
-    const isNight = sessionData.period && sessionData.period.toLowerCase().includes('night');
+    const isNight = sessionData.periodId && sessionData.periodId.toLowerCase().includes('night'); // periodId angepasst
 
     if (isInstruction && !isNight) {
         nightSuccess = false; 
-        
-        // FIX: Wir nutzen hier 'new Date()' (Endzeitpunkt), statt 'startTime'.
-        // Damit wird die Compliance dem Tag zugeordnet, an dem die Session ENDET.
-        // Das löst das Problem bei Sessions über Mitternacht.
-        const sessionDate = new Date();
-
-        const offset = sessionDate.getTimezoneOffset() * 60000;
-        const dateKey = new Date(sessionDate.getTime() - offset).toISOString().split('T')[0];
+        const offset = endTime.getTimezoneOffset() * 60000;
+        const dateKey = new Date(endTime.getTime() - offset).toISOString().split('T')[0];
 
         try {
             const complianceRef = doc(db, `users/${userId}/status/nightCompliance`);
@@ -119,9 +123,11 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
         } catch (e) { console.error(e); }
     }
 
-    // 1. Session beenden
+    // 1. Session schließen
     const updateData = {
         endTime: serverTimestamp(),
+        isActive: false,
+        durationMinutes,
         feelings: feedback.feelings || [],
         finalNote: feedback.note || ''
     };
@@ -130,22 +136,65 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
     }
     batch.update(sessionRef, updateData);
 
-    // 2. Item Status zurücksetzen & LAST WORN AKTUALISIEREN
-    // Das fehlte vorher, weshalb der Timer nicht startete.
-    const updatePayload = { 
-        status: 'active',
-        lastWorn: serverTimestamp() // FIX: Wichtig für Elasthan Recovery
-    };
-
-    if (sessionData.itemIds && Array.isArray(sessionData.itemIds) && sessionData.itemIds.length > 0) {
-        sessionData.itemIds.forEach(id => {
-            const itemRef = doc(db, `users/${userId}/items`, id);
-            batch.update(itemRef, updatePayload);
+    // 2. Item Status zurücksetzen & Stats aktualisieren
+    const itemIds = sessionData.itemIds || (sessionData.itemId ? [sessionData.itemId] : []);
+    
+    // Batch Update für Status
+    itemIds.forEach(id => {
+        const itemRef = doc(db, `users/${userId}/items`, id);
+        batch.update(itemRef, { 
+            status: 'active',
+            lastWorn: serverTimestamp() 
         });
-    } else if (sessionData.itemId) {
-        const itemRef = doc(db, `users/${userId}/items`, sessionData.itemId);
-        batch.update(itemRef, updatePayload);
+    });
+
+    await batch.commit(); // Batch erst committen
+
+    // 3. ASYNC STATS UPDATES (Nicht im Batch)
+    // wearCount und totalMinutes hochzählen
+    for (const id of itemIds) {
+        await updateWearStats(userId, id, durationMinutes);
     }
 
-    await batch.commit();
+    // 4. TIME BANK LOGIK (EARNING)
+    // Credits nur für Voluntary oder Instruction-Overtime
+    if (sessionData.type !== 'punishment' && !sessionData.tzdExecuted) {
+        let eligibleMinutes = 0;
+
+        if (sessionData.type === 'voluntary') {
+            // Voluntary: Volle Zeit zählt (Kurs wird im Service berechnet)
+            eligibleMinutes = durationMinutes;
+        } else if (sessionData.type === 'instruction') {
+            // Instruction: Nur Zeit ÜBER dem Ziel zählt
+            const target = sessionData.targetDurationMinutes || 0;
+            if (durationMinutes > target && target > 0) {
+                eligibleMinutes = durationMinutes - target;
+            }
+        }
+
+        if (eligibleMinutes > 0) {
+            // Typ bestimmen (Nylon vs Lingerie) anhand des ersten Items
+            let creditType = 'lingerie';
+            try {
+                // Wir holen das Item um die Kategorie zu prüfen
+                const firstItemId = itemIds[0];
+                const itemSnap = await getDoc(doc(db, `users/${userId}/items`, firstItemId));
+                if (itemSnap.exists()) {
+                    const item = itemSnap.data();
+                    const sub = (item.subCategory || '').toLowerCase();
+                    const cat = (item.mainCategory || '').toLowerCase();
+                    
+                    if (sub.includes('strumpfhose') || sub.includes('tights') || 
+                        sub.includes('halterlose') || sub.includes('stockings') || 
+                        cat.includes('nylons')) {
+                        creditType = 'nylon';
+                    }
+                }
+                // Credits gutschreiben
+                await addCredits(userId, eligibleMinutes, creditType);
+            } catch(e) { console.error("Error calculating credits", e); }
+        }
+    }
+
+    return { ...sessionData, endTime, durationMinutes };
 };
