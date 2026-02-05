@@ -16,7 +16,7 @@ import { isAuditDue, initializeAudit, confirmAuditItem } from '../services/Audit
 import { getActivePunishment, clearPunishment, findPunishmentItem, registerOathRefusal, registerPunishment } from '../services/PunishmentService';
 import { loadMonthlyBudget } from '../services/BudgetService';
 import { generateAndSaveInstruction, getLastInstruction } from '../services/InstructionService';
-import { checkForTZDTrigger, getTZDStatus } from '../services/TZDService';
+import { checkForTZDTrigger, getTZDStatus, triggerEvasionPenalty } from '../services/TZDService';
 import { registerRelease as apiRegisterRelease } from '../services/ReleaseService'; 
 import { startSession as startSessionService, stopSession as stopSessionService } from '../services/SessionService';
 
@@ -119,13 +119,9 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const { startBindingScan, isScanning: isNfcScanning } = useNFCGlobal();
   
-  // Hook liefert jetzt Live-Daten via onSnapshot
   const { activeSessions, progress, loading: sessionsLoading, dailyTargetHours, registerRelease: hookRegisterRelease } = useSessionProgress(currentUser, items);
   
-  // 1. ZUERST KPI BERECHNEN
   const kpis = useKPIs(items, activeSessions); 
-
-  // 2. DANN FEM-INDEX BERECHNEN
   const { femIndex, femIndexLoading, indexDetails } = useFemIndex(currentUser, items, activeSessions, kpis.coreMetrics.nocturnal); 
 
   const [now, setNow] = useState(Date.now());
@@ -195,7 +191,6 @@ export default function Dashboard() {
             if(pSnap.exists()) setMaxInstructionItems(pSnap.data().maxInstructionItems || 1);
 
             const statusData = await getActivePunishment(currentUser.uid);
-            // FIX: Fallback, falls getActivePunishment null zurückgibt
             setPunishmentStatus(statusData || { active: false });
             
             setAuditDue(await isAuditDue(currentUser.uid));
@@ -219,7 +214,7 @@ export default function Dashboard() {
       if (items.length > 0) setPunishmentItem(findPunishmentItem(items));
   }, [items]);
 
-  // 3. TZD Check
+  // 3. TZD Check (UND CHECK AUF ANWEISUNGS-FLUCHT)
   useEffect(() => {
     let interval;
     const checkTZD = async () => {
@@ -238,6 +233,7 @@ export default function Dashboard() {
                     setTzdActive(false); 
                     setTzdStartTime(null);
                 }
+                // REGULÄRER TRIGGER (während einer Session)
                 if (isInstructionActive) { 
                     const triggered = await checkForTZDTrigger(currentUser.uid, activeSessions, items); 
                     if (triggered) {
@@ -262,34 +258,53 @@ export default function Dashboard() {
 
   // 4. Instruction / Period
   useEffect(() => {
-    const newPeriod = calculatePeriodId();
-    if (newPeriod !== currentPeriod) setCurrentPeriod(newPeriod);
-    const d = new Date(now);
-    const day = d.getDay();
-    const isWeekend = (day === 0 || day === 6);
-    const isHoliday = checkIsHoliday(d);
-    setIsFreeDay(isWeekend || isHoliday);
-    setFreeDayReason(isHoliday ? 'Holiday' : (isWeekend ? 'Weekend' : ''));
-  }, [now]);
-
-  useEffect(() => {
     if (items.length > 0 && !sessionsLoading && currentPeriod) {
         const isIdle = instructionStatus === 'idle';
         const wrongPeriod = currentInstruction && currentInstruction.periodId !== currentPeriod;
+        
         if ((isIdle || wrongPeriod) && instructionStatus !== 'loading') { 
             const check = async () => {
                 setInstructionStatus('loading');
                 try {
-                    const instr = await getLastInstruction(currentUser.uid);
+                    let instr = await getLastInstruction(currentUser.uid);
+                    
+                    // --- NEU: FLUCHT-ERKENNUNG (Szenario 2+1) ---
                     if (instr && instr.periodId === currentPeriod) {
-                        setCurrentInstruction(instr);
+                        if (!instr.isAccepted && !instr.evasionPenaltyTriggered) {
+                            const genDate = instr.generatedAt?.toDate ? instr.generatedAt.toDate() : new Date(instr.generatedAt);
+                            const ageInMinutes = (new Date() - genDate) / 60000;
+                            
+                            // UPDATED: Wenn Anweisung älter als 30 Min ist (war 15) und nicht akzeptiert -> FLUCHT
+                            if (ageInMinutes > 30) {
+                                console.log("Flucht erkannt! Trigger 150% TZD.");
+                                // Das TZD wird hier explizit mit den Items der ignorierten Anweisung gestartet.
+                                // Unabhängig von Tag oder Uhrzeit.
+                                await triggerEvasionPenalty(currentUser.uid, instr.items);
+                                
+                                // Instruction markieren, damit sie nicht nochmal triggert
+                                await updateDoc(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), { 
+                                    evasionPenaltyTriggered: true,
+                                    isAccepted: true, // "Zwangs-Akzeptanz" durch Strafe
+                                    acceptedAt: new Date().toISOString()
+                                });
+                                
+                                setTzdActive(true); // Overlay sofort an
+                                setInstructionOpen(false); // Dialog weg
+                                
+                                instr = null; // Instruction nicht anzeigen, TZD übernimmt
+                            }
+                        }
+                        
+                        if (instr) setCurrentInstruction(instr);
+
                     } else if (!isFreeDay || currentPeriod.includes('night')) {
                         const newInstr = await generateAndSaveInstruction(currentUser.uid, items, activeSessions, currentPeriod);
                         setCurrentInstruction(newInstr);
                     } else {
                         setCurrentInstruction(null);
                     }
-                } catch(e){} finally { setInstructionStatus('ready'); }
+                } catch(e){ console.error("Instruction Load Error", e); } 
+                finally { setInstructionStatus('ready'); }
             };
             check();
         }
@@ -308,6 +323,17 @@ export default function Dashboard() {
           }
       }
   }, [isInstructionActive, currentInstruction, forcedReleaseOpen]);
+
+  useEffect(() => {
+    const newPeriod = calculatePeriodId();
+    if (newPeriod !== currentPeriod) setCurrentPeriod(newPeriod);
+    const d = new Date(now);
+    const day = d.getDay();
+    const isWeekend = (day === 0 || day === 6);
+    const isHoliday = checkIsHoliday(d);
+    setIsFreeDay(isWeekend || isHoliday);
+    setFreeDayReason(isHoliday ? 'Holiday' : (isWeekend ? 'Weekend' : ''));
+  }, [now]);
 
   // HANDLERS
   const handleStartRequest = async (itemsToStart) => { 
@@ -346,7 +372,6 @@ export default function Dashboard() {
   const handleDeclineOath = async () => { 
       await registerOathRefusal(currentUser.uid); 
       const newPunishment = await getActivePunishment(currentUser.uid);
-      // FIX: Fallback, falls getActivePunishment null ist
       setPunishmentStatus(newPunishment || { active: false }); 
       setInstructionOpen(false); 
       setIsHoldingOath(false); 
@@ -357,7 +382,6 @@ export default function Dashboard() {
           await addDoc(collection(db,`users/${currentUser.uid}/sessions`),{ itemId:punishmentItem.id, itemIds:[punishmentItem.id], type:'punishment', startTime:serverTimestamp(), endTime:null }); 
           await updateDoc(doc(db,`users/${currentUser.uid}/status/punishment`),{active:true,deferred:false}); 
           const newStatus = await getActivePunishment(currentUser.uid);
-          // FIX: Fallback
           setPunishmentStatus(newStatus || { active: false }); 
           setPunishmentScanOpen(false); 
       } 
@@ -412,7 +436,6 @@ export default function Dashboard() {
       try {
           await registerPunishment(currentUser.uid, "Forced Release Protocol verweigert", 60);
           const newStatus = await getActivePunishment(currentUser.uid);
-          // FIX: Fallback
           setPunishmentStatus(newStatus || { active: false });
           
           await updateDoc(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), { "forcedRelease.executed": true });
@@ -430,16 +453,9 @@ export default function Dashboard() {
   if (isCheckingProtocol) {
       return (
           <Box sx={{ 
-              height: '100vh', 
-              width: '100vw', 
-              bgcolor: '#000', 
-              display: 'flex', 
-              flexDirection: 'column',
-              alignItems: 'center', 
-              justifyContent: 'center',
-              zIndex: 9999,
-              position: 'fixed',
-              top: 0, left: 0
+              height: '100vh', width: '100vw', bgcolor: '#000', 
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+              zIndex: 9999, position: 'fixed', top: 0, left: 0
           }}>
               <LockIcon sx={{ fontSize: 60, color: PALETTE.accents.red, mb: 2 }} />
               <Typography variant="overline" sx={{ color: 'text.secondary', letterSpacing: 4, animation: 'pulse 1.5s infinite' }}>
@@ -488,7 +504,6 @@ export default function Dashboard() {
                 <Typography variant="h4" sx={DESIGN_TOKENS.textGradient}>Dashboard</Typography>
             </Box>
 
-            {/* 1. PROGRESS BAR */}
             <ProgressBar 
                 currentMinutes={progress.currentContinuousMinutes} 
                 targetHours={dailyTargetHours} 
@@ -496,10 +511,8 @@ export default function Dashboard() {
                 progressData={progress}
             />
 
-            {/* 2. FEM INDEX BAR */}
             <FemIndexBar femIndex={femIndex || 0} loading={femIndexLoading} />
 
-            {/* 3. ACTION BUTTONS */}
             <ActionButtons 
                 punishmentStatus={punishmentStatus} 
                 punishmentRunning={isPunishmentRunning}
@@ -519,7 +532,6 @@ export default function Dashboard() {
                 onStartAudit={handleStartAudit}
             />
 
-            {/* 4. ACTIVE SESSIONS */}
             <ActiveSessionsList 
                 activeSessions={activeSessions} 
                 items={items}
@@ -533,10 +545,8 @@ export default function Dashboard() {
                 <Typography variant="caption" color="text.secondary">METRIKEN & VERWALTUNG</Typography>
             </Divider>
 
-            {/* 5. INFO TILES */}
             <InfoTiles kpis={kpis} />
 
-            {/* 6. BUTTON FÜR WÄSCHE */}
             <Button
               variant="contained" fullWidth size="large" onClick={() => setLaundryOpen(true)}
               sx={{ 
@@ -548,7 +558,6 @@ export default function Dashboard() {
               <Chip label={`${laundryCount} Stk.`} size="small" sx={{ bgcolor: 'rgba(255,255,255,0.1)', color: 'text.primary', fontWeight: 'bold', borderRadius: '4px' }} />
             </Button>
 
-            {/* 7. BUTTON FÜR BUDGET */}
             <Button
               variant="contained" fullWidth size="large" onClick={() => navigate('/budget')}
               sx={{ 
