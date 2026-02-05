@@ -23,40 +23,45 @@ export const checkGambleTrigger = async (userId, isTzdActive, isInstructionActiv
 
 /**
  * Ermittelt den Einsatz: 1x Strumpfhose + 1x Höschen.
- * Fallback auf zufällige Items, wenn Kategorien fehlen.
+ * STRIKTE LOGIK: Nur Items, die exakt die geforderten Subkategorien enthalten.
+ * Keine Fallbacks auf MainCategory 'Nylons'.
  */
 export const determineGambleStake = (items) => {
     if (!items || items.length === 0) return [];
 
     const activeItems = items.filter(i => i.status === 'active');
     
-    // Suche Strumpfhose
-    let tights = activeItems.filter(i => {
+    // 1. Suche Strumpfhose (Strikt via Subcategory)
+    // Entfernt: Fallback auf i.mainCategory === 'Nylons'
+    const tights = activeItems.filter(i => {
         const sub = (i.subCategory || '').toLowerCase();
-        return sub.includes('strumpfhose') || sub.includes('tights') || (i.mainCategory === 'Nylons');
+        return sub.includes('strumpfhose');
     });
     
-    // Suche Höschen
-    let panties = activeItems.filter(i => {
+    // 2. Suche Höschen (Strikt via Subcategory)
+    const panties = activeItems.filter(i => {
         const sub = (i.subCategory || '').toLowerCase();
-        return sub.includes('slip') || sub.includes('höschen') || sub.includes('panties') || sub.includes('thong') || sub.includes('string');
+        return sub.includes('höschen');
     });
 
-    // Fallbacks falls leer
-    if (tights.length === 0) tights = activeItems;
-    if (panties.length === 0) panties = activeItems;
+    // WICHTIG: Wenn keine passende Strumpfhose da ist, gibt es keinen Deal.
+    // Wir erzwingen keine falschen Items.
+    if (tights.length === 0) return [];
 
+    // Auswahl zufälliger Items aus den gefilterten Listen
     const selectedTights = tights[Math.floor(Math.random() * tights.length)];
-    const selectedPanties = panties[Math.floor(Math.random() * panties.length)];
+    
+    // Höschen ist optionaler, falls keines mit dem Tag "Höschen" gefunden wurde, 
+    // aber wenn eines da ist, wird es genommen.
+    const selectedPanties = panties.length > 0 
+        ? panties[Math.floor(Math.random() * panties.length)] 
+        : null;
 
-    // Sicherstellen, dass wir 2 verschiedene Items haben (falls möglich)
     const stake = [selectedTights];
-    if (selectedPanties && selectedPanties.id !== selectedTights?.id) {
+    
+    // Füge Höschen hinzu, wenn vorhanden und nicht identisch mit Strumpfhose (Edge Case)
+    if (selectedPanties && selectedPanties.id !== selectedTights.id) {
         stake.push(selectedPanties);
-    } else if (activeItems.length > 1) {
-        // Zwanghaft ein zweites Item suchen
-        const others = activeItems.filter(i => i.id !== selectedTights?.id);
-        if(others.length > 0) stake.push(others[Math.floor(Math.random() * others.length)]);
     }
 
     return stake;
