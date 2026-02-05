@@ -16,11 +16,9 @@ import { isAuditDue, initializeAudit, confirmAuditItem } from '../services/Audit
 import { getActivePunishment, clearPunishment, findPunishmentItem, registerOathRefusal, registerPunishment } from '../services/PunishmentService';
 import { loadMonthlyBudget } from '../services/BudgetService';
 import { generateAndSaveInstruction, getLastInstruction } from '../services/InstructionService';
-// NEU: Importiere triggerEvasionPenalty
 import { checkForTZDTrigger, getTZDStatus, triggerEvasionPenalty } from '../services/TZDService';
 import { registerRelease as apiRegisterRelease } from '../services/ReleaseService'; 
 import { startSession as startSessionService, stopSession as stopSessionService } from '../services/SessionService';
-// NEU: Importiere Gamble Services
 import { checkGambleTrigger, determineGambleStake, rollTheDice, isImmunityActive } from '../services/OfferService';
 
 // Hooks
@@ -31,7 +29,7 @@ import { useKPIs } from '../hooks/useKPIs';
 // Components
 import TzdOverlay from '../components/dashboard/TzdOverlay'; 
 import ForcedReleaseOverlay from '../components/dashboard/ForcedReleaseOverlay';
-import OfferDialog from '../components/dialogs/OfferDialog'; // NEU
+import OfferDialog from '../components/dialogs/OfferDialog'; 
 import ProgressBar from '../components/dashboard/ProgressBar';
 import FemIndexBar from '../components/dashboard/FemIndexBar';
 import ActionButtons from '../components/dashboard/ActionButtons';
@@ -57,7 +55,7 @@ import TimerIcon from '@mui/icons-material/Timer';
 import LinkOffIcon from '@mui/icons-material/LinkOff';
 import AnalyticsIcon from '@mui/icons-material/Analytics';
 import LockIcon from '@mui/icons-material/Lock'; 
-import ShieldIcon from '@mui/icons-material/Shield'; // NEU: Für Immunität
+import ShieldIcon from '@mui/icons-material/Shield'; 
 
 const REFLECTION_TAGS = [
     "Sicher / Geborgen", "Erregt", "Gedemütigt", "Exponiert / Öffentlich", 
@@ -188,6 +186,9 @@ export default function Dashboard() {
   const isPunishmentRunning = activeSessions.some(s => s.type === 'punishment');
   const isDailyGoalMet = progress.isDailyGoalMet;
   
+  // SYSTEM OVERRIDE DETECTION
+  const hasVoluntarySession = activeSessions.some(s => s.type === 'voluntary' && !s.endTime);
+  
   const budgetBalance = monthlyBudget - currentSpent;
 
   const showToast = (message, severity = 'success') => setToast({ open: true, message, severity });
@@ -250,7 +251,7 @@ export default function Dashboard() {
                     setTzdStartTime(null);
                 }
                 
-                // --- NEU: GAMBLE CHECK ---
+                // --- GAMBLE CHECK ---
                 // Nur wenn kein TZD, noch nicht gespielt und Items da
                 if (!hasGambledThisSession && items.length > 0) {
                     // isInstructionActive wird hier geprüft
@@ -308,7 +309,7 @@ export default function Dashboard() {
                             const genDate = instr.generatedAt?.toDate ? instr.generatedAt.toDate() : new Date(instr.generatedAt);
                             const ageInMinutes = (new Date() - genDate) / 60000;
                             
-                            // UPDATED: Wenn Anweisung älter als 30 Min ist (war 15) und nicht akzeptiert -> FLUCHT
+                            // Wenn Anweisung älter als 30 Min ist und nicht akzeptiert -> FLUCHT
                             if (ageInMinutes > 30) {
                                 console.log("Flucht erkannt! Trigger 150% TZD.");
                                 await triggerEvasionPenalty(currentUser.uid, instr.items);
@@ -374,6 +375,27 @@ export default function Dashboard() {
           showToast("GEWINN! 24h Immunität aktiviert.", "success");
           setImmunityActive(true);
       } else {
+          // --- SYSTEM OVERRIDE PROTOCOL ---
+          // Falls Verlust UND aktive Voluntary Sessions existieren:
+          // Zwangs-Beendigung ohne User-Input.
+          const voluntarySessions = activeSessions.filter(s => s.type === 'voluntary' && !s.endTime);
+          
+          if (voluntarySessions.length > 0) {
+              try {
+                  // Parallel alle stoppen
+                  const stopPromises = voluntarySessions.map(s => 
+                      stopSessionService(currentUser.uid, s.id, { 
+                          feelings: ['System Override'], // System-Flag
+                          note: 'Zwangsabbruch durch Gamble-Verlust (System Override).' 
+                      })
+                  );
+                  await Promise.all(stopPromises);
+                  showToast(`${voluntarySessions.length} Session(s) durch Protokoll überschrieben.`, "warning");
+              } catch (e) {
+                  console.error("Error auto-stopping sessions during override:", e);
+              }
+          }
+
           showToast("VERLOREN. Zeitloses Diktat aktiviert.", "error");
           setTzdActive(true);
           setTzdStartTime(new Date());
@@ -552,7 +574,8 @@ export default function Dashboard() {
           open={offerOpen} 
           stakeItems={gambleStake} 
           onAccept={handleGambleAccept} 
-          onDecline={handleGambleDecline} 
+          onDecline={handleGambleDecline}
+          hasActiveSession={hasVoluntarySession} // NEU: Prop für den Warnhinweis
       />
 
       <Container maxWidth="md" sx={{ pt: 2, pb: 4 }}>

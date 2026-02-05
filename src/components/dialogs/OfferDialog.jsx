@@ -8,8 +8,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import CasinoIcon from '@mui/icons-material/Casino';
 import ShieldIcon from '@mui/icons-material/Shield';
 import LockIcon from '@mui/icons-material/Lock';
+import ReportProblemIcon from '@mui/icons-material/ReportProblem'; // Importiert für den Warnhinweis
 
-export default function OfferDialog({ open, stakeItems, onAccept, onDecline }) {
+export default function OfferDialog({ open, stakeItems, onAccept, onDecline, hasActiveSession }) {
     const [isFlipping, setIsFlipping] = useState(false);
 
     const handlePlay = () => {
@@ -67,7 +68,7 @@ export default function OfferDialog({ open, stakeItems, onAccept, onDecline }) {
                                 Dein Einsatz
                             </Typography>
                             
-                            {/* ITEM DISPLAY UPDATE: Name & ID sichtbar */}
+                            {/* ITEM DISPLAY */}
                             <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, mb: 2 }}>
                                 {stakeItems.map(item => (
                                     <Box key={item.id} sx={{ position: 'relative', width: 100, textAlign: 'center' }}>
@@ -98,6 +99,26 @@ export default function OfferDialog({ open, stakeItems, onAccept, onDecline }) {
                                     </Box>
                                 ))}
                             </Box>
+
+                            {/* SYSTEM OVERRIDE WARNUNG */}
+                            {hasActiveSession && (
+                                <Box sx={{ 
+                                    mt: 2, 
+                                    p: 1.5, 
+                                    bgcolor: 'rgba(255, 0, 0, 0.1)', 
+                                    border: `1px solid ${PALETTE.accents.red}`,
+                                    borderRadius: '8px' 
+                                }}>
+                                    <Typography variant="caption" sx={{ color: PALETTE.accents.red, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, fontWeight: 'bold' }}>
+                                        <ReportProblemIcon fontSize="small" />
+                                        ACHTUNG: SYSTEM OVERRIDE
+                                    </Typography>
+                                    <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.5 }}>
+                                        Deine laufende Session wird bei Verlust sofort und ohne Rückfrage terminiert.
+                                    </Typography>
+                                </Box>
+                            )}
+
                         </motion.div>
                     ) : (
                         <Box sx={{ py: 6 }}>
