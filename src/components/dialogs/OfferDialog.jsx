@@ -17,7 +17,6 @@ export default function OfferDialog({ open, stakeItems, onAccept, onDecline }) {
         // Künstliche Verzögerung für Spannung
         setTimeout(() => {
             onAccept(); // Trigger Logik im Parent
-            // Dialog schließt sich erst durch Parent State Change
         }, 2000);
     };
 
@@ -49,6 +48,7 @@ export default function OfferDialog({ open, stakeItems, onAccept, onDecline }) {
                                 ALLES ODER NICHTS
                             </Typography>
                             
+                            {/* RISIKO VS GEWINN */}
                             <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, mb: 4 }}>
                                 <Box sx={{ textAlign: 'center', width: '45%' }}>
                                     <ShieldIcon sx={{ fontSize: 40, color: PALETTE.accents.green, mb: 1 }} />
@@ -66,11 +66,35 @@ export default function OfferDialog({ open, stakeItems, onAccept, onDecline }) {
                             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2, textTransform: 'uppercase', letterSpacing: 1 }}>
                                 Dein Einsatz
                             </Typography>
+                            
+                            {/* ITEM DISPLAY UPDATE: Name & ID sichtbar */}
                             <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, mb: 2 }}>
                                 {stakeItems.map(item => (
-                                    <Box key={item.id} sx={{ position: 'relative' }}>
-                                        <Avatar src={item.imageUrl} variant="rounded" sx={{ width: 60, height: 60, border: `1px solid ${PALETTE.accents.gold}` }} />
-                                        <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.secondary' }}>{item.subCategory || 'Item'}</Typography>
+                                    <Box key={item.id} sx={{ position: 'relative', width: 100, textAlign: 'center' }}>
+                                        <Avatar 
+                                            src={item.imageUrl} 
+                                            variant="rounded" 
+                                            sx={{ 
+                                                width: 70, 
+                                                height: 70, 
+                                                border: `1px solid ${PALETTE.accents.gold}`,
+                                                mx: 'auto',
+                                                mb: 1
+                                            }} 
+                                        />
+                                        <Typography 
+                                            variant="body2" 
+                                            sx={{ fontWeight: 'bold', color: '#fff', lineHeight: 1.2, fontSize: '0.75rem', mb: 0.5 }}
+                                            noWrap
+                                        >
+                                            {item.name || item.brand || 'Unbekannt'}
+                                        </Typography>
+                                        <Typography variant="caption" sx={{ fontSize: '0.65rem', color: PALETTE.accents.gold, display: 'block' }}>
+                                            {item.customId || 'ID ???'}
+                                        </Typography>
+                                        <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.secondary', display: 'block' }}>
+                                            {item.subCategory}
+                                        </Typography>
                                     </Box>
                                 ))}
                             </Box>
