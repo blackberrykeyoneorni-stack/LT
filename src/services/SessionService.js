@@ -97,14 +97,14 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
     const sessionData = sessionSnap.data();
     const batch = writeBatch(db);
     const endTime = new Date();
-    // Falls startTime noch ein ServerTimestamp Placeholder ist, nutzen wir lokale Zeit als Fallback (selten)
+    // Falls startTime noch ein ServerTimestamp Placeholder ist, nutzen wir lokale Zeit als Fallback
     const startTime = sessionData.startTime?.toDate ? sessionData.startTime.toDate() : new Date(); 
     const durationMinutes = Math.round((endTime - startTime) / 60000);
 
-    // --- NACHT-COMPLIANCE CHECK (Preserved Logic) ---
+    // --- NACHT-COMPLIANCE CHECK ---
     let nightSuccess = null;
     const isInstruction = sessionData.type === 'instruction';
-    const isNight = sessionData.periodId && sessionData.periodId.toLowerCase().includes('night'); // periodId angepasst
+    const isNight = sessionData.periodId && sessionData.periodId.toLowerCase().includes('night');
 
     if (isInstruction && !isNight) {
         nightSuccess = false; 
@@ -151,7 +151,7 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
     await batch.commit(); // Batch erst committen
 
     // 3. ASYNC STATS UPDATES (Nicht im Batch)
-    // wearCount und totalMinutes hochzählen
+    // wearCount und totalMinutes hochzählen (ruft ItemService auf)
     for (const id of itemIds) {
         await updateWearStats(userId, id, durationMinutes);
     }
