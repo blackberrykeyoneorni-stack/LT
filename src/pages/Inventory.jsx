@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { doc, getDoc, addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -26,7 +26,6 @@ import {
 import AddIcon from '@mui/icons-material/Add';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import CloseIcon from '@mui/icons-material/Close';
-import SortIcon from '@mui/icons-material/Sort';
 import SnoozeIcon from '@mui/icons-material/Snooze'; 
 import NfcIcon from '@mui/icons-material/Nfc';
 import Inventory2Icon from '@mui/icons-material/Inventory2';
@@ -39,6 +38,20 @@ import DeleteIcon from '@mui/icons-material/Delete';
 
 // DESIGN SYSTEM
 import { DESIGN_TOKENS, PALETTE, getCategoryColor, MOTION } from '../theme/obsidianDesign';
+
+// --- PERSISTENCE HELPER ---
+const usePersistentState = (key, defaultValue) => {
+    const [state, setState] = useState(() => {
+        const storedValue = localStorage.getItem(key);
+        return storedValue !== null ? storedValue : defaultValue;
+    });
+
+    useEffect(() => {
+        localStorage.setItem(key, state);
+    }, [key, state]);
+
+    return [state, setState];
+};
 
 // DEFAULT STATE
 const defaultNewItem = {
@@ -63,7 +76,7 @@ export default function Inventory() {
       categoryStructure: {}, vibeTagsList: [] 
   });
   const [restingHours, setRestingHours] = useState(24);
-  
+   
   // UI States
   const [filterOpen, setFilterOpen] = useState(false);
   const [addItemOpen, setAddItemOpen] = useState(false); 
@@ -74,13 +87,16 @@ export default function Inventory() {
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
 
-  // Filter Values
-  const [filterStatus, setFilterStatus] = useState('active');
-  const [filterCategory, setFilterCategory] = useState('All');
-  const [filterBrand, setFilterBrand] = useState('All');
-  const [filterMaterial, setFilterMaterial] = useState('All'); 
-  const [filterMinRating, setFilterMinRating] = useState(0);
-  const [sortBy, setSortBy] = useState('dateDesc');
+  // --- PERSISTENT FILTER VALUES ---
+  const [filterStatus, setFilterStatus] = usePersistentState('inv_filterStatus', 'active');
+  const [filterCategory, setFilterCategory] = usePersistentState('inv_filterCategory', 'All');
+  const [filterBrand, setFilterBrand] = usePersistentState('inv_filterBrand', 'All');
+  const [filterMaterial, setFilterMaterial] = usePersistentState('inv_filterMaterial', 'All'); 
+  const [filterLocation, setFilterLocation] = usePersistentState('inv_filterLocation', 'All'); // NEU
+  const [filterMinRating, setFilterMinRating] = usePersistentState('inv_filterMinRating', '0'); // String für LocalStorage Sicherheit
+  const [sortBy, setSortBy] = usePersistentState('inv_sortBy', 'dateDesc');
+  
+  // Temporärer State für NFC Scans (überschreibt Filter temporär)
   const [scannedLocation, setScannedLocation] = useState(null);
 
   // LOAD SETTINGS
@@ -119,7 +135,8 @@ export default function Inventory() {
   useEffect(() => {
       if (locationRouter.state?.filterLocation) {
           setScannedLocation(locationRouter.state.filterLocation);
-          setFilterCategory('All'); setFilterBrand('All'); setFilterStatus('All'); 
+          // Bei NFC Scan setzen wir temporäre Filter zurück, damit man das Ergebnis sieht
+          // Persistent States werden aber nicht gelöscht, nur temporär ignoriert durch die Logik unten
       }
   }, [locationRouter]);
 
@@ -129,6 +146,14 @@ export default function Inventory() {
           if (imagePreview) URL.revokeObjectURL(imagePreview);
       }
   }, [imagePreview]);
+
+  // --- COMBINED LOCATIONS ---
+  // Kombiniert gespeicherte Locations aus Settings mit tatsächlich genutzten Locations aus Items
+  const availableLocations = useMemo(() => {
+      const fromSettings = dropdowns.locations || [];
+      const fromItems = items.map(i => i.storageLocation).filter(l => l && l.trim() !== '');
+      return [...new Set([...fromSettings, ...fromItems])].sort();
+  }, [dropdowns.locations, items]);
 
   // --- IMAGE HANDLERS ---
   const handleImageChange = (e) => {
@@ -222,19 +247,29 @@ export default function Inventory() {
 
   useEffect(() => {
     let res = [...items];
+    
+    // Prio 1: NFC Scan Location
     if (scannedLocation) {
         res = res.filter(i => i.storageLocation && i.storageLocation.trim() === scannedLocation.trim());
     } else {
+        // Prio 2: Manuelle Filter
         if (filterStatus === 'active') {
             res = res.filter(i => (i.status === 'active' || !i.status));
         } else if (filterStatus !== 'All') {
             res = res.filter(i => i.status === filterStatus);
         }
+
+        if (filterCategory !== 'All') res = res.filter(i => i.mainCategory === filterCategory || i.category === filterCategory);
+        if (filterBrand !== 'All') res = res.filter(i => i.brand === filterBrand);
+        if (filterMaterial !== 'All') res = res.filter(i => i.material === filterMaterial); 
+        
+        // NEU: Lagerort Filter
+        if (filterLocation !== 'All') {
+            res = res.filter(i => i.storageLocation === filterLocation);
+        }
+
+        if (parseInt(filterMinRating) > 0) res = res.filter(i => i.condition >= parseInt(filterMinRating));
     }
-    if (filterCategory !== 'All') res = res.filter(i => i.mainCategory === filterCategory || i.category === filterCategory);
-    if (filterBrand !== 'All') res = res.filter(i => i.brand === filterBrand);
-    if (filterMaterial !== 'All') res = res.filter(i => i.material === filterMaterial); 
-    if (filterMinRating > 0) res = res.filter(i => i.condition >= filterMinRating);
     
     // Sortierung mit Crash-Schutz
     res.sort((a, b) => {
@@ -252,7 +287,7 @@ export default function Inventory() {
       }
     });
     setFilteredItems(res);
-  }, [items, filterCategory, filterBrand, filterMaterial, filterMinRating, filterStatus, sortBy, scannedLocation, restingHours]);
+  }, [items, filterCategory, filterBrand, filterMaterial, filterMinRating, filterStatus, filterLocation, sortBy, scannedLocation, restingHours]);
 
   const getDisplayName = (item) => item.name || `${item.brand} ${item.model}`;
   const getImage = (item) => {
@@ -282,8 +317,16 @@ export default function Inventory() {
           {/* ACTIVE FILTERS */}
           <Box sx={{ mb: 2, px: 2, display: 'flex', gap: 1, overflowX: 'auto', pb: 1 }}>
                 {scannedLocation && <Chip icon={<Inventory2Icon />} label={`Ort: ${scannedLocation}`} onDelete={() => { setScannedLocation(null); }} sx={DESIGN_TOKENS.chip.active}/>}
-                {filterCategory !== 'All' && <Chip label={filterCategory} onDelete={() => setFilterCategory('All')} sx={DESIGN_TOKENS.chip.active} />}
-                {filterBrand !== 'All' && <Chip label={filterBrand} onDelete={() => setFilterBrand('All')} sx={DESIGN_TOKENS.chip.active} />}
+                
+                {/* Zeige Chips nur wenn nicht All */}
+                {!scannedLocation && (
+                    <>
+                        {filterCategory !== 'All' && <Chip label={filterCategory} onDelete={() => setFilterCategory('All')} sx={DESIGN_TOKENS.chip.active} />}
+                        {filterBrand !== 'All' && <Chip label={filterBrand} onDelete={() => setFilterBrand('All')} sx={DESIGN_TOKENS.chip.active} />}
+                        {filterLocation !== 'All' && <Chip icon={<Inventory2Icon style={{fontSize: 16}}/>} label={filterLocation} onDelete={() => setFilterLocation('All')} sx={DESIGN_TOKENS.chip.active} />}
+                        {filterStatus !== 'active' && filterStatus !== 'All' && <Chip label={filterStatus} onDelete={() => setFilterStatus('active')} sx={DESIGN_TOKENS.chip.active} />}
+                    </>
+                )}
           </Box>
 
           {/* GRID */}
@@ -305,27 +348,20 @@ export default function Inventory() {
             let idChipColor = 'white';
 
             if (isArchived) {
-                // Roter Chip für Archiviert
                 idChipBg = PALETTE.accents.red;
-                
-                // Card Styling für Archiviert
                 borderColor = PALETTE.accents.red;
                 background = 'rgba(20, 0, 0, 0.4)';
                 imgFilter = 'grayscale(1)';
             } 
             else if (isWashing) {
-                // Kräftiges Blau (#2979ff) für Wäsche statt Accent-Blue
                 idChipBg = '#2979ff';
-
-                // Card Styling für Wäsche
                 borderColor = '#2979ff';
                 background = `rgba(41, 121, 255, 0.1)`;
                 imgFilter = 'grayscale(0.8)';
             }
             else if (isResting) {
-                // Gelb/Gold (#ffc107) für Elasthan Recovery
                 idChipBg = '#ffc107'; 
-                idChipColor = '#000'; // Schwarze Schrift für Kontrast auf Gelb
+                idChipColor = '#000';
             }
             
             return (
@@ -354,7 +390,7 @@ export default function Inventory() {
                                         backdropFilter: 'blur(4px)', 
                                         color: idChipColor, 
                                         fontWeight: 'bold',
-                                        height: '22px',      // Kleiner als Standard
+                                        height: '22px',       // Kleiner als Standard
                                         fontSize: '0.7rem',  // Kleinere Schrift
                                         '& .MuiChip-icon': { marginLeft: '4px' } 
                                     }} 
@@ -363,7 +399,7 @@ export default function Inventory() {
 
                             {isWashing && <LocalLaundryServiceIcon sx={{ position: 'absolute', bottom: 8, right: 8, color: '#2979ff', filter: 'drop-shadow(0 0 4px black)' }} />}
                             
-                            {/* --- RECOVERY CHIP (JETZT AUCH GOLD/GELB) --- */}
+                            {/* --- RECOVERY CHIP --- */}
                             {isResting && item.status === 'active' && (
                                 <Tooltip title={`Erholung: noch ${recoveryInfo.remaining}h`}>
                                     <Chip 
@@ -374,8 +410,8 @@ export default function Inventory() {
                                             position: 'absolute', 
                                             top: 8, 
                                             right: 8, 
-                                            bgcolor: '#ffc107', // Gold Hintergrund
-                                            color: '#000',      // Schwarze Schrift
+                                            bgcolor: '#ffc107', 
+                                            color: '#000',      
                                             fontWeight: 'bold',
                                             border: `1px solid #e0a800`,
                                             backdropFilter: 'blur(4px)',
@@ -449,10 +485,10 @@ export default function Inventory() {
                                     <img src={imagePreview} alt="Preview" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
                                 ) : (
                                     <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, p: 2 }}>
-                                        <CloudUploadIcon sx={{ fontSize: 40, color: PALETTE.primary.main }} />
-                                        <Typography variant="body2" color="text.secondary">
-                                            Bild auswählen oder aufnehmen
-                                        </Typography>
+                                            <CloudUploadIcon sx={{ fontSize: 40, color: PALETTE.primary.main }} />
+                                            <Typography variant="body2" color="text.secondary">
+                                                Bild auswählen oder aufnehmen
+                                            </Typography>
                                     </Box>
                                 )}
                             </Box>
@@ -499,7 +535,7 @@ export default function Inventory() {
         </Box>
       </Drawer>
 
-      {/* --- FILTER DRAWER (VOLLSTÄNDIG) --- */}
+      {/* --- FILTER DRAWER (PERSISTENT & WITH LOCATION) --- */}
       <Drawer anchor="right" open={filterOpen} onClose={() => setFilterOpen(false)} PaperProps={{ sx: { bgcolor: '#121212', borderLeft: '1px solid #333' } }}>
         <Box sx={{ width: 280, p: 3, pt: 8, height: '100%', overflowY: 'auto' }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
@@ -507,9 +543,11 @@ export default function Inventory() {
               <IconButton onClick={() => setFilterOpen(false)}><CloseIcon /></IconButton>
           </Box>
           
-          <TextField select fullWidth size="small" margin="dense" value={sortBy} onChange={e => setSortBy(e.target.value)}>
+          <TextField select fullWidth size="small" margin="dense" label="Sortierung" value={sortBy} onChange={e => setSortBy(e.target.value)}>
             <MenuItem value="dateDesc">Neueste zuerst</MenuItem>
+            <MenuItem value="dateAsc">Älteste zuerst</MenuItem>
             <MenuItem value="priceDesc">Preis (Hoch {'>'} Niedrig)</MenuItem>
+            <MenuItem value="priceAsc">Preis (Niedrig {'>'} Hoch)</MenuItem>
             <MenuItem value="conditionDesc">Zustand (Best)</MenuItem>
             <MenuItem value="nameAsc">Name A-Z</MenuItem>
           </TextField>
@@ -521,6 +559,14 @@ export default function Inventory() {
               <MenuItem value="All">Alle</MenuItem>
               <MenuItem value="washing">In der Wäsche</MenuItem>
               <MenuItem value="archived">Archiviert</MenuItem>
+          </TextField>
+
+          {/* NEUER LAGERORT FILTER */}
+          <TextField select fullWidth label="Lagerort" margin="dense" size="small" value={filterLocation} onChange={e => setFilterLocation(e.target.value)}>
+              <MenuItem value="All">Alle Orte</MenuItem>
+              {availableLocations.map(loc => (
+                  <MenuItem key={loc} value={loc}>{loc}</MenuItem>
+              ))}
           </TextField>
 
           <TextField select fullWidth label="Kategorie" margin="dense" size="small" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
@@ -538,7 +584,17 @@ export default function Inventory() {
               {dropdowns.materials.map(m => <MenuItem key={m} value={m}>{m}</MenuItem>)}
           </TextField>
 
-          <Button variant="outlined" fullWidth sx={{ mt: 4 }} onClick={() => { setFilterStatus('active'); setFilterCategory('All'); setFilterBrand('All'); setFilterMaterial('All'); setFilterMinRating(0); setSortBy('dateDesc'); setScannedLocation(null); }}>
+          <Button variant="outlined" fullWidth sx={{ mt: 4 }} onClick={() => { 
+              // Reset to defaults
+              setFilterStatus('active'); 
+              setFilterCategory('All'); 
+              setFilterBrand('All'); 
+              setFilterMaterial('All'); 
+              setFilterLocation('All');
+              setFilterMinRating('0'); 
+              setSortBy('dateDesc'); 
+              setScannedLocation(null); 
+          }}>
               Zurücksetzen
           </Button>
         </Box>

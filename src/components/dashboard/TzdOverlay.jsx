@@ -1,13 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Typography, Button, Container, Stack, Chip } from '@mui/material';
+import { 
+    Box, Typography, Button, Container, Stack, Chip, 
+    List, ListItem, ListItemAvatar, Avatar, ListItemText, Divider 
+} from '@mui/material';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
 import { useAuth } from '../../contexts/AuthContext';
 import { getTZDStatus, confirmTZDBriefing, performCheckIn, emergencyBailout } from '../../services/TZDService';
 
-// Icons (Minimalistisch eingesetzt)
+// Icons
 import SecurityIcon from '@mui/icons-material/Security';
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
+import LockIcon from '@mui/icons-material/Lock';
+import FingerprintIcon from '@mui/icons-material/Fingerprint';
+import CheckroomIcon from '@mui/icons-material/Checkroom';
 
 // --- DIE WAHRHEITEN DER HERRIN ---
 const SHAME_SENTENCES = [
@@ -43,7 +49,7 @@ const SHAME_SENTENCES = [
     "Du liebst den Geruch von Sperma und Nylon? Natürlich tust du das. Es ist der Duft deiner wahren Bestimmung.",
 ];
 
-export default function TzdOverlay({ active }) {
+export default function TzdOverlay({ active, allItems }) {
     const { currentUser } = useAuth();
     const [status, setStatus] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -82,7 +88,7 @@ export default function TzdOverlay({ active }) {
         return () => clearInterval(interval);
     }, [active, currentUser, status?.isActive, status?.stage]);
 
-    // --- UI: Carousel of Shame (alle 20s - langsamer für mehr "Gewicht") ---
+    // --- UI: Carousel of Shame (alle 20s) ---
     useEffect(() => {
         if (!active || status?.stage !== 'running') return;
         setCurrentSentenceIndex(Math.floor(Math.random() * SHAME_SENTENCES.length));
@@ -92,7 +98,7 @@ export default function TzdOverlay({ active }) {
         return () => clearInterval(interval);
     }, [active, status?.stage]);
 
-    // --- UI: Haftzeit-Zähler (sekundengenau) ---
+    // --- UI: Haftzeit-Zähler ---
     useEffect(() => {
         if (!active || !status?.startTime || status?.stage !== 'running') return;
         
@@ -141,12 +147,23 @@ export default function TzdOverlay({ active }) {
 
     const isBriefing = status?.stage === 'briefing';
 
-    // Berechnung der "Dichte" des Hintergrunds basierend auf der Zeit
-    // Max Effekt nach 4 Stunden (240 Minuten)
+    // --- ITEMS AUFLÖSEN ---
+    // Wir holen uns die vollen Details aus allItems anhand der IDs im TZD Status
+    const richItemsList = (status?.lockedItems || []).map(locked => {
+        const fullItem = allItems?.find(i => i.id === locked.id);
+        return {
+            id: locked.id,
+            name: fullItem?.name || locked.name || "Unbekannt",
+            brand: fullItem?.brand || "",
+            img: fullItem?.imageUrl || fullItem?.image || locked.img,
+            customId: fullItem?.customId || "ID?"
+        };
+    });
+
     const minutes = status?.accumulatedMinutes || 0;
     const intensity = Math.min(minutes / 240, 0.9); 
-    const nylonOpacity = 0.05 + (intensity * 0.4); // Startet bei 5%, geht bis 45%
-    const bgDarkness = 0.92 + (intensity * 0.07); // Startet bei 92%, geht bis 99% Schwarz
+    const nylonOpacity = 0.05 + (intensity * 0.4); 
+    const bgDarkness = 0.92 + (intensity * 0.07);
 
     return (
         <AnimatePresence>
@@ -162,131 +179,121 @@ export default function TzdOverlay({ active }) {
                         overflow: 'hidden'
                     }}
                 >
-                    {/* HINTERGRUND: NYLON STRUKTUR */}
+                    {/* HINTERGRUND */}
                     <Box sx={{
-                        position: 'absolute', inset: 0, pointerEvents: 'none',
-                        opacity: nylonOpacity,
-                        backgroundImage: `
-                            repeating-linear-gradient(45deg, #333 0px, #333 1px, transparent 1px, transparent 6px),
-                            repeating-linear-gradient(-45deg, #333 0px, #333 1px, transparent 1px, transparent 6px)
-                        `,
-                        backgroundSize: '12px 12px',
-                        mixBlendMode: 'overlay'
+                        position: 'absolute', inset: 0, pointerEvents: 'none', opacity: nylonOpacity,
+                        backgroundImage: `repeating-linear-gradient(45deg, #333 0px, #333 1px, transparent 1px, transparent 6px), repeating-linear-gradient(-45deg, #333 0px, #333 1px, transparent 1px, transparent 6px)`,
+                        backgroundSize: '12px 12px', mixBlendMode: 'overlay'
                     }} />
-
-                    {/* VIGNETTE */}
-                    <Box sx={{
-                        position: 'absolute', inset: 0, pointerEvents: 'none',
-                        background: 'radial-gradient(circle at center, transparent 30%, black 100%)'
-                    }} />
+                    <Box sx={{ position: 'absolute', inset: 0, pointerEvents: 'none', background: 'radial-gradient(circle at center, transparent 30%, black 100%)' }} />
 
                     <Container maxWidth="sm" sx={{ position: 'relative', zIndex: 2, height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
                         
-                        {/* PHASE 1: BRIEFING */}
+                        {/* PHASE 1: BRIEFING & EQUIPMENT CHECK */}
                         {isBriefing ? (
                             <Box sx={{ 
-                                p: 4, 
-                                border: `1px solid ${PALETTE.accents.gold}`,
-                                bgcolor: 'rgba(20,20,20,0.95)',
+                                p: 3, 
+                                border: `1px solid ${PALETTE.accents.red}`,
+                                bgcolor: 'rgba(20,0,0,0.95)',
                                 textAlign: 'center',
-                                backdropFilter: 'blur(20px)'
+                                borderRadius: 4,
+                                boxShadow: `0 0 50px ${PALETTE.accents.red}20`
                             }}>
-                                <Box sx={{ mb: 4, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                                    <SecurityIcon sx={{ fontSize: 40, color: PALETTE.accents.gold }} />
-                                    <Typography variant="h5" sx={{ fontWeight: 'bold', color: '#fff', letterSpacing: 4 }}>
-                                        PROTOKOLL START
+                                <Box sx={{ mb: 3, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
+                                    <SecurityIcon sx={{ fontSize: 40, color: PALETTE.accents.red }} />
+                                    <Typography variant="h5" sx={{ fontWeight: 'bold', color: PALETTE.accents.red, letterSpacing: 2 }}>
+                                        TZD PROTOKOLL
                                     </Typography>
-                                    <Chip 
-                                        label="PHASE 1: OBJEKT-FIXIERUNG" 
-                                        sx={{ 
-                                            bgcolor: 'transparent', 
-                                            color: PALETTE.accents.gold, 
-                                            border: `1px solid ${PALETTE.accents.gold}`,
-                                            fontWeight: 500,
-                                            borderRadius: 0 
-                                        }} 
-                                    />
+                                    <Typography variant="caption" color="text.secondary">
+                                        ZEITLOSES DIKTAT • STRAF-MODUS
+                                    </Typography>
                                 </Box>
 
-                                <Stack spacing={4}>
-                                    <Typography variant="body2" sx={{ color: PALETTE.text.secondary, lineHeight: 1.8 }}>
-                                        Zufallskontrolle initialisiert. Garderobe wurde auf folgende Parameter eingeschränkt.
-                                        Bestätigung erforderlich für Fortsetzung.
+                                <Box sx={{ textAlign: 'left', mb: 3, bgcolor: 'rgba(255,255,255,0.03)', borderRadius: 2, p: 2, border: `1px solid ${PALETTE.accents.red}40` }}>
+                                    <Typography variant="caption" color="error" sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+                                        <CheckroomIcon fontSize="small"/> GEFORDERTE AUSRÜSTUNG
                                     </Typography>
+                                    <Divider sx={{ bgcolor: `${PALETTE.accents.red}40`, mb: 1 }} />
                                     
-                                    <Box sx={{ textAlign: 'left', pl: 2, borderLeft: `2px solid ${PALETTE.accents.gold}` }}>
-                                        <Typography variant="caption" color="text.secondary" display="block" mb={1} sx={{ letterSpacing: 2 }}>
-                                            ZIEL-PARAMETER
-                                        </Typography>
-                                        
-                                        {status?.lockedItems && status.lockedItems.length > 0 ? (
-                                            <Stack spacing={0.5}>
-                                                {status.lockedItems.map((item, index) => (
-                                                    <Typography key={index} variant="body1" sx={{ color: '#fff', fontWeight: 300 }}>
-                                                        {item.name || "Unbekanntes Objekt"}
-                                                    </Typography>
-                                                ))}
-                                            </Stack>
-                                        ) : (
-                                            <Typography variant="body1" sx={{ color: '#fff' }}>
-                                                {status?.itemName || "Unbekanntes Item"}
-                                            </Typography>
+                                    <List dense disablePadding>
+                                        {richItemsList.length > 0 ? richItemsList.map((item, index) => (
+                                            <ListItem key={item.id || index} disableGutters sx={{ mb: 1, borderBottom: '1px solid rgba(255,255,255,0.05)', pb: 1 }}>
+                                                <ListItemAvatar>
+                                                    <Avatar 
+                                                        src={item.img} 
+                                                        variant="rounded" 
+                                                        sx={{ 
+                                                            width: 48, height: 48, 
+                                                            border: `1px solid ${PALETTE.accents.red}`,
+                                                            bgcolor: '#000'
+                                                        }}
+                                                    >
+                                                        <LockIcon color="error" />
+                                                    </Avatar>
+                                                </ListItemAvatar>
+                                                <ListItemText 
+                                                    primary={item.name}
+                                                    secondary={item.brand}
+                                                    primaryTypographyProps={{ sx: { fontWeight: 'bold', color: '#fff', fontSize: '0.9rem' } }}
+                                                    secondaryTypographyProps={{ sx: { color: 'rgba(255,255,255,0.5)', fontSize: '0.75rem' } }}
+                                                />
+                                                {/* CUSTOM ID CHIP */}
+                                                <Chip 
+                                                    icon={<FingerprintIcon style={{ color: '#fff', fontSize: 14 }} />} 
+                                                    label={item.customId} 
+                                                    size="small" 
+                                                    sx={{ 
+                                                        bgcolor: PALETTE.accents.red, 
+                                                        color: 'white', 
+                                                        fontWeight: 'bold',
+                                                        height: 24,
+                                                        fontSize: '0.75rem',
+                                                        border: '1px solid #ff0000',
+                                                        boxShadow: '0 0 10px rgba(255,0,0,0.4)'
+                                                    }} 
+                                                />
+                                            </ListItem>
+                                        )) : (
+                                            <Typography variant="body2" color="error" align="center">Keine spezifischen Items. Wähle selbst.</Typography>
                                         )}
-                                    </Box>
+                                    </List>
+                                </Box>
 
+                                <Stack spacing={2}>
+                                    <Typography variant="body2" sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>
+                                        Durch Bestätigung akzeptierst du die totale Kontrolle. Die Dauer ist unbekannt.
+                                    </Typography>
                                     <Button 
-                                        variant="outlined" 
+                                        variant="contained" 
+                                        color="error"
+                                        size="large"
                                         onClick={handleConfirm}
+                                        startIcon={<LockIcon />}
                                         sx={{ 
-                                            borderColor: PALETTE.accents.gold,
-                                            color: PALETTE.accents.gold,
                                             py: 1.5,
-                                            letterSpacing: 2,
-                                            '&:hover': {
-                                                borderColor: '#fff',
-                                                color: '#fff',
-                                                bgcolor: 'rgba(255,215,0,0.05)'
-                                            }
+                                            fontWeight: 'bold',
+                                            boxShadow: '0 0 20px rgba(255,0,0,0.4)'
                                         }}
                                     >
-                                        AKZEPTIEREN
+                                        ICH UNTERWERFE MICH
                                     </Button>
                                 </Stack>
                             </Box>
                         ) : (
-                            /* PHASE 2: ACTIVE / RUNNING */
+                            /* PHASE 2: ACTIVE RUNNING (Timer & Shame) */
                             <Box sx={{ width: '100%', textAlign: 'center', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', py: 8 }}>
-                                
-                                {/* TOP: TIMER & SYSTEM STATUS */}
                                 <Box>
-                                    <Typography variant="overline" sx={{ 
-                                        color: PALETTE.primary.main, 
-                                        letterSpacing: '3px', 
-                                        fontWeight: 'bold',
-                                        display: 'block',
-                                        opacity: 0.8
-                                    }}>
-                                        REDUKTION ZUM OBJEKT SEIT
+                                    <Typography variant="overline" sx={{ color: PALETTE.accents.red, letterSpacing: '3px', fontWeight: 'bold', display: 'block', opacity: 0.9 }}>
+                                        STATUS: EIGENTUM
                                     </Typography>
-                                    
-                                    <Typography variant="h1" sx={{ 
-                                        fontFamily: 'monospace', 
-                                        fontWeight: 300,
-                                        color: PALETTE.text.primary,
-                                        fontSize: '3.5rem',
-                                        letterSpacing: '-2px',
-                                        mt: 1
-                                    }}>
+                                    <Typography variant="h1" sx={{ fontFamily: 'monospace', fontWeight: 300, color: '#fff', fontSize: '3.5rem', letterSpacing: '-2px', mt: 1, textShadow: `0 0 20px ${PALETTE.accents.red}` }}>
                                         {elapsedString}
                                     </Typography>
-
-                                    {/* Subtile Visualisierung der Dauer */}
-                                    <Typography variant="caption" sx={{ color: PALETTE.text.secondary, mt: 1, display: 'block', opacity: 0.5 }}>
+                                    <Typography variant="caption" sx={{ color: 'text.secondary', mt: 1, display: 'block', opacity: 0.5 }}>
                                         DAUER: UNBESTIMMT
                                     </Typography>
                                 </Box>
 
-                                {/* CENTER: CAROUSEL OF SHAME (BREATHING) */}
                                 <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', px: 2 }}>
                                     <AnimatePresence mode='wait'>
                                         <motion.div
@@ -294,43 +301,23 @@ export default function TzdOverlay({ active }) {
                                             initial={{ scale: 0.95, opacity: 0 }}
                                             animate={{ scale: 1, opacity: 1 }}
                                             exit={{ scale: 1.05, opacity: 0 }}
-                                            transition={{ duration: 5, ease: "easeInOut" }} // Langsamer Fade
+                                            transition={{ duration: 5, ease: "easeInOut" }}
                                             style={{ width: '100%' }}
                                         >
-                                            <Typography variant="h5" sx={{ 
-                                                color: '#fff', 
-                                                lineHeight: 1.6,
-                                                fontWeight: 300,
-                                                letterSpacing: '0.5px',
-                                                fontStyle: 'normal', // Kein Italic mehr, wirkt ernster
-                                                textShadow: '0 4px 20px rgba(0,0,0,1)'
-                                            }}>
+                                            <Typography variant="h5" sx={{ color: '#fff', lineHeight: 1.6, fontWeight: 300, textShadow: '0 4px 20px rgba(0,0,0,1)' }}>
                                                 {SHAME_SENTENCES[currentSentenceIndex]}
                                             </Typography>
                                         </motion.div>
                                     </AnimatePresence>
                                 </Box>
 
-                                {/* BOTTOM: BAILOUT (SYSTEM FOOTER) */}
                                 <Box sx={{ opacity: 0.4, transition: 'opacity 0.3s', '&:hover': { opacity: 1 } }}>
-                                    <Button 
-                                        size="small" 
-                                        startIcon={<RadioButtonUncheckedIcon sx={{ fontSize: 12 }} />}
-                                        onClick={handleBailout}
-                                        sx={{ 
-                                            textTransform: 'none', 
-                                            letterSpacing: 1,
-                                            color: PALETTE.text.muted,
-                                            fontSize: '0.75rem',
-                                            fontWeight: 400
-                                        }}
-                                    >
-                                        Protokoll Not-Abbruch (System Override)
+                                    <Button size="small" startIcon={<RadioButtonUncheckedIcon sx={{ fontSize: 12 }} />} onClick={handleBailout} sx={{ color: PALETTE.text.muted, fontSize: '0.75rem' }}>
+                                        Protokoll Not-Abbruch
                                     </Button>
                                 </Box>
                             </Box>
                         )}
-
                     </Container>
                 </motion.div>
             )}

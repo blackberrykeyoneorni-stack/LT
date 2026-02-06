@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Dialog, DialogContent, DialogActions, DialogTitle, DialogContentText,
   Typography, Box, Button, CircularProgress, Avatar,
@@ -58,16 +58,98 @@ export default function InstructionDialog({
   const [projectedCost, setProjectedCost] = useState(0);
   const [isOverdraft, setIsOverdraft] = useState(false);
 
-  // --- ROBUSTE LOGIK FÜR SLIDER-ANZEIGE ---
-  // 1. Hole PeriodId sicher (Fallback leerer String um Absturz zu verhindern)
+  // LOGIK FÜR SLIDER-ANZEIGE
   const safePeriodId = (instruction?.periodId || "").toLowerCase();
-  
-  // 2. Prüfe auf Nacht-Protokoll
   const isNightProtocol = safePeriodId.includes('night');
-  
-  // 3. Zeige Vault, wenn es NICHT explizit Nacht-Protokoll ist.
-  // Fallback: Wenn PeriodId fehlt, nutzen wir die Tageszeit (!isNight) als Indikator.
   const showVault = safePeriodId ? !isNightProtocol : !isNight;
+
+  // --- NFC SCAN LOGIC ("Einer für Alle") ---
+  useEffect(() => {
+      if (open && instruction && !instruction.isAccepted) {
+          // Wir starten den Scanner, sobald der Dialog offen ist
+          startBindingScan(handleNfcAutoStart);
+      }
+  }, [open, instruction]);
+
+  // Diese Funktion wird aufgerufen, wenn irgendein Tag gescannt wird
+  const handleNfcAutoStart = async (scannedId) => {
+      if (!instruction || !instruction.items) return;
+
+      // 1. Finde heraus, welches Item gescannt wurde (aus dem Gesamtinventar)
+      // Wir prüfen Custom ID, NFC Tag ID und Firestore ID
+      const scannedItem = items.find(i => 
+          (i.nfcTagId && i.nfcTagId === scannedId) || 
+          (i.customId && i.customId === scannedId) ||
+          (i.id === scannedId)
+      );
+
+      if (!scannedItem) {
+          if (showToast) showToast("Unbekanntes Item gescannt.", "warning");
+          return;
+      }
+
+      // 2. Prüfe, ob dieses Item Teil der Instruction ist
+      const isPartOfInstruction = instruction.items.some(instrItem => instrItem.id === scannedItem.id);
+
+      if (isPartOfInstruction) {
+          if (showToast) showToast(`Item "${scannedItem.name}" verifiziert. Starte Session...`, "success");
+          
+          // 3. Trigger den Start (so als hätte man den Button gedrückt & gehalten)
+          // Wir müssen hier direkt die Start-Logik aufrufen, da wir den "Oath"-Button überspringen
+          await executeStartSequence(true); // true = verified via NFC
+      } else {
+          if (showToast) showToast(`Falsches Item! "${scannedItem.name}" gehört nicht zur Anweisung.`, "error");
+          if (navigator.vibrate) navigator.vibrate([100, 50, 100]); // Error Buzz
+      }
+  };
+
+  // Kapselt die Start-Logik, damit sie vom Button UND vom NFC Scan genutzt werden kann
+  const executeStartSequence = async (viaNfc = false) => {
+      // Hardcore Check (wenn aktiv)
+      triggerHardcoreCheck(async () => {
+          // Time Bank Logic (Kaufen)
+          if (creditReduction > 0) {
+             try {
+                 await spendCredits(currentUser.uid, creditReduction, creditType);
+                 const newDuration = (instruction.durationMinutes || 0) - creditReduction;
+                 await updateDoc(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), {
+                     durationMinutes: newDuration,
+                     originalDurationMinutes: instruction.durationMinutes,
+                     creditsUsed: creditReduction,
+                     wasOverdraft: isOverdraft 
+                 });
+             } catch(e) {
+                 if (showToast) showToast("Kauf fehlgeschlagen.", "error");
+                 return; // Abbruch bei Fehler
+             }
+          }
+
+          // Session Start (Alle Items der Instruction)
+          // Wir übergeben das gesamte instruction.items Array an den Service
+          // Aber wir müssen die VOLLSTÄNDIGEN Item-Objekte aus 'items' holen, nicht nur die IDs aus instruction
+          const itemsToStart = instruction.items.map(instrItem => items.find(i => i.id === instrItem.id)).filter(Boolean);
+
+          if (itemsToStart.length > 0) {
+              try {
+                  await startSessionService(currentUser.uid, {
+                      items: itemsToStart, // ALLE ITEMS STARTEN
+                      itemId: itemsToStart[0].id, // Haupt-Item (technisch nötig)
+                      type: 'instruction',
+                      periodId: instruction.periodId,
+                      acceptedAt: instruction.acceptedAt,
+                      verifiedViaNfc: viaNfc,
+                      instructionDurationMinutes: (instruction.durationMinutes || 0) - creditReduction
+                  });
+                  onClose();
+                  if (showToast) showToast("Session erfolgreich gestartet.", "success");
+              } catch (e) {
+                  console.error(e);
+                  if (showToast) showToast("Fehler beim Session-Start.", "error");
+              }
+          }
+      });
+  };
+
 
   useEffect(() => {
     const loadData = async () => {
@@ -229,61 +311,33 @@ export default function InstructionDialog({
       }
   };
 
-  const handleVerifyItem = (fullItem) => {
-      if (!fullItem) return;
-      const executeVerify = () => {
-        startBindingScan(async (scannedTagId) => {
-            const isMatch = (scannedTagId === fullItem.nfcTagId || scannedTagId === fullItem.customId || scannedTagId === fullItem.id);
-            if (isMatch) {
-                try {
-                    await startSessionService(currentUser.uid, {
-                        itemId: fullItem.id, items: [fullItem], type: 'instruction', 
-                        periodId: instruction.periodId, acceptedAt: instruction.acceptedAt, verifiedViaNfc: true,
-                        instructionDurationMinutes: instruction.durationMinutes 
-                    });
-                    setVerifiedItems(prev => [...prev, fullItem.id]);
-                    if (showToast) showToast(`${fullItem.name} verifiziert!`, "success");
-                    if (navigator.vibrate) navigator.vibrate(200);
-                } catch (e) { if (showToast) showToast("Fehler beim Start.", "error"); }
-            } else { if (showToast) showToast("Falscher Tag!", "error"); }
-        });
-      };
-      triggerHardcoreCheck(executeVerify);
+  // Manuelle Button Action (wenn kein NFC genutzt wird)
+  // Dies ersetzt die direkte onStartOath Logik, um alles zu bündeln
+  const handleManualAccept = () => {
+      if (!instruction) return;
+      // Hier nutzen wir die Hilfsfunktion, aber viaNfc = false
+      // Hinweis: Diese Funktion wird via "onStartOath" (Hold) getriggert, 
+      // aber wir müssen hier die Logik der Parent-Komponente (ActionButtons) beachten.
+      // Da ActionButtons den "Hold" steuert, rufen wir hier onStartOath auf, 
+      // der dann (in der Parent) die Logik anstoßen sollte? 
+      // NEIN: In ActionButtons wird InstructionDialog als Controlled Component genutzt.
+      // Wir müssen hier den "Hold" Progress selbst managen oder den Button im Dialog nutzen.
+      // Der Dialog selbst rendert den Button. Also rufen wir executeStartSequence auf, wenn der Hold fertig ist.
+      
+      // ACHTUNG: Die Props onStartOath etc. kommen von ActionButtons und steuern den Progress.
+      // Wir müssen sicherstellen, dass WENN der Progress 100% erreicht, executeStartSequence feuert.
+      // Das passiert normalerweise in ActionButtons.jsx via useEffect([oathProgress]).
+      // Da wir die Logik jetzt HIER haben (wg. NFC und Credits), müssen wir das umbiegen.
+      // Wir lassen onStartOath/onCancelOath für die Animation, aber der Trigger muss hier sein.
   };
-
-  const handleSmartStart = () => {
-      const executeStart = () => {
-        const unverifiedItems = instruction.items.filter(i => !verifiedItems.includes(i.id));
-        if (unverifiedItems.length === 0) { onClose(); if (showToast) showToast("Erledigt.", "success"); } 
-        else { onStartRequest(unverifiedItems); }
-      };
-      triggerHardcoreCheck(executeStart);
-  };
-
-  // --- OATH WRAPPER FOR SPENDING ---
+  
+  // Effekt: Wenn Hold-Button (von außen gesteuert) fertig ist -> Starten
   useEffect(() => {
-      if (instruction?.isAccepted && creditReduction > 0) {
-          const finalizeSpending = async () => {
-             try {
-                 await spendCredits(currentUser.uid, creditReduction, creditType);
-                 
-                 const newDuration = (instruction.durationMinutes || 0) - creditReduction;
-                 await updateDoc(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), {
-                     durationMinutes: newDuration,
-                     originalDurationMinutes: instruction.durationMinutes,
-                     creditsUsed: creditReduction,
-                     wasOverdraft: isOverdraft 
-                 });
-                 setCreditReduction(0);
-             } catch(e) {
-                 if (e.message === 'INSOLVENCY_LIMIT_REACHED') {
-                     showToast("TRANSAKTION FEHLGESCHLAGEN: Limit erreicht.", "error");
-                 }
-             }
-          };
-          finalizeSpending();
+      if (oathProgress >= 100 && !instruction.isAccepted) {
+          executeStartSequence(false); // Manuell gestartet
+          onCancelOath(); // Reset Progress
       }
-  }, [instruction?.isAccepted]);
+  }, [oathProgress]);
 
 
   const totalItems = instruction?.items?.length || 0;
@@ -439,6 +493,7 @@ export default function InstructionDialog({
                     </Box>
                 )}
 
+                {/* ACTION BUTTONS */}
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
                     <Box sx={{ position: 'relative', width: '100%' }}>
                         <Button fullWidth variant="contained" size="large"
@@ -449,37 +504,22 @@ export default function InstructionDialog({
                             <Box sx={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${oathProgress}%`, bgcolor: 'rgba(255,255,255,0.2)', transition: 'width 0.05s linear' }} />
                         </Button>
                     </Box>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                        <NfcIcon fontSize="small" /> Oder scanne irgendein Item der Liste
+                    </Typography>
                     <Button color="error" onClick={onDeclineOath}>Ablehnen (Strafe)</Button>
                 </Box>
             </Box>
         );
     }
     
+    // FALLS BEREITS AKZEPTIERT (Sollte eigentlich nicht passieren, da Dialog schließt, aber sicherheitshalber)
     if (instruction.isAccepted) {
         return (
-            <List>
-                {instruction.items.map(instrItem => {
-                    const fullItem = items.find(i => i.id === instrItem.id);
-                    const displayName = fullItem?.name || instrItem.name || "Item";
-                    const isVerified = verifiedItems.includes(instrItem.id);
-                    return (
-                        <ListItem key={instrItem.id} disablePadding divider secondaryAction={
-                                <Box sx={{ display: 'flex', gap: 1 }}>
-                                    <IconButton edge="end" color={isVerified ? "success" : "primary"} onClick={() => !isVerified && handleVerifyItem(fullItem)} disabled={isScanning || isVerified}>
-                                        {isVerified ? <CheckCircleIcon /> : <NfcIcon />}
-                                    </IconButton>
-                                    <IconButton edge="end" onClick={() => { onClose(); onNavigateItem(instrItem.id); }}><LaunchIcon /></IconButton>
-                                </Box>
-                            }>
-                             <ListItemButton onClick={() => { onClose(); onNavigateItem(instrItem.id); }} sx={{ pr: 9 }}>
-                                <ListItemAvatar><Avatar variant="rounded" src={fullItem?.imageUrl || instrItem.img} /></ListItemAvatar>
-                                <ListItemText primary={displayName} secondary={fullItem?.customId} 
-                                    primaryTypographyProps={{ sx: { textDecoration: isVerified ? 'line-through' : 'none', opacity: isVerified ? 0.7 : 1 } }} />
-                            </ListItemButton>
-                        </ListItem>
-                    );
-                })}
-            </List>
+            <Box sx={{ textAlign: 'center', py: 4 }}>
+                <CircularProgress />
+                <Typography variant="caption" display="block" sx={{ mt: 2 }}>Session wird geladen...</Typography>
+            </Box>
         );
     }
   };
@@ -507,11 +547,6 @@ export default function InstructionDialog({
         
         {canClose && (
             <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}>
-                {instruction?.isAccepted && (
-                    <Button variant="contained" fullWidth onClick={handleSmartStart} color={allDone ? "success" : "primary"} sx={{ mb: 1, py: 1.5 }}>
-                        {allDone ? "Fertig" : (verifiedCount > 0 ? `Rest (${remainingCount})` : "Alle Starten")}
-                    </Button>
-                )}
                 <Button onClick={onClose} fullWidth color="inherit">Schließen</Button>
             </DialogActions>
         )}

@@ -562,7 +562,7 @@ export default function Dashboard() {
 
   return (
     <Box sx={DESIGN_TOKENS.bottomNavSpacer}>
-      <TzdOverlay active={tzdActive} startTime={tzdStartTime} />
+      <TzdOverlay active={tzdActive} allItems={items} />
       
       <ForcedReleaseOverlay 
           open={forcedReleaseOpen}
