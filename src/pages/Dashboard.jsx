@@ -174,11 +174,12 @@ export default function Dashboard() {
   const [forcedReleaseOpen, setForcedReleaseOpen] = useState(false);
   const [forcedReleaseMethod, setForcedReleaseMethod] = useState(null);
 
-  // NEU: Gamble State
+  // NEU: Gamble & TimeBank State
   const [offerOpen, setOfferOpen] = useState(false);
   const [gambleStake, setGambleStake] = useState([]);
   const [hasGambledThisSession, setHasGambledThisSession] = useState(false);
   const [immunityActive, setImmunityActive] = useState(false);
+  const [timeBankData, setTimeBankData] = useState({ nc: 0, lc: 0 });
 
   // Derived State
   const isNight = currentPeriod ? currentPeriod.includes('night') : false;
@@ -215,15 +216,27 @@ export default function Dashboard() {
             const susp = await checkActiveSuspension(currentUser.uid);
             setActiveSuspension(susp);
 
-            // NEU: Immunitäts-Check für UI Anzeige
             const immune = await isImmunityActive(currentUser.uid);
             setImmunityActive(immune);
 
         } catch(e) { console.error(e); } finally { setLoadingSuspension(false); }
     };
     initLoad();
+
+    // TIME BANK LISTENER
+    const unsubscribeTB = onSnapshot(doc(db, `users/${currentUser.uid}/status/timeBank`), (docSnap) => {
+        if (docSnap.exists()) {
+            setTimeBankData(docSnap.data());
+        } else {
+            setTimeBankData({ nc: 0, lc: 0 });
+        }
+    });
+
     const timer = setInterval(() => setNow(Date.now()), 60000);
-    return () => clearInterval(timer);
+    return () => { 
+        clearInterval(timer);
+        unsubscribeTB(); 
+    };
   }, [currentUser]); 
 
   // 2. Punishment Item Load
@@ -252,19 +265,17 @@ export default function Dashboard() {
                 }
                 
                 // --- GAMBLE CHECK ---
-                // Nur wenn kein TZD, noch nicht gespielt und Items da
                 if (!hasGambledThisSession && items.length > 0) {
-                    // isInstructionActive wird hier geprüft
                     const triggerGamble = await checkGambleTrigger(currentUser.uid, false, isInstructionActive);
                     if (triggerGamble) {
                         const stake = determineGambleStake(items);
                         if (stake.length > 0) {
                             setGambleStake(stake);
                             setOfferOpen(true);
-                            setHasGambledThisSession(true); // Verhindert Loops
+                            setHasGambledThisSession(true);
                         }
                     } else {
-                        setHasGambledThisSession(true); // Auch bei False markieren als "geprüft"
+                        setHasGambledThisSession(true); 
                     }
                 }
 
@@ -303,13 +314,11 @@ export default function Dashboard() {
                 try {
                     let instr = await getLastInstruction(currentUser.uid);
                     
-                    // --- NEU: FLUCHT-ERKENNUNG (Szenario 2+1) ---
                     if (instr && instr.periodId === currentPeriod) {
                         if (!instr.isAccepted && !instr.evasionPenaltyTriggered) {
                             const genDate = instr.generatedAt?.toDate ? instr.generatedAt.toDate() : new Date(instr.generatedAt);
                             const ageInMinutes = (new Date() - genDate) / 60000;
                             
-                            // Wenn Anweisung älter als 30 Min ist und nicht akzeptiert -> FLUCHT
                             if (ageInMinutes > 30) {
                                 console.log("Flucht erkannt! Trigger 150% TZD.");
                                 await triggerEvasionPenalty(currentUser.uid, instr.items);
@@ -325,7 +334,6 @@ export default function Dashboard() {
                                 instr = null;
                             }
                         }
-                        
                         if (instr) setCurrentInstruction(instr);
 
                     } else if (!isFreeDay || currentPeriod.includes('night')) {
@@ -376,24 +384,19 @@ export default function Dashboard() {
           setImmunityActive(true);
       } else {
           // --- SYSTEM OVERRIDE PROTOCOL ---
-          // Falls Verlust UND aktive Voluntary Sessions existieren:
-          // Zwangs-Beendigung ohne User-Input.
           const voluntarySessions = activeSessions.filter(s => s.type === 'voluntary' && !s.endTime);
           
           if (voluntarySessions.length > 0) {
               try {
-                  // Parallel alle stoppen
                   const stopPromises = voluntarySessions.map(s => 
                       stopSessionService(currentUser.uid, s.id, { 
-                          feelings: ['System Override'], // System-Flag
+                          feelings: ['System Override'], 
                           note: 'Zwangsabbruch durch Gamble-Verlust (System Override).' 
                       })
                   );
                   await Promise.all(stopPromises);
                   showToast(`${voluntarySessions.length} Session(s) durch Protokoll überschrieben.`, "warning");
-              } catch (e) {
-                  console.error("Error auto-stopping sessions during override:", e);
-              }
+              } catch (e) { console.error(e); }
           }
 
           showToast("VERLOREN. Zeitloses Diktat aktiviert.", "error");
@@ -633,7 +636,8 @@ export default function Dashboard() {
                 <Typography variant="caption" color="text.secondary">METRIKEN & VERWALTUNG</Typography>
             </Divider>
 
-            <InfoTiles kpis={kpis} />
+            {/* NEU: TimeBank an InfoTiles übergeben */}
+            <InfoTiles kpis={kpis} timeBank={timeBankData} />
 
             <Button
               variant="contained" fullWidth size="large" onClick={() => setLaundryOpen(true)}

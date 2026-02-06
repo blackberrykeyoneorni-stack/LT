@@ -3,7 +3,7 @@ import {
   Dialog, DialogContent, DialogActions, DialogTitle, DialogContentText,
   Typography, Box, Button, CircularProgress, Avatar,
   List, ListItem, ListItemButton, ListItemAvatar, ListItemText, IconButton,
-  Slider, Chip, Divider
+  Slider, Chip, Divider, Alert
 } from '@mui/material';
 import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
 import { motion } from 'framer-motion'; 
@@ -18,15 +18,19 @@ import NfcIcon from '@mui/icons-material/Nfc';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ReportProblemIcon from '@mui/icons-material/ReportProblem';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'; 
-import SavingsIcon from '@mui/icons-material/Savings'; // Icon für TimeBank
+import SavingsIcon from '@mui/icons-material/Savings'; 
+import TrendingDownIcon from '@mui/icons-material/TrendingDown'; // Für Schulden
 
 import { useNFCGlobal } from '../../contexts/NFCContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { startSession as startSessionService } from '../../services/SessionService';
 import { registerPunishment } from '../../services/PunishmentService';
 import { db } from '../../firebase';
-import { doc, getDoc } from 'firebase/firestore';
-import { getTimeBankBalance, spendCredits } from '../../services/TimeBankService';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { getTimeBankBalance, spendCredits, checkInsolvency } from '../../services/TimeBankService';
+
+// Konfiguration der Falle (muss synchron mit Service sein)
+const OVERDRAFT_PENALTY = 1.5; 
 
 export default function InstructionDialog({ 
   open, onClose, instruction, items, loadingStatus,
@@ -46,15 +50,19 @@ export default function InstructionDialog({
 
   // --- TIME BANK STATE ---
   const [credits, setCredits] = useState({ nc: 0, lc: 0 });
-  const [creditReduction, setCreditReduction] = useState(0); // Minuten, die abgezogen werden
-  const [maxReduction, setMaxReduction] = useState(0); // Cap (1/3 oder Balance)
-  const [creditType, setCreditType] = useState(null); // 'nylon' oder 'lingerie'
+  const [creditReduction, setCreditReduction] = useState(0); 
+  const [maxReduction, setMaxReduction] = useState(0); 
+  const [creditType, setCreditType] = useState(null); 
+  const [insolvencyData, setInsolvencyData] = useState({ isBlocked: false, currentDebt: 0, remainingCredit: 0 });
+
+  // Calculation State für UI
+  const [projectedCost, setProjectedCost] = useState(0);
+  const [isOverdraft, setIsOverdraft] = useState(false);
 
   useEffect(() => {
     const loadData = async () => {
         if (!currentUser || !open) return;
         
-        // 1. Prefs laden (Hardcore)
         try {
             const prefsSnap = await getDoc(doc(db, `users/${currentUser.uid}/settings/preferences`));
             if (prefsSnap.exists()) {
@@ -66,17 +74,14 @@ export default function InstructionDialog({
             }
         } catch (e) { console.error("Error loading prefs", e); }
 
-        // 2. TimeBank laden (wenn Instruction vorhanden und nicht akzeptiert)
         if (instruction && !instruction.isAccepted) {
             const balance = await getTimeBankBalance(currentUser.uid);
             setCredits(balance);
-            setCreditReduction(0); // Reset bei neuem Dialog
+            setCreditReduction(0); 
             
-            // Ermittle Item Typ
+            // Typ bestimmen
             let type = 'lingerie';
             if (instruction.items && instruction.items.length > 0) {
-                // Wir nehmen das erste Item als Referenz (oder das "härteste")
-                // Da wir instruction.items meistens nur als {id, name, img} haben, suchen wir im vollen 'items' Array
                 const fullItem = items.find(i => i.id === instruction.items[0].id);
                 if (fullItem) {
                     const sub = (fullItem.subCategory || '').toLowerCase();
@@ -89,6 +94,10 @@ export default function InstructionDialog({
                 }
             }
             setCreditType(type);
+
+            // Insolvenz-Check
+            const insCheck = await checkInsolvency(currentUser.uid, type);
+            setInsolvencyData(insCheck);
         }
     };
     loadData();
@@ -98,28 +107,71 @@ export default function InstructionDialog({
       if (open) setSuggestedItem(null);
   }, [open]);
 
-  // --- TIME BANK LOGIC ---
-  // Prüfen ob Einlösung erlaubt ist
+  // --- TIME BANK LOGIC UPDATE ---
+  // Overdraft erlaubt, solange Insolvenz-Limit nicht erreicht
   const canSpendCredits = 
       instruction && 
       !instruction.isAccepted && 
-      instruction.periodId && instruction.periodId.includes('day') && // NUR TAG
+      instruction.periodId && instruction.periodId.includes('day') && 
       credits && creditType &&
-      (creditType === 'nylon' ? credits.nc > 0 : credits.lc > 0);
+      !insolvencyData.isBlocked; // Blockiert nur wenn HARD LIMIT (-48h) erreicht
 
-  // Berechne Limit (1/3 Regel)
   useEffect(() => {
       if (canSpendCredits && instruction.durationMinutes) {
-          const limitByPolicy = Math.floor(instruction.durationMinutes / 3); // Max 33%
-          const available = creditType === 'nylon' ? credits.nc : credits.lc;
+          // 1. Das logische Limit: 33% der Instruktion (Politik)
+          const limitByPolicy = Math.floor(instruction.durationMinutes / 3); 
           
-          // Das Limit ist das Kleinere von beiden (Politik oder Geldbeutel)
-          const actualMax = Math.min(limitByPolicy, available);
-          setMaxReduction(actualMax);
+          // 2. Das finanzielle Limit:
+          // Wie viel "Kaufkraft" habe ich noch bis zum Limit (-2880)?
+          // Guthaben (positiv) + Restkredit (bis -2880)
+          // Achtung: Für den Kredit-Teil gilt der Faktor 1.5!
+          // Wir vereinfachen hier: Wir erlauben den Slider bis 33%, 
+          // prüfen aber bei jedem Step, ob wir das Limit reißen würden.
+          
+          setMaxReduction(limitByPolicy);
       } else {
           setMaxReduction(0);
       }
-  }, [canSpendCredits, instruction, credits, creditType]);
+  }, [canSpendCredits, instruction, credits, creditType, insolvencyData]);
+
+  // KOSTEN-BERECHNUNG (Live Update beim Slider ziehen)
+  useEffect(() => {
+      if (!creditType) return;
+      const currentBalance = creditType === 'nylon' ? credits.nc : credits.lc;
+      
+      let cost = creditReduction;
+      let overdraft = false;
+
+      // Haben wir genug Guthaben?
+      if (currentBalance >= creditReduction) {
+          // Alles gedeckt -> Kosten 1:1
+          cost = creditReduction;
+      } else {
+          // Nicht gedeckt -> Overdraft Logik
+          overdraft = true;
+          // Alles was gedeckt ist: 1:1
+          const covered = Math.max(0, currentBalance);
+          // Rest: 1:1.5
+          const remainder = creditReduction - covered;
+          const penaltyPart = Math.round(remainder * OVERDRAFT_PENALTY);
+          cost = covered + penaltyPart;
+      }
+
+      setProjectedCost(cost);
+      setIsOverdraft(overdraft);
+
+      // Check ob das Ergebnis das Limit sprengt
+      const projectedNewBalance = currentBalance - cost;
+      // MAX_DEBT_MINUTES ist 2880. Also Limit ist -2880.
+      if (projectedNewBalance < -2880) {
+          // Slider zurücksetzen/Limitieren wäre elegant, hier Warnung oder Block im UI
+          // Wir lassen den User es sehen, aber deaktivieren den Button
+      }
+
+  }, [creditReduction, credits, creditType]);
+
+  const projectedBalance = (creditType === 'nylon' ? credits.nc : credits.lc) - projectedCost;
+  const isInsolvencyRisk = projectedBalance < -2880;
 
 
   const triggerHardcoreCheck = (actionToExecute) => {
@@ -202,10 +254,7 @@ export default function InstructionDialog({
                     await startSessionService(currentUser.uid, {
                         itemId: fullItem.id, items: [fullItem], type: 'instruction', 
                         periodId: instruction.periodId, acceptedAt: instruction.acceptedAt, verifiedViaNfc: true,
-                        // Hier übergeben wir die reduzierte Dauer (falls Credit genutzt wurde)
-                        // Achtung: Credits wurden schon beim "Schwur" abgezogen.
-                        // Hier geht es nur noch um die Session-Metadaten.
-                        instructionDurationMinutes: instruction.durationMinutes // Dies ist nun schon der reduzierte Wert aus dem State
+                        instructionDurationMinutes: instruction.durationMinutes 
                     });
                     setVerifiedItems(prev => [...prev, fullItem.id]);
                     if (showToast) showToast(`${fullItem.name} verifiziert!`, "success");
@@ -227,80 +276,30 @@ export default function InstructionDialog({
   };
 
   // --- OATH WRAPPER FOR SPENDING ---
-  const handleOathComplete = async () => {
-      // 1. Credits abziehen (wenn genutzt)
-      if (creditReduction > 0) {
-          await spendCredits(currentUser.uid, creditReduction, creditType);
-          if (showToast) showToast(`${creditReduction} Minuten Guthaben eingelöst.`, "info");
-      }
-
-      // 2. Oath Logik aufrufen (Parent)
-      // Wir müssen dem Parent/InstructionService eigentlich mitteilen, dass die Dauer verkürzt wurde.
-      // Da 'handleAcceptOath' im Dashboard liegt und nur das Flag setzt, 
-      // updaten wir die Instruction lokal, damit beim Starten die richtige Zeit genutzt wird.
-      
-      // ACHTUNG: Das saubere Vorgehen wäre, die reduzierte Zeit auch in 'dailyInstruction' zu speichern.
-      // Aber für den Session-Start reicht es, wenn wir es hier wissen.
-      
-      // Wir rufen onStartOath auf? Nein, dies ist der Callback wenn der Timer fertig ist.
-      // Der Timer im Dialog ruft 'handleAcceptOath' im Dashboard auf.
-      // Wir müssen diesen Flow leicht anpassen oder hier hooken.
-      
-      // Workaround: Wir manipulieren die 'instruction' im lokalen Scope nicht permanent,
-      // aber wir updaten die Datenbank optional mit der neuen Zielzeit.
-      
-      // Da wir keine Prop für 'updateInstruction' haben, rufen wir onStartOath/onCancel nicht hier auf,
-      // sondern wir sind der "Trigger", wenn der Button losgelassen wird (bei 100%).
-      // Das wird via 'oathProgress' gesteuert.
-      // Die Logik liegt im Dashboard.jsx 'handleAcceptOath'.
-      
-      // Da wir im Dashboard keinen Zugriff auf 'creditReduction' haben, müssen wir das Spending HIER machen,
-      // BEVOR wir dem Dashboard sagen "Ist akzeptiert".
-      
-      // Problem: Der Button im Dashboard triggert den Timer.
-      // Lösung: Wir lassen den Timer laufen. Wenn er fertig ist, ruft er im Dashboard 'handleAcceptOath' auf.
-      // Das Dashboard weiß nichts von den Credits.
-      // Das ist okay. Das Spending passiert HIER beim Klick auf "Akzeptieren"? Nein, beim Halten.
-      
-      // BESSERE LÖSUNG: Wir nutzen onStartOath nur als Trigger.
-      // Wenn der User den OathButton drückt (MouseDown), passiert nichts Kritisches.
-      // Wenn der Balken voll ist, wird die Funktion im Dashboard gerufen.
-      
-      // Wir injizieren die Credit-Logik in den Props-Callback? Nein, React Props sind read-only.
-      
-      // Pragmatisch: Wir machen das Spending, wenn der User den Slider bewegt? Nein. Erst beim Kauf.
-      // Wir führen das Spending aus, wenn der Dialog schließt? Nein.
-      
-      // Wir müssen 'handleAcceptOath' im Dashboard wrappen. Aber wir sind hier im Child.
-      // Wir können es nicht.
-      
-      // Alternative: Wir führen das Spending aus, wenn `instruction.isAccepted` true wird!
-      // Das passiert als Reaktion auf das Dashboard-Update.
-  };
-
-  // Wir überwachen, ob die Instruction akzeptiert wurde.
-  // Wenn ja, und wir hatten eine Reduction eingestellt -> SPEND!
-  // Und wir speichern die neue Dauer in der DB.
   useEffect(() => {
       if (instruction?.isAccepted && creditReduction > 0) {
           const finalizeSpending = async () => {
-             // Verhindern von Double-Spending via lokaler Ref wäre gut, aber Instruction ändert sich eh.
-             await spendCredits(currentUser.uid, creditReduction, creditType);
-             
-             // Update der Instruction Duration in der DB, damit die Session das korrekte Ziel hat
-             const newDuration = (instruction.durationMinutes || 0) - creditReduction;
-             await updateDoc(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), {
-                 durationMinutes: newDuration,
-                 originalDurationMinutes: instruction.durationMinutes, // Audit Trail
-                 creditsUsed: creditReduction
-             });
-             
-             // Lokales Reset
-             setCreditReduction(0);
+             // Hier rufen wir spendCredits auf - der Service kümmert sich um Penalty und Limits
+             try {
+                 await spendCredits(currentUser.uid, creditReduction, creditType);
+                 
+                 const newDuration = (instruction.durationMinutes || 0) - creditReduction;
+                 await updateDoc(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), {
+                     durationMinutes: newDuration,
+                     originalDurationMinutes: instruction.durationMinutes,
+                     creditsUsed: creditReduction,
+                     wasOverdraft: isOverdraft // Für Statistik
+                 });
+                 setCreditReduction(0);
+             } catch(e) {
+                 if (e.message === 'INSOLVENCY_LIMIT_REACHED') {
+                     showToast("TRANSAKTION FEHLGESCHLAGEN: Limit erreicht.", "error");
+                 }
+             }
           };
           finalizeSpending();
       }
-  }, [instruction?.isAccepted]); // Trigger wenn accepted wahr wird
+  }, [instruction?.isAccepted]);
 
 
   const totalItems = instruction?.items?.length || 0;
@@ -357,6 +356,7 @@ export default function InstructionDialog({
     if (!instruction.isAccepted) {
         const originalDuration = instruction.durationMinutes || 0;
         const currentDuration = originalDuration - creditReduction;
+        const currentBalance = creditType === 'nylon' ? credits.nc : credits.lc;
 
         return (
             <Box sx={{ textAlign: 'center' }}>
@@ -386,51 +386,82 @@ export default function InstructionDialog({
                 </Box>
 
                 {/* THE VAULT (TIME BANK) */}
-                {canSpendCredits && (
-                    <Box sx={{ mb: 3, px: 2, py: 2, border: `1px solid ${PALETTE.accents.gold}`, borderRadius: 2, bgcolor: 'rgba(255, 215, 0, 0.05)' }}>
+                {instruction.periodId && instruction.periodId.includes('day') && (
+                    <Box sx={{ 
+                        mb: 3, px: 2, py: 2, 
+                        border: `1px solid ${isOverdraft ? PALETTE.accents.red : PALETTE.accents.gold}`, 
+                        borderRadius: 2, 
+                        bgcolor: isOverdraft ? 'rgba(255, 0, 0, 0.05)' : 'rgba(255, 215, 0, 0.05)' 
+                    }}>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                <SavingsIcon sx={{ color: PALETTE.accents.gold }} fontSize="small" />
-                                <Typography variant="body2" sx={{ fontWeight: 'bold', color: PALETTE.accents.gold }}>THE VAULT</Typography>
+                                {isOverdraft ? <TrendingDownIcon sx={{ color: PALETTE.accents.red }} /> : <SavingsIcon sx={{ color: PALETTE.accents.gold }} />}
+                                <Typography variant="body2" sx={{ fontWeight: 'bold', color: isOverdraft ? PALETTE.accents.red : PALETTE.accents.gold }}>
+                                    {isOverdraft ? "DEBT WARNING" : "THE VAULT"}
+                                </Typography>
                             </Box>
                             <Chip 
-                                label={`${creditType === 'nylon' ? 'NC' : 'LC'}: ${creditType === 'nylon' ? credits.nc : credits.lc} min`} 
+                                label={`${creditType === 'nylon' ? 'NC' : 'LC'}: ${currentBalance} min`} 
                                 size="small" 
-                                sx={{ bgcolor: PALETTE.accents.gold, color: '#000', fontWeight: 'bold', fontSize: '0.7rem' }} 
-                            />
-                        </Box>
-                        
-                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1, textAlign: 'left' }}>
-                            Guthaben einlösen (Max 33%):
-                        </Typography>
-                        <Box sx={{ px: 1 }}>
-                            <Slider
-                                value={creditReduction}
-                                min={0}
-                                max={maxReduction}
-                                step={15} // 15 Min Schritte
-                                onChange={(e, val) => setCreditReduction(val)}
                                 sx={{ 
-                                    color: PALETTE.accents.gold,
-                                    '& .MuiSlider-thumb': { boxShadow: '0 0 10px rgba(255,215,0,0.5)' } 
-                                }}
+                                    bgcolor: currentBalance < 0 ? PALETTE.accents.red : PALETTE.accents.gold, 
+                                    color: '#000', fontWeight: 'bold', fontSize: '0.7rem' 
+                                }} 
                             />
                         </Box>
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 0.5 }}>
-                            <Typography variant="caption" color="text.secondary">0 min</Typography>
-                            <Typography variant="caption" sx={{ color: creditReduction > 0 ? PALETTE.accents.green : 'text.secondary', fontWeight: 'bold' }}>
-                                -{creditReduction} min
-                            </Typography>
-                        </Box>
+
+                        {insolvencyData.isBlocked ? (
+                             <Alert severity="error" sx={{ mb: 1, bgcolor: 'rgba(255,0,0,0.1)', color: '#ffaaaa' }}>
+                                 INSOLVENZ. KREDIT GESPERRT.
+                             </Alert>
+                        ) : (
+                            <>
+                                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1, textAlign: 'left' }}>
+                                    Verkürzen (Max 33%): {isOverdraft && <span style={{color: PALETTE.accents.red}}>+50% STRAFE</span>}
+                                </Typography>
+                                <Box sx={{ px: 1 }}>
+                                    <Slider
+                                        value={creditReduction}
+                                        min={0}
+                                        max={maxReduction}
+                                        step={15} 
+                                        onChange={(e, val) => setCreditReduction(val)}
+                                        sx={{ 
+                                            color: isOverdraft ? PALETTE.accents.red : PALETTE.accents.gold,
+                                            '& .MuiSlider-thumb': { boxShadow: isOverdraft ? '0 0 10px rgba(255,0,0,0.5)' : '0 0 10px rgba(255,215,0,0.5)' } 
+                                        }}
+                                    />
+                                </Box>
+                                <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 0.5 }}>
+                                    <Typography variant="caption" color="text.secondary">0 min</Typography>
+                                    <Box sx={{ textAlign: 'right' }}>
+                                        <Typography variant="caption" sx={{ color: 'text.primary', fontWeight: 'bold', display: 'block' }}>
+                                            Reduktion: -{creditReduction} min
+                                        </Typography>
+                                        {creditReduction > 0 && (
+                                            <Typography variant="caption" sx={{ color: isOverdraft ? PALETTE.accents.red : 'text.secondary' }}>
+                                                Kosten: {projectedCost} Credits
+                                            </Typography>
+                                        )}
+                                    </Box>
+                                </Box>
+                                {isInsolvencyRisk && (
+                                    <Typography variant="caption" color="error" sx={{ mt: 1, display: 'block', fontWeight: 'bold' }}>
+                                        LIMIT ÜBERSCHRITTEN! ({projectedBalance} min)
+                                    </Typography>
+                                )}
+                            </>
+                        )}
                     </Box>
                 )}
 
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
                     <Box sx={{ position: 'relative', width: '100%' }}>
                         <Button fullWidth variant="contained" size="large"
+                            disabled={isInsolvencyRisk}
                             onMouseDown={onStartOath} onMouseUp={onCancelOath} onMouseLeave={onCancelOath} onTouchStart={onStartOath} onTouchEnd={onCancelOath}
                             sx={{ py: 2, bgcolor: isHoldingOath ? PALETTE.primary.dark : PALETTE.primary.main, overflow: 'hidden' }}>
-                            {isHoldingOath ? "HALTEN..." : (creditReduction > 0 ? "KAUFEN & AKZEPTIEREN" : "AKZEPTIEREN")}
+                            {isHoldingOath ? "HALTEN..." : (creditReduction > 0 ? (isOverdraft ? "KREDIT AUFNEHMEN" : "KAUFEN & AKZEPTIEREN") : "AKZEPTIEREN")}
                             <Box sx={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${oathProgress}%`, bgcolor: 'rgba(255,255,255,0.2)', transition: 'width 0.05s linear' }} />
                         </Button>
                     </Box>
