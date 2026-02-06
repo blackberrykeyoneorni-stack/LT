@@ -10,15 +10,15 @@ import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
 export default function InfoTiles({ kpis, timeBank }) {
   // Sicherheits-Abfragen mit Defaults
   const orphanCount = kpis?.health?.orphanCount || 0;
-  const avgCPW = kpis?.financials?.avgCPW || 0;
-  const nylonIndex = kpis?.usage?.nylonIndex || 0;
+  const avgCPW = kpis?.financials?.avgCPW || '0.00';
+  const nylonIndex = kpis?.usage?.nylonIndex || '0.0';
   
   // Time Bank
   const nc = timeBank?.nc || 0;
   const lc = timeBank?.lc || 0;
   
   // SpermaScore
-  const spermaScore = kpis?.spermaScore || { rate: 0, total: 0, count: 0 };
+  const spermaScore = kpis?.spermaScore || { rate: '0.0', total: 0, count: 0 };
 
   // Hilfsfunktion für einheitliche kleine Karten
   const SmallCard = ({ icon, title, value, unit, color }) => (
@@ -60,14 +60,14 @@ export default function InfoTiles({ kpis, timeBank }) {
         <SmallCard 
             icon={<EuroIcon sx={{ fontSize: 16, color: PALETTE.accents.green }} />}
             title="Ø Cost/Wear"
-            value={typeof avgCPW === 'number' ? avgCPW.toFixed(2) : '0.00'}
+            value={avgCPW}
             unit="€"
             color={PALETTE.accents.green}
         />
         <SmallCard 
             icon={<AccessTimeIcon sx={{ fontSize: 16, color: PALETTE.accents.gold }} />}
             title="Nylon Index"
-            value={typeof nylonIndex === 'number' ? nylonIndex.toFixed(1) : '0.0'}
+            value={nylonIndex}
             unit="h"
             color={PALETTE.accents.gold}
         />

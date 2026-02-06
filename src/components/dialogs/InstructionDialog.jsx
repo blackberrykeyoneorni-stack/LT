@@ -58,10 +58,16 @@ export default function InstructionDialog({
   const [projectedCost, setProjectedCost] = useState(0);
   const [isOverdraft, setIsOverdraft] = useState(false);
 
-  // LOGIK VEREINFACHT:
-  // Wir prüfen NUR die Instruction. Ist es Nacht-Protokoll? Wenn nein -> Es ist Tag (Vault aktiv).
-  const isNightProtocol = instruction?.periodId?.toLowerCase().includes('night');
-  const showVault = !isNightProtocol; 
+  // --- ROBUSTE LOGIK FÜR SLIDER-ANZEIGE ---
+  // 1. Hole PeriodId sicher (Fallback leerer String um Absturz zu verhindern)
+  const safePeriodId = (instruction?.periodId || "").toLowerCase();
+  
+  // 2. Prüfe auf Nacht-Protokoll
+  const isNightProtocol = safePeriodId.includes('night');
+  
+  // 3. Zeige Vault, wenn es NICHT explizit Nacht-Protokoll ist.
+  // Fallback: Wenn PeriodId fehlt, nutzen wir die Tageszeit (!isNight) als Indikator.
+  const showVault = safePeriodId ? !isNightProtocol : !isNight;
 
   useEffect(() => {
     const loadData = async () => {
@@ -112,7 +118,6 @@ export default function InstructionDialog({
   }, [open]);
 
   // Spending Permission: 
-  // Instruction da + Nicht akzeptiert + Vault erlaubt (kein Nacht-Protokoll) + Keine Insolvenz-Sperre
   const canSpendCredits = 
       instruction && 
       !instruction.isAccepted && 
@@ -364,7 +369,7 @@ export default function InstructionDialog({
                     </Box>
                 </Box>
 
-                {/* THE VAULT (TIME BANK) - SIMPLIFIED CONDITION: showVault wenn !isNightProtocol */}
+                {/* THE VAULT (TIME BANK) */}
                 {showVault && (
                     <Box sx={{ 
                         mb: 3, px: 2, py: 2, 
