@@ -11,27 +11,34 @@ const HISTORY_START_DATE = new Date('2025-12-15T00:00:00');
 const fmtPct = (val) => (typeof val === 'number' ? val.toFixed(1) : '0.0');
 const fmtMoney = (val) => (typeof val === 'number' ? val.toFixed(2) : '0.00');
 
-/**
- * Berechnet die "Coverage" (Abdeckung) der letzten 7 Tage.
- * Summiert die Tragezeit (Union aller Sessions), bereinigt um Überlappungen.
- */
+// Neue Formatierung: Stunden & Minuten (z.B. "5h 12m" oder "45m")
+const fmtDuration = (minutes) => {
+    if (!minutes || minutes <= 0) return '0m';
+    const h = Math.floor(minutes / 60);
+    const m = Math.round(minutes % 60);
+    if (h > 0) return `${h}h ${m}m`;
+    return `${m}m`;
+};
+
+// Hilfsfunktion für dezimale Stunden -> Formatierung
+const fmtHoursToDuration = (hours) => {
+    return fmtDuration(hours * 60);
+};
+
 const calculateCoverage = (sessions) => {
     const now = new Date();
     const startOfPeriod = new Date(now);
-    startOfPeriod.setDate(now.getDate() - 7); // Letzte 7 Tage
+    startOfPeriod.setDate(now.getDate() - 7); 
 
-    // 1. Relevante Sessions filtern (die in den Zeitraum ragen)
     const relevantSessions = sessions.filter(s => {
         const start = s.startTime.toDate ? s.startTime.toDate() : new Date(s.startTime);
         const end = s.endTime ? (s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime)) : new Date();
         return end > startOfPeriod && start < now;
     });
 
-    // 2. Intervalle bilden und auf Zeitraum beschneiden
     const intervals = relevantSessions.map(s => {
         const start = s.startTime.toDate ? s.startTime.toDate() : new Date(s.startTime);
         const end = s.endTime ? (s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime)) : new Date();
-        
         return {
             start: Math.max(start.getTime(), startOfPeriod.getTime()),
             end: Math.min(end.getTime(), now.getTime())
@@ -40,7 +47,6 @@ const calculateCoverage = (sessions) => {
 
     if (intervals.length === 0) return 0;
 
-    // 3. Union bilden (Überlappungen verschmelzen)
     intervals.sort((a,b) => a.start - b.start);
     const merged = [];
     let curr = intervals[0];
@@ -55,9 +61,8 @@ const calculateCoverage = (sessions) => {
     }
     merged.push(curr);
 
-    // 4. Summe und Prozent berechnen
     const activeMs = merged.reduce((acc, i) => acc + (i.end - i.start), 0);
-    const totalMs = 7 * 24 * 60 * 60 * 1000; // 7 Tage in ms
+    const totalMs = 7 * 24 * 60 * 60 * 1000; 
 
     return Math.min(100, (activeMs / totalMs) * 100);
 };
@@ -147,15 +152,15 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput) {
         coreMetrics: {
             nylonEnclosure: '0.0', 
             nocturnal: '0.0', 
-            nylonGap: '0.0', 
+            nylonGap: '0m', // Jetzt String
             cpnh: '0.00',
-            complianceLag: '0.0', 
-            coverage: '0.0', // Ersetzt Exposure
+            complianceLag: '0m', // Jetzt String
+            coverage: '0.0',
             resistance: '0.0',
-            voluntarism: '0.0%', 
-            endurance: '0.0', 
-            enduranceNylon: '0.0', 
-            enduranceDessous: '0.0',
+            voluntarism: '0.0%',
+            endurance: '0m', // Jetzt String
+            enduranceNylon: '0m', 
+            enduranceDessous: '0m',
             submission: '85.0',
             denial: '12.0', 
             chastity: '0.0'
@@ -219,7 +224,7 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput) {
         const archivedItems = items.filter(i => i.status === 'archived');
         const orphanCount = items.filter(i => i.status === 'active' && (!i.wearCount || i.wearCount === 0)).length;
 
-        // B. FINANCIALS (CPW)
+        // B. FINANCIALS
         let totalCost = 0; 
         let totalWears = 0;
         items.forEach(i => { 
@@ -283,11 +288,8 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput) {
         const cpnhVal = totalNylonHoursLifetime > 0 ? (totalNylonCost / totalNylonHoursLifetime) : 0;
 
         // D. CORE METRICS
-        
-        // Coverage (7 Tage Rolling)
         const coverageVal = calculateCoverage(allSessions);
 
-        // Nocturnal
         let daysCount = 0;
         let nocturnalSuccessCount = 0;
         const loopDate = new Date(HISTORY_START_DATE);
@@ -302,7 +304,6 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput) {
         }
         const nocturnalVal = daysCount > 0 ? (nocturnalSuccessCount / daysCount) * 100 : 0;
 
-        // Nylon Gap
         let totalGapHours = 0;
         let gapDaysCount = 0;
         const gapLoopDate = new Date(HISTORY_START_DATE);
@@ -314,21 +315,31 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput) {
         }
         const avgGapVal = gapDaysCount > 0 ? (totalGapHours / gapDaysCount) : 24;
 
-        // Voluntarism & Resistance
+        // Voluntarism & Compliance Lag
         let totalDurationMs = 0;
         let voluntaryDurationMs = 0;
+        let totalLagMinutes = 0;
+        let lagCount = 0;
+
         historySessions.forEach(s => {
             const start = s.startTime.toDate ? s.startTime.toDate() : new Date(s.startTime);
             const end = s.endTime ? (s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime)) : new Date();
             const duration = Math.max(0, end.getTime() - start.getTime());
             totalDurationMs += duration;
             if (s.type === 'voluntary') voluntaryDurationMs += duration;
+
+            // Compliance Lag berechnen
+            if (typeof s.complianceLagMinutes === 'number') {
+                totalLagMinutes += s.complianceLagMinutes;
+                lagCount++;
+            }
         });
         const voluntarismVal = totalDurationMs > 0 ? (voluntaryDurationMs / totalDurationMs) * 100 : 0;
-        const punishments = historySessions.filter(s => s.type === 'punishment');
-        const resistanceVal = historySessions.length > 0 ? (punishments.length / historySessions.length) * 100 : 0;
+        const resistanceVal = historySessions.length > 0 ? (historySessions.filter(s => s.type === 'punishment').length / historySessions.length) * 100 : 0;
+        
+        const avgLagVal = lagCount > 0 ? (totalLagMinutes / lagCount) : 0;
 
-        // Endurance
+        // ENDURANCE (Strict: Only Nylon/Lingerie)
         const relevantEnduranceSessions = historySessions.filter(s => s.startTime);
         let globalDuration = 0; let globalCount = 0;
         let nylonDuration = 0; let nylonCount = 0;
@@ -351,14 +362,14 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput) {
             const hasDessous = sessionItems.some(i => {
                 const sub = (i.subCategory || '').toLowerCase();
                 const cat = (i.mainCategory || '').toLowerCase();
-                return cat.includes('dessous') || cat.includes('wäsche') || sub.includes('body');
-            });
-            const isAccessoryOnly = sessionItems.every(i => {
-                const cat = (i.mainCategory || '').toLowerCase();
-                return cat === 'accessoires' || cat === 'schuhe';
+                return cat.includes('dessous') || cat.includes('wäsche') || sub.includes('body') || sub.includes('slip') || sub.includes('bh') || cat.includes('corsage');
             });
 
-            if (!isAccessoryOnly) { globalDuration += durationHours; globalCount++; }
+            // LOGIK ÄNDERUNG: Zähle global nur, wenn Nylon oder Dessous dabei ist.
+            if (hasNylon || hasDessous) { 
+                globalDuration += durationHours; 
+                globalCount++; 
+            }
             if (hasNylon) { nylonDuration += durationHours; nylonCount++; }
             if (hasDessous) { dessousDuration += durationHours; dessousCount++; }
         });
@@ -389,8 +400,8 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput) {
 
         setKpis({
             health: { orphanCount },
-            financials: { avgCPW: fmtMoney(avgCPWVal) }, // 2 Nachkommastellen
-            usage: { nylonIndex: fmtPct(nylonIndexVal) }, // 1 Nachkommastelle
+            financials: { avgCPW: fmtMoney(avgCPWVal) }, 
+            usage: { nylonIndex: fmtPct(nylonIndexVal) }, 
             spermaScore: { 
                 rate: fmtPct(spermaRateVal), 
                 total: releaseStats.totalReleases, 
@@ -399,15 +410,15 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput) {
             coreMetrics: {
                 nylonEnclosure: fmtPct(nylonEnclosureVal),
                 nocturnal: fmtPct(nocturnalVal),
-                nylonGap: fmtPct(avgGapVal),
+                nylonGap: fmtHoursToDuration(avgGapVal), // FORMATIERT: Xh Ym
                 cpnh: fmtMoney(cpnhVal),
-                complianceLag: '12.0',
-                coverage: fmtPct(coverageVal), // NEU
+                complianceLag: fmtDuration(avgLagVal), // FORMATIERT: Xh Ym
+                coverage: fmtPct(coverageVal),
                 resistance: fmtPct(resistanceVal),
-                voluntarism: fmtPct(voluntarismVal) + '%', // MIT % ZEICHEN
-                endurance: fmtPct(enduranceVal),
-                enduranceNylon: fmtPct(enduranceNylonVal),
-                enduranceDessous: fmtPct(enduranceDessousVal),
+                voluntarism: fmtPct(voluntarismVal) + '%', 
+                endurance: fmtHoursToDuration(enduranceVal), // FORMATIERT: Xh Ym
+                enduranceNylon: fmtHoursToDuration(enduranceNylonVal), // FORMATIERT
+                enduranceDessous: fmtHoursToDuration(enduranceDessousVal), // FORMATIERT
                 submission: '85.0',
                 denial: '12.0',
                 chastity: fmtPct(nylonEnclosureVal)

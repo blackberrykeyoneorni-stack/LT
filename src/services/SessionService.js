@@ -23,7 +23,7 @@ export const startSession = async (userId, params) => {
 
     if (!userId) throw new Error("User ID fehlt.");
 
-    // 1. Items vorbereiten
+    // Items vorbereiten
     let itemsToProcess = [];
     if (items && Array.isArray(items) && items.length > 0) {
         itemsToProcess = items;
@@ -33,14 +33,14 @@ export const startSession = async (userId, params) => {
 
     if (itemsToProcess.length === 0) return;
     const allItemIds = itemsToProcess.map(i => i.id);
-    const mainItem = itemsToProcess[0]; // Referenz für Kategorie-Check
+    const mainItem = itemsToProcess[0]; 
 
     // --- DEBT PROTOCOL CHECK ---
     const timeBank = await getTimeBankBalance(userId);
-    let debtType = null; // 'nylon', 'lingerie', oder null
+    let debtType = null; 
     let debtAmount = 0;
 
-    // Priorität: Wo sind die Schulden am höchsten? (Oder einfach NC zuerst prüfen)
+    // Wir prüfen, ob ein Konto im Minus ist
     if (timeBank.nc < 0) {
         debtType = 'nylon';
         debtAmount = Math.abs(timeBank.nc);
@@ -53,8 +53,7 @@ export const startSession = async (userId, params) => {
     let enforcedMinDuration = 0;
 
     if (debtType) {
-        // WÄHRUNGSTRENNUNG PRÜFEN
-        // Ist das Item passend zur Schuld?
+        // WÄHRUNGSTRENNUNG: Item muss zur Schuld passen
         const sub = (mainItem.subCategory || '').toLowerCase();
         const cat = (mainItem.mainCategory || '').toLowerCase();
         
@@ -63,27 +62,20 @@ export const startSession = async (userId, params) => {
                             cat.includes('nylons');
         
         if (debtType === 'nylon' && !isNylonItem) {
-            // FEHLER: Du hast Nylon Schulden, versuchst aber was anderes zu starten.
-            // Wir werfen einen Fehler, der im UI als Toast angezeigt werden sollte.
             throw new Error("BLOCKIERT: Nylon-Schulden müssen mit Nylons getilgt werden.");
         }
 
         if (debtType === 'lingerie' && isNylonItem) {
-             // Optional: Lingerie Schulden, aber Nylon Item. 
-             // Wenn man streng ist: Verboten. Wenn man locker ist: Nylons zählen nicht als Dessous-Tilgung.
-             // Laut Prompt: "Währungstrennung". Also strikt.
              throw new Error("BLOCKIERT: Dessous-Schulden erfordern Lingerie.");
         }
 
-        // Wenn wir hier sind, passt das Item zur Schuld.
-        // Session wird zur TILGUNGS-SESSION
+        // Wenn passend: Session wird zur Zwangstilgung
         isDebtSession = true;
         enforcedMinDuration = debtAmount;
         console.log(`DEBT PROTOCOL: Session enforced for ${debtAmount} mins (${debtType}).`);
     }
 
-
-    // 2. Compliance Lag berechnen
+    // Compliance Lag berechnen
     let lagMinutes = 0;
     if (type === 'instruction' && acceptedAt) {
         const acceptDate = new Date(acceptedAt);
@@ -93,7 +85,7 @@ export const startSession = async (userId, params) => {
         }
     }
 
-    // 3. Session Dokument erstellen
+    // Session Dokument erstellen
     const sessionData = {
         userId,
         itemId: allItemIds[0], 
@@ -103,12 +95,12 @@ export const startSession = async (userId, params) => {
         endTime: null,
         isActive: true,
         note,
-        targetDurationMinutes: instructionDurationMinutes || null,
+        targetDurationMinutes: instructionDurationMinutes ? Number(instructionDurationMinutes) : null,
         complianceLagMinutes: lagMinutes,
         
-        // NEU: Debt Data
+        // DEBT DATA: Das macht die Session zur Falle
         isDebtSession: isDebtSession,
-        minDuration: enforcedMinDuration // Das ActiveSessionsList UI sperrt den Button hiermit
+        minDuration: enforcedMinDuration 
     };
 
     if (type === 'instruction') {
@@ -118,7 +110,6 @@ export const startSession = async (userId, params) => {
         sessionData.verifiedViaNfc = true;
     }
 
-    // DB Operations
     const sessionRef = await addDoc(collection(db, `users/${userId}/sessions`), sessionData);
     const batch = writeBatch(db);
 
@@ -151,7 +142,7 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
     const startTime = sessionData.startTime?.toDate ? sessionData.startTime.toDate() : new Date(); 
     const durationMinutes = Math.round((endTime - startTime) / 60000);
 
-    // --- NACHT-COMPLIANCE CHECK ---
+    // Night Compliance
     let nightSuccess = null;
     const isInstruction = sessionData.type === 'instruction';
     const isNight = sessionData.periodId && sessionData.periodId.toLowerCase().includes('night');
@@ -160,7 +151,6 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
         nightSuccess = false; 
         const offset = endTime.getTimezoneOffset() * 60000;
         const dateKey = new Date(endTime.getTime() - offset).toISOString().split('T')[0];
-
         try {
             const complianceRef = doc(db, `users/${userId}/status/nightCompliance`);
             const complianceSnap = await getDoc(complianceRef);
@@ -173,7 +163,7 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
         } catch (e) { console.error(e); }
     }
 
-    // 1. Session schließen
+    // Session schließen
     const updateData = {
         endTime: serverTimestamp(),
         isActive: false,
@@ -186,44 +176,42 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
     }
     batch.update(sessionRef, updateData);
 
-    // 2. Item Status zurücksetzen
+    // Item Status zurücksetzen
     const itemIds = sessionData.itemIds || (sessionData.itemId ? [sessionData.itemId] : []);
-    
     itemIds.forEach(id => {
         const itemRef = doc(db, `users/${userId}/items`, id);
-        batch.update(itemRef, { 
-            status: 'active',
-            lastWorn: serverTimestamp() 
-        });
+        batch.update(itemRef, { status: 'active', lastWorn: serverTimestamp() });
     });
 
     await batch.commit(); 
 
-    // 3. ASYNC STATS UPDATES
+    // Stats Updates
     for (const id of itemIds) {
         await updateWearStats(userId, id, durationMinutes);
     }
 
-    // 4. TIME BANK LOGIK (EARNING & TILGUNG)
-    // Wenn es eine Debt-Session war, zählt JEDE Minute zur Tilgung (Verhältnis 1:1 bei Tilgung)
-    // Wenn es normal war, zählt nur Overtime.
-    // TimeBankService.addCredits unterscheidet intern ob Saldo < 0 ist.
-    
+    // TIME BANK: Earning & Tilgung
     if (sessionData.type !== 'punishment' && !sessionData.tzdExecuted) {
         let eligibleMinutes = 0;
 
         if (sessionData.isDebtSession) {
-            // Bei Schulden zählt alles, um das Loch zu füllen
+            // Bei Schulden zählt jede Minute zur Tilgung (1:1)
             eligibleMinutes = durationMinutes;
         } else if (sessionData.type === 'voluntary') {
+            // Normales Earnen
             eligibleMinutes = durationMinutes;
         } else if (sessionData.type === 'instruction') {
-            const target = sessionData.targetDurationMinutes || 0;
-            if (durationMinutes > target && target > 0) {
+            // FIX: Robustere Berechnung für Instruction Overtime
+            const target = Number(sessionData.targetDurationMinutes) || 0;
+            if (target > 0 && durationMinutes > target) {
+                // Nur die Differenz wird gutgeschrieben (Overtime)
                 eligibleMinutes = durationMinutes - target;
+                console.log(`Instruction Overtime: ${durationMinutes} worn - ${target} target = ${eligibleMinutes} eligible.`);
             }
         }
 
+        // Wenn Guthaben verdient wurde, rufen wir den Service auf.
+        // Der Service teilt voluntary/overtime Minuten durch 3 (sofern Konto im Plus).
         if (eligibleMinutes > 0) {
             let creditType = 'lingerie';
             try {
@@ -240,7 +228,6 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
                         creditType = 'nylon';
                     }
                 }
-                // HIER: addCredits ruft intern die Logik auf.
                 await addCredits(userId, eligibleMinutes, creditType);
             } catch(e) { console.error("Error calculating credits", e); }
         }

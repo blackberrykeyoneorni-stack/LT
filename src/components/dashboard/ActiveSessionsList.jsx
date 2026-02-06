@@ -4,7 +4,6 @@ import {
 } from '@mui/material';
 import StopIcon from '@mui/icons-material/Stop';
 import LockIcon from '@mui/icons-material/Lock';
-import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -17,11 +16,17 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
 
   if (!activeSessions || activeSessions.length === 0) return null;
 
+  // Hilfsfunktion zur Formatierung der Dauer
+  const formatDuration = (totalMinutes) => {
+      const h = Math.floor(totalMinutes / 60);
+      const m = totalMinutes % 60;
+      if (h > 0) return `${h} h ${m} min`;
+      return `${m} min`;
+  };
+
   return (
     <Box sx={{ mb: 4 }}>
-      <Typography variant="h6" gutterBottom sx={{ px: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-         <AccessTimeIcon color="primary" /> Aktive Protokolle
-      </Typography>
+      {/* Überschrift "Aktive Protokolle" entfernt, wie gewünscht */}
       
       <AnimatePresence>
         {activeSessions.map((session) => {
@@ -121,7 +126,6 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
                                                 sx={{ width: 40, height: 40, border: `1px solid ${PALETTE.primary.main}` }}
                                             />
                                             <Box>
-                                                {/* Text clean (ohne Unterstreichung) */}
                                                 <Typography variant="body2" sx={{ fontWeight: 'bold', color: 'text.primary' }}>
                                                     {item.name}
                                                 </Typography>
@@ -131,9 +135,9 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
                                             </Box>
                                         </Box>
 
-                                        {/* Zeit-Chip */}
+                                        {/* Zeit-Chip: Jetzt formatiert in h/min */}
                                         <Chip 
-                                            label={`${durationMinutes} min`} 
+                                            label={formatDuration(durationMinutes)} 
                                             size="small" 
                                             variant="outlined"
                                             sx={{ 

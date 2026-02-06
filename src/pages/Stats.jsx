@@ -9,7 +9,7 @@ import {
 } from '@mui/material';
 import { 
     AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, 
-    ResponsiveContainer, PieChart, Pie, Cell, Legend 
+    ResponsiveContainer, PieChart, Pie, Cell, Legend, BarChart, Bar 
 } from 'recharts';
 import { motion } from 'framer-motion';
 
@@ -24,9 +24,8 @@ import PsychologyIcon from '@mui/icons-material/Psychology';
 import TimerIcon from '@mui/icons-material/Timer';
 import SecurityIcon from '@mui/icons-material/Security';
 import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty'; 
-import ShieldIcon from '@mui/icons-material/Shield'; // Für Coverage
+import ShieldIcon from '@mui/icons-material/Shield'; 
 
-// --- HELPER: Safe Date Parsing ---
 const safeDate = (val) => {
     if (!val) return null;
     if (typeof val.toDate === 'function') {
@@ -39,8 +38,6 @@ const safeDate = (val) => {
     return isNaN(d.getTime()) ? null : d;
 };
 
-// Hilfsfunktion: Berechnet die effektiven Trage-Minuten (Union) für einen Tag
-// Identisch zur Logik in useKPIs für Konsistenz (Nylon Gap)
 const calculateDailyNylonWearMinutes = (targetDate, sessions, items) => {
     const startOfDay = new Date(targetDate);
     startOfDay.setHours(0, 0, 0, 0);
@@ -58,7 +55,6 @@ const calculateDailyNylonWearMinutes = (targetDate, sessions, items) => {
         return sItemIds.some(id => {
             const item = items.find(i => i.id === id);
             if (!item) return false;
-            // Gap Definition: Nylon oder Strumpfhose
             const cat = (item.mainCategory || '').toLowerCase();
             const sub = (item.subCategory || '').toLowerCase();
             return cat.includes('nylon') || sub.includes('strumpfhose') || sub.includes('stockings');
@@ -92,7 +88,6 @@ const calculateDailyNylonWearMinutes = (targetDate, sessions, items) => {
     return Math.floor(totalMs / 60000);
 };
 
-// NEU: Berechnet allgemeine Active Minutes (für Coverage Trend)
 const calculateDailyActiveMinutes = (targetDate, sessions) => {
     const startOfDay = new Date(targetDate);
     startOfDay.setHours(0, 0, 0, 0);
@@ -101,9 +96,9 @@ const calculateDailyActiveMinutes = (targetDate, sessions) => {
     
     const relevantSessions = sessions.filter(s => {
         const sStart = safeDate(s.startTime);
-        const sEnd = safeDate(s.endTime); 
         if (!sStart) return false;
         if (sStart > endOfDay) return false;
+        const sEnd = safeDate(s.endTime);
         if (sEnd && sEnd < startOfDay) return false;
         return true;
     });
@@ -143,13 +138,11 @@ export default function Statistics() {
     const [selectedMetric, setSelectedMetric] = useState(null); 
     const [trendData, setTrendData] = useState([]); 
 
-    // --- 1. DATA LOADING ---
     useEffect(() => {
         if (!currentUser) return;
         const loadData = async () => {
             setLoading(true);
             try {
-                // Items laden
                 const iSnap = await getDocs(collection(db, `users/${currentUser.uid}/items`));
                 const loadedItems = iSnap.docs.map(d => ({ 
                     id: d.id, ...d.data(), 
@@ -157,7 +150,6 @@ export default function Statistics() {
                 }));
                 setItems(loadedItems);
 
-                // History laden
                 const sSnap = await getDocs(query(collection(db, `users/${currentUser.uid}/sessions`), orderBy('startTime', 'asc')));
                 const loadedSessions = sSnap.docs.map(d => ({ 
                     id: d.id, ...d.data(), 
@@ -166,25 +158,18 @@ export default function Statistics() {
                 }));
                 setSessions(loadedSessions);
 
-            } catch (e) { 
-                console.error("Stats Load Error:", e); 
-            } finally { 
-                setLoading(false); 
-            }
+            } catch (e) { console.error("Stats Load Error:", e); } 
+            finally { setLoading(false); }
         };
         loadData();
     }, [currentUser]);
 
-    // --- 2. KPI CALCULATION ---
     const { coreMetrics, basics } = useKPIs(items, [], sessions);
 
-    // --- 3. CHART LOGIK ---
     const calculateTrend = (metricId) => {
-        // Anzeige: Letzte 30 Tage
         const displayDays = 30;
         const windowSize = 5;
         const totalDaysNeeded = displayDays + windowSize - 1;
-
         const rawData = [];
         const today = new Date();
         
@@ -201,7 +186,7 @@ export default function Statistics() {
 
             let val = 0;
             
-            if (metricId === 'coverage') { // ERSETZT EXPOSURE
+            if (metricId === 'coverage') {
                 const activeMins = calculateDailyActiveMinutes(d, sessions);
                 val = (activeMins / 1440) * 100;
             } 
@@ -209,11 +194,9 @@ export default function Statistics() {
                 const checkTime = new Date(d);
                 checkTime.setHours(2, 0, 0, 0); 
                 const checkTs = checkTime.getTime();
-
                 const isWorn = sessions.some(s => {
                      const start = s.startTime; 
                      const end = s.endTime; 
-                     
                      if (!start) return false;
                      if (checkTs >= start.getTime() && (!end || checkTs <= end.getTime())) {
                          const sItemIds = s.itemIds || (s.itemId ? [s.itemId] : []);
@@ -248,9 +231,8 @@ export default function Statistics() {
                 let volMs = 0;
                 daySessions.forEach(s => {
                     const end = s.endTime || new Date();
-                    const dur = end - s.startTime;
-                    totalMs += dur;
-                    if(s.type === 'voluntary') volMs += dur;
+                    totalMs += (end - s.startTime);
+                    if(s.type === 'voluntary') volMs += (end - s.startTime);
                 });
                 val = totalMs > 0 ? (volMs / totalMs) * 100 : 0;
             }
@@ -271,7 +253,6 @@ export default function Statistics() {
                      const end = s.endTime || new Date();
                      const dur = end - s.startTime;
                      globalMs += dur;
-
                      const sItemIds = s.itemIds || (s.itemId ? [s.itemId] : []);
                      const hasNylon = sItemIds.some(id => {
                         const item = items.find(i => i.id === id);
@@ -280,7 +261,6 @@ export default function Statistics() {
                         const sub = (item.subCategory || '').toLowerCase();
                         return cat.includes('nylon') || sub.includes('strumpfhose') || sub.includes('stockings');
                      });
-
                      if(hasNylon) nylonMs += dur;
                  });
                  val = globalMs > 0 ? (nylonMs / globalMs) * 100 : 0;
@@ -288,7 +268,6 @@ export default function Statistics() {
             else {
                 val = daySessions.length;
             }
-            
             rawData.push({ date: dateStr, val });
         }
 
@@ -298,7 +277,6 @@ export default function Statistics() {
             const sum = windowSlice.reduce((acc, curr) => acc + curr.val, 0);
             const avg = sum / windowSize;
             const currentDay = rawData[i];
-            
             smoothedData.push({
                 name: currentDay.date.split('-').slice(2).join('.'),
                 fullDate: currentDay.date,
@@ -321,20 +299,34 @@ export default function Statistics() {
     const forensics = {
         archivedCount: basics?.archived || 0,
         realizedCPW: 0,
-        reasonsData: []
+        reasonsData: [],
+        lossValueData: []
     };
     
     if (items.length > 0) {
         const archived = items.filter(i => i.status === 'archived');
         let totalCost = 0; let totalWears = 0;
-        items.forEach(i => { totalCost += (parseFloat(i.cost)||0); totalWears += (i.wearCount||0); });
+        const reasonCounts = {};
+        const reasonValues = {};
+
+        archived.forEach(i => { 
+            const cost = parseFloat(i.cost)||0;
+            totalCost += cost; 
+            totalWears += (i.wearCount||0); 
+            const r = i.archiveReason || 'Unbekannt'; 
+            reasonCounts[r] = (reasonCounts[r]||0) + 1;
+            reasonValues[r] = (reasonValues[r]||0) + cost;
+        });
+        
         forensics.realizedCPW = totalWears > 0 ? (totalCost / totalWears) : 0;
         
-        const reasonCounts = {};
-        archived.forEach(i => { const r = i.archiveReason || 'Unbekannt'; reasonCounts[r] = (reasonCounts[r]||0) + 1; });
         forensics.reasonsData = Object.keys(reasonCounts).map((key, idx) => ({
             name: key, value: reasonCounts[key], color: CHART_THEME.colors[idx % CHART_THEME.colors.length]
         }));
+
+        forensics.lossValueData = Object.keys(reasonValues).map((key, idx) => ({
+            name: key, value: reasonValues[key], color: CHART_THEME.colors[idx % CHART_THEME.colors.length]
+        })).sort((a,b) => b.value - a.value); // Sortiert nach Verlusthöhe
     }
 
     const getUnit = (metricId) => {
@@ -353,14 +345,13 @@ export default function Statistics() {
     const metrics = [
         { id: 'nylonEnclosure', title: 'Nylon Enclosure', val: `${coreMetrics.nylonEnclosure}%`, sub: 'Tragezeit-Anteil', icon: Icons.Layers, color: PALETTE.accents.pink },
         { id: 'nocturnal', title: 'Nocturnal', val: `${coreMetrics.nocturnal}%`, sub: 'Nacht-Quote', icon: Icons.Night, color: PALETTE.accents.purple },
-        { id: 'nylonGap', title: 'Nylon Gap', val: `${coreMetrics.nylonGap} h`, sub: 'Ø Lücke/Tag', icon: HourglassEmptyIcon, color: '#00e5ff' }, // FIX: h angehängt
+        { id: 'nylonGap', title: 'Nylon Gap', val: coreMetrics.nylonGap, sub: 'Ø Lücke/Tag', icon: HourglassEmptyIcon, color: '#00e5ff' },
         { id: 'cpnh', title: 'CPNH', val: `${coreMetrics.cpnh}€`, sub: 'Cost/Hour', icon: TrendingUpIcon, color: PALETTE.accents.green },
-        { id: 'compliance', title: 'Compliance Lag', val: `${coreMetrics.complianceLag}m`, sub: 'Ø Verzögerung', icon: TimerIcon, color: PALETTE.accents.red },
-        // FIX: Exposure durch Coverage ersetzt
+        { id: 'compliance', title: 'Compliance Lag', val: coreMetrics.complianceLag, sub: 'Ø Verzögerung', icon: TimerIcon, color: PALETTE.accents.red },
         { id: 'coverage', title: 'Coverage', val: `${coreMetrics.coverage}%`, sub: 'Abdeckung (7d)', icon: ShieldIcon, color: PALETTE.primary.main },
         { id: 'resistance', title: 'Resistance', val: `${coreMetrics.resistance}%`, sub: 'Straf-Quote', icon: SecurityIcon, color: PALETTE.accents.gold },
         { id: 'voluntarism', title: 'Voluntarism', val: coreMetrics.voluntarism, sub: 'Zeit-Verhältnis', icon: PsychologyIcon, color: PALETTE.accents.blue },
-        { id: 'endurance', title: 'Endurance', val: `${coreMetrics.endurance}h`, sub: `Nyl: ${coreMetrics.enduranceNylon || 0}h • Des: ${coreMetrics.enduranceDessous || 0}h`, icon: SpeedIcon, color: PALETTE.text.secondary },
+        { id: 'endurance', title: 'Endurance', val: coreMetrics.endurance, sub: `Nyl: ${coreMetrics.enduranceNylon} • Des: ${coreMetrics.enduranceDessous}`, icon: SpeedIcon, color: PALETTE.text.secondary },
     ];
 
     return (
@@ -390,7 +381,7 @@ export default function Statistics() {
                                 >
                                     <CardContent sx={{ p: 2, textAlign: 'center' }}>
                                         <m.icon sx={{ color: m.color, fontSize: 28, mb: 1 }} />
-                                        <Typography variant="h5" fontWeight="bold" sx={{ color: PALETTE.text.primary }}>{m.val}</Typography>
+                                        <Typography variant="h5" fontWeight="bold" sx={{ color: PALETTE.text.primary, fontSize: '1.1rem' }}>{m.val}</Typography>
                                         <Typography variant="caption" sx={{ color: m.color, display:'block', fontWeight:'bold', textTransform:'uppercase', fontSize:'0.65rem' }}>{m.title}</Typography>
                                         <Typography variant="caption" sx={{ color: 'text.secondary', fontSize:'0.6rem' }}>{m.sub}</Typography>
                                     </CardContent>
@@ -409,6 +400,7 @@ export default function Statistics() {
                 </motion.div>
 
                 <Grid container spacing={3}>
+                    {/* GLOBAL CPW CARD */}
                     <Grid item xs={12} sm={4}>
                          <motion.div variants={MOTION.listItem} style={{ height: '100%' }}>
                             <Paper sx={{ p: 2, height: '100%', border: `1px solid ${PALETTE.accents.crimson}`, bgcolor: `${PALETTE.accents.crimson}10`, textAlign: 'center', display: 'flex', flexDirection: 'column', justifyContent: 'center', borderRadius: '12px' }}>
@@ -419,42 +411,50 @@ export default function Statistics() {
                         </motion.div>
                     </Grid>
                     
+                    {/* CHARTS: PIE & BAR */}
                     <Grid item xs={12} sm={8}>
                         <motion.div variants={MOTION.listItem} style={{ height: '100%' }}>
-                            <Paper sx={{ p: 2, height: 350, ...DESIGN_TOKENS.glassCard }}>
-                                <Typography variant="subtitle2" gutterBottom align="center">Verlust-Ursachen</Typography>
-                                {forensics.reasonsData.length > 0 ? (
-                                    <Box sx={{height: 300, width: '100%'}}>
-                                        <ResponsiveContainer>
-                                            <PieChart>
-                                                <Pie
-                                                    data={forensics.reasonsData}
-                                                    cx="50%" cy="50%"
-                                                    innerRadius={60} outerRadius={80}
-                                                    paddingAngle={5}
-                                                    dataKey="value"
-                                                >
-                                                    {forensics.reasonsData.map((entry, index) => (
-                                                        <Cell key={`cell-${index}`} fill={entry.color} stroke="none" />
-                                                    ))}
-                                                </Pie>
-                                                <RechartsTooltip contentStyle={{ backgroundColor: '#000', borderRadius: '8px', border: 'none' }} />
-                                                <Legend verticalAlign="bottom" height={36} iconType="circle" />
-                                            </PieChart>
-                                        </ResponsiveContainer>
-                                    </Box>
-                                ) : (
-                                    <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                        <Typography color="text.secondary">Keine Daten verfügbar</Typography>
-                                    </Box>
-                                )}
+                            <Paper sx={{ p: 2, ...DESIGN_TOKENS.glassCard }}>
+                                <Grid container spacing={2}>
+                                    {/* Pie Chart: Anzahl */}
+                                    <Grid item xs={6}>
+                                        <Typography variant="subtitle2" align="center" gutterBottom>Nach Anzahl</Typography>
+                                        <Box sx={{height: 200, width: '100%'}}>
+                                            <ResponsiveContainer>
+                                                <PieChart>
+                                                    <Pie data={forensics.reasonsData} cx="50%" cy="50%" innerRadius={40} outerRadius={60} paddingAngle={5} dataKey="value">
+                                                        {forensics.reasonsData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} stroke="none" />)}
+                                                    </Pie>
+                                                    <RechartsTooltip contentStyle={{ backgroundColor: '#000', border: 'none' }} />
+                                                </PieChart>
+                                            </ResponsiveContainer>
+                                        </Box>
+                                    </Grid>
+                                    
+                                    {/* Bar Chart: Wertverlust */}
+                                    <Grid item xs={6}>
+                                        <Typography variant="subtitle2" align="center" gutterBottom>Verlustwert (€)</Typography>
+                                        <Box sx={{height: 200, width: '100%'}}>
+                                            <ResponsiveContainer>
+                                                <BarChart data={forensics.lossValueData} layout="vertical">
+                                                    <XAxis type="number" hide />
+                                                    <YAxis dataKey="name" type="category" width={70} tick={{fontSize: 10, fill: '#aaa'}} />
+                                                    <RechartsTooltip cursor={{fill: 'transparent'}} contentStyle={{ backgroundColor: '#000', border: 'none' }} />
+                                                    <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+                                                        {forensics.lossValueData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
+                                                    </Bar>
+                                                </BarChart>
+                                            </ResponsiveContainer>
+                                        </Box>
+                                    </Grid>
+                                </Grid>
                             </Paper>
                         </motion.div>
                     </Grid>
                 </Grid>
             </motion.div>
 
-            {/* TREND DIALOG */}
+            {/* TREND DIALOG (unverändert) */}
             <Dialog open={!!selectedMetric} onClose={() => setSelectedMetric(null)} fullWidth maxWidth="sm" PaperProps={DESIGN_TOKENS.dialog.paper}>
                 <DialogTitle sx={DESIGN_TOKENS.dialog.title.sx}>
                     <Box><Typography variant="h6">{selectedMetric?.title} Trend</Typography></Box>
@@ -471,37 +471,10 @@ export default function Statistics() {
                                     </linearGradient>
                                 </defs>
                                 <CartesianGrid strokeDasharray="3 3" stroke={CHART_THEME.grid.line.stroke} vertical={false} />
-                                <XAxis 
-                                    dataKey="name" 
-                                    stroke={CHART_THEME.textColor} 
-                                    tick={{fontSize: 10}} 
-                                    interval={4} 
-                                    axisLine={false}
-                                    tickLine={false}
-                                />
-                                <YAxis 
-                                    stroke={CHART_THEME.textColor} 
-                                    tick={{fontSize: 10}} 
-                                    unit={getUnit(selectedMetric?.id)} 
-                                    width={35} 
-                                    axisLine={false}
-                                    tickLine={false}
-                                />
-                                <RechartsTooltip 
-                                    contentStyle={CHART_THEME.tooltip.container} 
-                                    formatter={(value) => [value + getUnit(selectedMetric?.id), "Ø 5 Tage"]}
-                                    labelFormatter={(label) => `Tag: ${label}`}
-                                    cursor={{ stroke: PALETTE.primary.main, strokeWidth: 1 }}
-                                />
-                                <Area 
-                                    type="monotone" 
-                                    dataKey="value" 
-                                    stroke={selectedMetric?.id === 'nylonGap' ? '#00e5ff' : PALETTE.accents.pink} 
-                                    fillOpacity={1} 
-                                    fill="url(#colorVal)" 
-                                    animationDuration={1000} 
-                                    strokeWidth={2}
-                                />
+                                <XAxis dataKey="name" stroke={CHART_THEME.textColor} tick={{fontSize: 10}} interval={4} axisLine={false} tickLine={false} />
+                                <YAxis stroke={CHART_THEME.textColor} tick={{fontSize: 10}} unit={getUnit(selectedMetric?.id)} width={35} axisLine={false} tickLine={false} />
+                                <RechartsTooltip contentStyle={CHART_THEME.tooltip.container} formatter={(value) => [value + getUnit(selectedMetric?.id), "Ø 5 Tage"]} labelFormatter={(label) => `Tag: ${label}`} cursor={{ stroke: PALETTE.primary.main, strokeWidth: 1 }} />
+                                <Area type="monotone" dataKey="value" stroke={selectedMetric?.id === 'nylonGap' ? '#00e5ff' : PALETTE.accents.pink} fillOpacity={1} fill="url(#colorVal)" animationDuration={1000} strokeWidth={2} />
                             </AreaChart>
                         </ResponsiveContainer>
                     </Box>
