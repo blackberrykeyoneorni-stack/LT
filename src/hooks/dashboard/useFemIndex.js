@@ -1,99 +1,61 @@
 import { useState, useEffect } from 'react';
 
-/**
- * Berechnet den Fem-Index (0-100) basierend auf 4 Säulen:
- * 1. Enclosure (Material): Anteil Nylon/Latex/Spandex im Besitz/Einsatz.
- * 2. Nocturnal (Nacht): EXTERN BERECHNETE Single Source of Truth.
- * 3. Compliance (Agilität): Reaktionszeit und Annahmequote.
- * 4. Gap (Disziplin): Zeit ohne Item (Lücken).
- */
-export default function useFemIndex(currentUser, items = [], activeSessions = [], externalNocturnalScore = 0) {
-    const [score, setScore] = useState(0);
-    const [details, setDetails] = useState(null);
+// Die 5 Phasen der Transformation
+const PHASES = [
+    { name: "TOURIST", limit: 20, color: "#1a1a1a", desc: "Besucher. Keine Bindung." },
+    { name: "NOVICE", limit: 40, color: "#4a148c", desc: "Erste Anpassung." },
+    { name: "RESIDENT", limit: 60, color: "#7b1fa2", desc: "Teil des Systems." },
+    { name: "DEDICATED", limit: 80, color: "#c2185b", desc: "Aktive Unterwerfung." },
+    { name: "PROPERTY", limit: 100, color: "#f50057", desc: "Vollständiger Besitz." }
+];
+
+const getPhase = (score) => {
+    // Finde die passende Phase basierend auf dem Score
+    return PHASES.find(p => score <= p.limit) || PHASES[PHASES.length - 1];
+};
+
+export const useFemIndex = (kpis) => {
+    const [indexData, setIndexData] = useState({ 
+        score: 0, 
+        phase: PHASES[0], 
+        subScores: { physis: 0, psyche: 0, infiltration: 0 },
+        trend: 'neutral'
+    });
     const [loading, setLoading] = useState(true);
 
-    // Hilfsfunktion: Gap-Score berechnen
-    const calculateGapScore = (items, currentSessions) => {
-        if (currentSessions && currentSessions.length > 0) return 100;
-        if (!items || items.length === 0) return 0;
+    useEffect(() => {
+        // Wir verlassen uns auf die Berechnung in useKPIs
+        if (kpis && kpis.femIndex) {
+            const currentScore = kpis.femIndex.score || 0;
+            const subScores = kpis.femIndex.subScores || { physis: 0, psyche: 0, infiltration: 0 };
+            const phase = getPhase(currentScore);
 
-        const lastWornDates = items
-            .map(i => i.lastWorn ? (i.lastWorn.toDate ? i.lastWorn.toDate() : new Date(i.lastWorn)) : null)
-            .filter(d => d !== null);
-
-        if (lastWornDates.length === 0) return 0;
-
-        const mostRecent = new Date(Math.max(...lastWornDates));
-        const now = new Date();
-        const hoursDiff = (now - mostRecent) / (1000 * 60 * 60);
-
-        if (hoursDiff <= 12) return 100;
-        if (hoursDiff >= 48) return 0;
-        
-        const remaining = 48 - hoursDiff;
-        return (remaining / 36) * 100;
-    };
-
-    const calculateMetrics = async () => {
-        if (!items || items.length === 0) {
-            setScore(0);
+            setIndexData({
+                score: currentScore,
+                phase: phase,
+                subScores: subScores,
+                trend: kpis.femIndex.trend || 'neutral'
+            });
             setLoading(false);
-            return;
         }
+    }, [kpis]); // Reagiert auf Updates von useKPIs
 
-        // --- A. ENCLOSURE (Material-Quote) ---
-        const fetishItems = items.filter(i => {
-            const cat = (i.mainCategory || '').toLowerCase();
-            const sub = (i.subCategory || '').toLowerCase();
-            return cat.includes('nylon') || cat.includes('latex') || cat.includes('pvc') || 
-                   sub.includes('strumpfhose') || sub.includes('corsage');
-        });
-        const enclosureScore = (fetishItems.length / items.length) * 100;
-
-        // --- B. GAP (Disziplin) ---
-        const gapScore = calculateGapScore(items, activeSessions);
-
-        // --- C. NOCTURNAL (Single Source of Truth) ---
-        // Wir nehmen den Wert 1:1 von außen.
-        const nocturnalScore = externalNocturnalScore; 
-
-        // --- D. COMPLIANCE (Vereinfacht für Dashboard Visualisierung) ---
-        const complianceBase = 70;
-        const complianceScore = activeSessions.length > 0 ? 100 : complianceBase;
-
-        // --- TOTAL SCORE CALCULATION ---
-        const total = (
-            (enclosureScore * 0.20) + 
-            (gapScore * 0.40) + 
-            (nocturnalScore * 0.20) + 
-            (complianceScore * 0.20)
-        );
-
-        setScore(Math.round(total));
-        setDetails({
-            score: Math.round(total),
-            subScores: {
-                enclosure: enclosureScore,
-                gap: gapScore,
-                nocturnal: nocturnalScore,
-                compliance: complianceScore
-            }
-        });
-        setLoading(false);
+    // Für den Detail-Dialog (falls benötigt)
+    const indexDetails = {
+        score: indexData.score,
+        phaseName: indexData.phase.name,
+        phaseDesc: indexData.phase.desc,
+        color: indexData.phase.color,
+        subScores: indexData.subScores
     };
 
-    // Berechnung bei Änderungen
-    useEffect(() => {
-        calculateMetrics();
-    }, [items, activeSessions, externalNocturnalScore]);
+    return { 
+        femIndex: indexData.score, 
+        phase: indexData.phase,
+        subScores: indexData.subScores,
+        indexDetails,
+        femIndexLoading: loading 
+    };
+};
 
-    // Live-Update (Gap-Score Decay)
-    useEffect(() => {
-        const timer = setInterval(() => {
-            calculateMetrics();
-        }, 60000);
-        return () => clearInterval(timer);
-    }, [items, activeSessions, externalNocturnalScore]);
-
-    return { femIndex: score, indexDetails: details, loading };
-}
+export default useFemIndex;

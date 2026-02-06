@@ -152,20 +152,20 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput) {
         coreMetrics: {
             nylonEnclosure: '0.0', 
             nocturnal: '0.0', 
-            nylonGap: '0m', // Jetzt String
+            nylonGap: '0m', 
             cpnh: '0.00',
-            complianceLag: '0m', // Jetzt String
+            complianceLag: '0m', 
             coverage: '0.0',
             resistance: '0.0',
             voluntarism: '0.0%',
-            endurance: '0m', // Jetzt String
+            endurance: '0m',
             enduranceNylon: '0m', 
             enduranceDessous: '0m',
             submission: '85.0',
             denial: '12.0', 
             chastity: '0.0'
         },
-        femIndex: { score: 0, trend: 'neutral' },
+        femIndex: { score: 0, trend: 'neutral', subScores: { physis: 0, psyche: 0, infiltration: 0 } },
         basics: { activeItems: 0, washing: 0, wornToday: 0, archived: 0 }
     });
 
@@ -328,7 +328,6 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput) {
             totalDurationMs += duration;
             if (s.type === 'voluntary') voluntaryDurationMs += duration;
 
-            // Compliance Lag berechnen
             if (typeof s.complianceLagMinutes === 'number') {
                 totalLagMinutes += s.complianceLagMinutes;
                 lagCount++;
@@ -365,7 +364,6 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput) {
                 return cat.includes('dessous') || cat.includes('wäsche') || sub.includes('body') || sub.includes('slip') || sub.includes('bh') || cat.includes('corsage');
             });
 
-            // LOGIK ÄNDERUNG: Zähle global nur, wenn Nylon oder Dessous dabei ist.
             if (hasNylon || hasDessous) { 
                 globalDuration += durationHours; 
                 globalCount++; 
@@ -383,20 +381,29 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput) {
         // E. SCORES
         const spermaRateVal = releaseStats.totalReleases > 0 
             ? (releaseStats.cleanReleases / releaseStats.totalReleases) * 100 : 0;
-        const femScore = Math.round((nylonEnclosureVal * 0.3) + (nocturnalVal * 0.2) + (nylonIndexVal * 2));
 
-        // G. BASICS TODAY
-        const startOfToday = new Date(); startOfToday.setHours(0,0,0,0);
-        const sessionsToday = allSessions.filter(s => {
-            if(!s.startTime) return false;
-            const d = s.startTime.toDate ? s.startTime.toDate() : new Date(s.startTime);
-            return d >= startOfToday;
-        });
-        const uniqueItemsToday = new Set();
-        sessionsToday.forEach(s => {
-            if (s.itemId) uniqueItemsToday.add(s.itemId);
-            if (s.itemIds) s.itemIds.forEach(id => uniqueItemsToday.add(id));
-        });
+        // --- FEM INDEX 3.0 (Erosion Metric) ---
+        
+        // 1. PHYSIS (30%) - Körperliche Gewöhnung
+        // Endurance Ziel: 12h = 100%. Enclosure Ziel: 100%.
+        const scoreEndurance = Math.min(100, (enduranceVal / 12) * 100);
+        const scorePhysis = (scoreEndurance * 0.4) + (nylonEnclosureVal * 0.6);
+
+        // 2. PSYCHE (30%) - Mentaler Widerstand
+        // Compliance Ziel: < 5 min = 100%.
+        const scoreCompliance = Math.max(0, 100 - (avgLagVal * 1.6));
+        const scorePsyche = Math.max(0, ((voluntarismVal * 0.6) + (scoreCompliance * 0.4)) - (resistanceVal * 2));
+
+        // 3. INFILTRATION (40%) - Alltags-Übernahme
+        // Nocturnal und Coverage sind die Schlüssel
+        const scoreInfiltration = (nocturnalVal * 0.5) + (coverageVal * 0.5);
+
+        // TOTAL SCORE
+        const femScore = Math.round(
+            (scorePhysis * 0.30) + 
+            (scorePsyche * 0.30) + 
+            (scoreInfiltration * 0.40)
+        );
 
         setKpis({
             health: { orphanCount },
@@ -410,20 +417,29 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput) {
             coreMetrics: {
                 nylonEnclosure: fmtPct(nylonEnclosureVal),
                 nocturnal: fmtPct(nocturnalVal),
-                nylonGap: fmtHoursToDuration(avgGapVal), // FORMATIERT: Xh Ym
+                nylonGap: fmtHoursToDuration(avgGapVal), 
                 cpnh: fmtMoney(cpnhVal),
-                complianceLag: fmtDuration(avgLagVal), // FORMATIERT: Xh Ym
+                complianceLag: fmtDuration(avgLagVal), 
                 coverage: fmtPct(coverageVal),
                 resistance: fmtPct(resistanceVal),
                 voluntarism: fmtPct(voluntarismVal) + '%', 
-                endurance: fmtHoursToDuration(enduranceVal), // FORMATIERT: Xh Ym
-                enduranceNylon: fmtHoursToDuration(enduranceNylonVal), // FORMATIERT
-                enduranceDessous: fmtHoursToDuration(enduranceDessousVal), // FORMATIERT
+                endurance: fmtHoursToDuration(enduranceVal), 
+                enduranceNylon: fmtHoursToDuration(enduranceNylonVal), 
+                enduranceDessous: fmtHoursToDuration(enduranceDessousVal), 
                 submission: '85.0',
                 denial: '12.0',
                 chastity: fmtPct(nylonEnclosureVal)
             },
-            femIndex: { score: Math.min(100, femScore), trend: 'stable' },
+            // NEUE STRUKTUR FÜR DEN FEM INDEX
+            femIndex: { 
+                score: Math.min(100, femScore), 
+                trend: 'stable',
+                subScores: {
+                    physis: Math.round(scorePhysis),
+                    psyche: Math.round(scorePsyche),
+                    infiltration: Math.round(scoreInfiltration)
+                }
+            },
             basics: {
                 activeItems: activeItems.length,
                 washing: washingItems.length,

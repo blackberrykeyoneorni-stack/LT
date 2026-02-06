@@ -106,10 +106,9 @@ const IndexDetailDialog = ({ open, onClose, details }) => {
             <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
                 <Box sx={{ textAlign: 'center', mb: 4 }}><Typography variant="h2" sx={{ ...DESIGN_TOKENS.textGradient, fontWeight: 'bold', fontSize: '3.5rem' }}>{details.score}</Typography><Typography variant="overline" color="text.secondary">COMPOSITE SCORE</Typography></Box>
                 <Box sx={{ px: 1 }}>
-                    {renderMetricRow("Enclosure (Material)", details.subScores.enclosure, PALETTE.primary.main, <CheckCircleOutlineIcon fontSize="small" color="primary" />)}
-                    {renderMetricRow("Nocturnal (Nacht-Quote)", details.subScores.nocturnal, PALETTE.accents.purple, <NightlightRoundIcon fontSize="small" sx={{ color: PALETTE.accents.purple }} />)}
-                    {renderMetricRow("Agilität (Reaktion)", details.subScores.compliance, PALETTE.accents.gold, <TimerIcon fontSize="small" sx={{ color: PALETTE.accents.gold }} />)}
-                    {renderMetricRow("Disziplin (Lücken)", details.subScores.gap, PALETTE.accents.pink, <LinkOffIcon fontSize="small" sx={{ color: PALETTE.accents.pink }} />)}
+                    {renderMetricRow("Physis (Körper)", details.subScores.physis, '#00e5ff', <CheckCircleOutlineIcon fontSize="small" sx={{color: '#00e5ff'}} />)}
+                    {renderMetricRow("Psyche (Wille)", details.subScores.psyche, '#ffeb3b', <TimerIcon fontSize="small" sx={{ color: '#ffeb3b' }} />)}
+                    {renderMetricRow("Infiltration (Alltag)", details.subScores.infiltration, '#f50057', <LinkOffIcon fontSize="small" sx={{ color: '#f50057' }} />)}
                 </Box>
             </DialogContent>
             <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}><Button onClick={onClose} fullWidth color="inherit">Schließen</Button></DialogActions>
@@ -126,7 +125,8 @@ export default function Dashboard() {
   const { activeSessions, progress, loading: sessionsLoading, dailyTargetHours, registerRelease: hookRegisterRelease } = useSessionProgress(currentUser, items);
   
   const kpis = useKPIs(items, activeSessions); 
-  const { femIndex, femIndexLoading, indexDetails } = useFemIndex(currentUser, items, activeSessions, kpis.coreMetrics.nocturnal); 
+  // UPDATED HOOK CALL:
+  const { femIndex, femIndexLoading, indexDetails, phase, subScores } = useFemIndex(kpis); 
 
   const [now, setNow] = useState(Date.now());
   const [tzdActive, setTzdActive] = useState(false);
@@ -601,7 +601,13 @@ export default function Dashboard() {
                 progressData={progress}
             />
 
-            <FemIndexBar femIndex={femIndex || 0} loading={femIndexLoading} />
+            {/* UPDATED FEM INDEX BAR CALL */}
+            <FemIndexBar 
+                femIndex={femIndex || 0} 
+                loading={femIndexLoading} 
+                phase={phase}           
+                subScores={subScores}   
+            />
 
             <ActionButtons 
                 punishmentStatus={punishmentStatus} 
