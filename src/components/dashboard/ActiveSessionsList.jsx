@@ -1,16 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { 
-    Card, CardContent, Typography, Box, Button, IconButton, LinearProgress, Chip 
+    Card, CardContent, Typography, Box, Button, Chip, LinearProgress, Avatar 
 } from '@mui/material';
 import StopIcon from '@mui/icons-material/Stop';
 import LockIcon from '@mui/icons-material/Lock';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
-import ReportProblemIcon from '@mui/icons-material/ReportProblem'; // Für Debt Icon
 import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export default function ActiveSessionsList({ activeSessions, items, onStopSession, onNavigateItem, onOpenRelease }) {
-  // Eigener Ticker für Live-Updates der Buttons (jede Minute)
   const [, setTick] = useState(0);
   useEffect(() => {
     const timer = setInterval(() => setTick(t => t + 1), 60000);
@@ -27,14 +25,16 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
       
       <AnimatePresence>
         {activeSessions.map((session) => {
-            const item = items.find(i => i.id === session.itemId) || { name: 'Unbekanntes Item', img: null };
-            
-            // Dauer berechnen
+            // Wir sammeln ALLE Items der Session ein
+            const sessionItems = session.itemIds 
+                ? session.itemIds.map(id => items.find(i => i.id === id)).filter(Boolean)
+                : [items.find(i => i.id === session.itemId)].filter(Boolean);
+
             const startTime = session.startTime?.toDate ? session.startTime.toDate() : new Date(session.startTime);
             const durationMinutes = Math.floor((new Date() - startTime) / 60000);
             
-            // --- DEBT LOGIC CHECK ---
-            const minDuration = session.minDuration || 0; // Das ist die Schuld, die beim Start gesetzt wurde
+            // Debt Logic
+            const minDuration = session.minDuration || 0;
             const isDebtLocked = durationMinutes < minDuration;
             const remainingDebt = Math.max(0, minDuration - durationMinutes);
 
@@ -55,28 +55,58 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
                         borderLeft: `4px solid ${isPunishment ? PALETTE.accents.red : (session.isDebtSession ? PALETTE.accents.red : PALETTE.primary.main)}`
                     }}>
                         <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
-                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
                                 <Box>
-                                    <Typography variant="h6" onClick={() => onNavigateItem(session.itemId)} sx={{ cursor: 'pointer', fontWeight: 'bold' }}>
-                                        {item.name}
+                                    <Typography variant="caption" color="text.secondary" sx={{textTransform: 'uppercase', letterSpacing: 1}}>
+                                        {session.isDebtSession ? "SCHULDENABBAU" : (isPunishment ? "STRAFARBEIT" : (isTZD ? "ZEITLOSES DIKTAT" : "LAUFEND"))}
                                     </Typography>
-                                    <Typography variant="body2" color="text.secondary">
-                                        {session.isDebtSession ? "SCHULDENABBAU" : (isPunishment ? "STRAFARBEIT" : (isTZD ? "ZEITLOSES DIKTAT" : "Laufend"))}
+                                    <Typography variant="h4" sx={{ fontWeight: 'bold', color: '#fff', mt: 0.5 }}>
+                                        {Math.floor(durationMinutes / 60)}:{String(durationMinutes % 60).padStart(2, '0')} h
                                     </Typography>
                                 </Box>
                                 <Chip 
-                                    label={`${durationMinutes} min`} 
-                                    color={session.isDebtSession ? "error" : "primary"} 
-                                    variant={session.isDebtSession ? "filled" : "outlined"}
+                                    label={isDebtLocked ? "LOCKED" : "ACTIVE"} 
+                                    color={isDebtLocked ? "error" : "success"} 
+                                    variant={isDebtLocked ? "filled" : "outlined"}
                                     size="small" 
+                                    icon={isDebtLocked ? <LockIcon fontSize="small"/> : null}
                                 />
                             </Box>
 
-                            {/* DEBT PROGRESS BAR */}
+                            {/* ITEMS LIST (Wiederhergestellt: Alle Items sichtbar) */}
+                            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 2 }}>
+                                {sessionItems.map((item, idx) => (
+                                    <Box 
+                                        key={item.id || idx} 
+                                        onClick={() => onNavigateItem(item.id)}
+                                        sx={{ 
+                                            display: 'flex', alignItems: 'center', gap: 1.5, 
+                                            p: 1, borderRadius: 1, 
+                                            bgcolor: 'rgba(255,255,255,0.05)',
+                                            cursor: 'pointer',
+                                            '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' }
+                                        }}
+                                    >
+                                        <Avatar 
+                                            src={item.imageUrl || item.image} 
+                                            variant="rounded" 
+                                            sx={{ width: 40, height: 40, border: `1px solid ${PALETTE.primary.main}` }}
+                                        />
+                                        <Box>
+                                            <Typography variant="body2" sx={{ fontWeight: 'bold' }}>{item.name}</Typography>
+                                            <Typography variant="caption" color="text.secondary">
+                                                {item.brand} • {item.subCategory}
+                                            </Typography>
+                                        </Box>
+                                    </Box>
+                                ))}
+                            </Box>
+
+                            {/* DEBT PROGRESS */}
                             {session.isDebtSession && (
                                 <Box sx={{ mt: 1, mb: 2 }}>
                                     <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                                        <Typography variant="caption" color="error">Tilgungspflicht</Typography>
+                                        <Typography variant="caption" color="error">Pflicht-Tilgung</Typography>
                                         <Typography variant="caption" color="text.secondary">{durationMinutes} / {minDuration} min</Typography>
                                     </Box>
                                     <LinearProgress 
@@ -88,12 +118,13 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
                                 </Box>
                             )}
 
-                            <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, mt: 1 }}>
+                            {/* ACTIONS */}
+                            <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
                                 {(isTZD || isPunishment || session.isDebtSession) ? (
                                     <Button 
                                         variant="outlined" 
                                         color="error" 
-                                        size="small"
+                                        fullWidth
                                         disabled={isDebtLocked || (isPunishment && durationMinutes < 30)}
                                         onClick={() => onStopSession(session)}
                                         startIcon={isDebtLocked ? <LockIcon /> : <StopIcon />}
@@ -108,18 +139,11 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
                                     <Button 
                                         variant="contained" 
                                         color="primary" 
-                                        size="small"
+                                        fullWidth
                                         onClick={() => onStopSession(session)}
                                         startIcon={<StopIcon />}
                                     >
-                                        Beenden
-                                    </Button>
-                                )}
-                                
-                                {/* Release Option für bestimmte Sessions */}
-                                {!isDebtLocked && !isPunishment && (
-                                    <Button size="small" color="inherit" onClick={onOpenRelease}>
-                                        Release?
+                                        Session Beenden
                                     </Button>
                                 )}
                             </Box>

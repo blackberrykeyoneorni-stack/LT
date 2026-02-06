@@ -9,6 +9,7 @@ import LightModeIcon from '@mui/icons-material/LightMode';
 import LockIcon from '@mui/icons-material/Lock';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import TimerIcon from '@mui/icons-material/Timer'; 
+import WaterDropIcon from '@mui/icons-material/WaterDrop'; // Für Release
 import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
 import { isPunishmentWindowOpen } from '../../services/PunishmentService';
 import { motion } from 'framer-motion'; 
@@ -19,23 +20,22 @@ export default function ActionButtons({
   auditDue, isFreeDay, freeDayReason, 
   currentInstruction, currentPeriod, isHoldingOath, 
   isInstructionActive, isDailyGoalMet,
-  onStartPunishment, onStartAudit, onOpenInstruction 
+  onStartPunishment, onStartAudit, onOpenInstruction,
+  onOpenRelease // NEU: Prop für Release Dialog
 }) {
 
   const punishmentWindowOpen = isPunishmentWindowOpen();
   const isNight = currentPeriod && currentPeriod.includes('night');
   const instructionAlreadyStarted = currentInstruction && currentInstruction.isAccepted;
   
-  // Logik: Freier Tag nur, wenn nicht schon eine Instruction läuft (z.B. Nachts)
   const showFreeMode = isFreeDay && !isNight && !instructionAlreadyStarted;
-
   const blockSessionRunning = isInstructionActive;
   const blockGoalReached = isDailyGoalMet && !isNight;
 
   return (
     <Box sx={{ width: '100%' }}>
       
-      {/* 1. STRAFE */}
+      {/* 1. STRAFE (Top Priorität) */}
       {punishmentStatus.active && punishmentWindowOpen && (
         <Box sx={{ mb: 3 }}>
             {punishmentRunning ? (
@@ -44,13 +44,8 @@ export default function ActionButtons({
                     startIcon={<TimerIcon />}
                     sx={{ 
                         py: 2, fontWeight: 'bold', fontSize: '1.1rem',
-                        borderColor: `${PALETTE.accents.red}80`,
-                        color: PALETTE.accents.red,
-                        bgcolor: 'rgba(255,0,0,0.05)',
-                        '&.Mui-disabled': { 
-                            color: PALETTE.accents.red,
-                            borderColor: `${PALETTE.accents.red}40` 
-                        }
+                        borderColor: `${PALETTE.accents.red}80`, color: PALETTE.accents.red,
+                        bgcolor: 'rgba(255,0,0,0.05)'
                     }} 
                 >
                     STRAFE LÄUFT...
@@ -65,8 +60,7 @@ export default function ActionButtons({
                             boxShadow: `0 0 20px ${PALETTE.accents.red}66`,
                             '&:hover': { bgcolor: '#b71c1c' }
                         }} 
-                        startIcon={<SportsScoreIcon />} 
-                        onClick={onStartPunishment} 
+                        startIcon={<SportsScoreIcon />} onClick={onStartPunishment} 
                     >
                         COMPLIANCE WHIP ({punishmentStatus.durationMinutes || 45}m)
                     </Button>
@@ -75,24 +69,14 @@ export default function ActionButtons({
         </Box>
       )}
 
-      {/* 2. AUFGESCHOBENE STRAFE */}
-      {punishmentStatus.deferred && (
-        <Box sx={{ mb: 3 }}>
-           <Alert severity="warning" variant="filled" sx={{ py: 2, justifyContent: 'center', fontWeight: 'bold', bgcolor: `${PALETTE.accents.gold}22`, color: PALETTE.accents.gold, border: `1px solid ${PALETTE.accents.gold}` }}>
-               STRAFE ({punishmentStatus.durationMinutes || '?'}m) AUFGESCHOBEN
-           </Alert>
-        </Box>
-      )}
-
-      {/* 3. AUDIT */}
+      {/* 2. AUDIT */}
       {auditDue && (
         <Box sx={{ mb: 3 }}>
           <motion.div whileHover={{ scale: 1.02 }}>
               <Button 
                   variant="contained" fullWidth size="large"
                   sx={{ py: 2, fontWeight: 'bold', fontSize: '1.1rem', bgcolor: PALETTE.accents.gold, color: '#000' }} 
-                  startIcon={<GradingIcon />} 
-                  onClick={onStartAudit}
+                  startIcon={<GradingIcon />} onClick={onStartAudit}
               >
               INVENTORY AUDIT FÄLLIG
               </Button>
@@ -100,17 +84,16 @@ export default function ActionButtons({
         </Box>
       )}
 
-      {/* 4. HAUPT BUTTON (Instruction / Frei / Status) */}
+      {/* 3. HAUPT BUTTON (Instruction) */}
       {(() => {
           let label = isNight ? "NACHTANWEISUNG ÖFFNEN" : "TAGESANWEISUNG ÖFFNEN";
           let icon = isNight ? <DarkModeIcon /> : <LightModeIcon />;
           let isDisabled = false;
           let isBlockedStyle = false;
 
-          // Free Mode Styling (FIX: Sichtbarer machen)
           const freeModeSx = {
-              background: 'rgba(255,255,255,0.05)', // Leicht sichtbar statt transparent
-              border: `1px solid ${PALETTE.accents.green}`, // Grüner Rahmen für "Frei"
+              background: 'rgba(255,255,255,0.05)', 
+              border: `1px solid ${PALETTE.accents.green}`, 
               color: PALETTE.accents.green
           };
 
@@ -132,28 +115,19 @@ export default function ActionButtons({
           }
 
           return (
-            <Box sx={{ mb: 3 }}>
+            <Box sx={{ mb: 2 }}>
                 <motion.div whileHover={!isDisabled ? { scale: 1.02 } : {}} whileTap={!isDisabled ? { scale: 0.98 } : {}}>
                     <Button 
                         variant="contained" fullWidth size="large" 
                         disabled={isDisabled}
-                        aria-disabled={showFreeMode}
                         sx={{ 
                             py: 2, fontWeight: 'bold', fontSize: '1.1rem',
-                            // Standard Gradient nur wenn NICHT Free Mode und NICHT Disabled
                             ...(!showFreeMode && !isBlockedStyle ? DESIGN_TOKENS.buttonGradient : {}),
-                            
-                            // Free Mode Styling anwenden
                             ...(showFreeMode ? freeModeSx : {}),
-                            
-                            '&.Mui-disabled': {
-                                bgcolor: 'rgba(255, 255, 255, 0.12)',
-                                color: 'rgba(255, 255, 255, 0.3)'
-                            },
+                            '&.Mui-disabled': { bgcolor: 'rgba(255, 255, 255, 0.12)', color: 'rgba(255, 255, 255, 0.3)' },
                             transition: isHoldingOath ? 'background-color 5s linear' : 'all 0.2s'
                         }} 
-                        onClick={onOpenInstruction} 
-                        startIcon={icon}
+                        onClick={onOpenInstruction} startIcon={icon}
                     >
                         {label}
                     </Button>
@@ -161,6 +135,37 @@ export default function ActionButtons({
             </Box>
           );
       })()}
+
+      {/* 4. RELEASE BUTTON (Prominent wiederhergestellt) */}
+      {/* Nur sichtbar, wenn keine Strafe aktiv ist, um Fokus zu behalten */}
+      {!punishmentStatus.active && (
+        <Box sx={{ mb: 3 }}>
+             <Button
+                fullWidth variant="outlined" size="large"
+                onClick={onOpenRelease}
+                startIcon={<WaterDropIcon />}
+                sx={{
+                    py: 1.5,
+                    borderColor: 'rgba(64, 196, 255, 0.3)',
+                    color: PALETTE.accents.blue,
+                    background: 'rgba(64, 196, 255, 0.05)',
+                    '&:hover': {
+                        borderColor: PALETTE.accents.blue,
+                        background: 'rgba(64, 196, 255, 0.1)',
+                    }
+                }}
+             >
+                 ENTLADUNG ANFRAGEN
+             </Button>
+        </Box>
+      )}
+
+      {/* 5. Deferred Info */}
+      {punishmentStatus.deferred && (
+        <Alert severity="warning" variant="filled" sx={{ mt: 2, fontWeight: 'bold', bgcolor: `${PALETTE.accents.gold}22`, color: PALETTE.accents.gold, border: `1px solid ${PALETTE.accents.gold}` }}>
+            STRAFE ({punishmentStatus.durationMinutes}m) AUFGESCHOBEN
+        </Alert>
+      )}
     </Box>
   );
 }
