@@ -24,6 +24,7 @@ import PsychologyIcon from '@mui/icons-material/Psychology';
 import TimerIcon from '@mui/icons-material/Timer';
 import SecurityIcon from '@mui/icons-material/Security';
 import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty'; 
+import ShieldIcon from '@mui/icons-material/Shield'; // Für Coverage
 
 // --- HELPER: Safe Date Parsing ---
 const safeDate = (val) => {
@@ -62,6 +63,49 @@ const calculateDailyNylonWearMinutes = (targetDate, sessions, items) => {
             const sub = (item.subCategory || '').toLowerCase();
             return cat.includes('nylon') || sub.includes('strumpfhose') || sub.includes('stockings');
         });
+    });
+
+    const intervals = relevantSessions.map(s => {
+        const sStart = safeDate(s.startTime);
+        const sEnd = safeDate(s.endTime) || new Date(); 
+        const start = Math.max(sStart.getTime(), startOfDay.getTime());
+        const end = Math.min(sEnd.getTime(), endOfDay.getTime());
+        return { start, end };
+    }).filter(i => i.end > i.start);
+
+    if (intervals.length === 0) return 0;
+
+    intervals.sort((a, b) => a.start - b.start);
+    const merged = [];
+    let current = intervals[0];
+    for (let i = 1; i < intervals.length; i++) {
+        if (intervals[i].start < current.end) {
+            current.end = Math.max(current.end, intervals[i].end);
+        } else {
+            merged.push(current);
+            current = intervals[i];
+        }
+    }
+    merged.push(current);
+
+    const totalMs = merged.reduce((acc, i) => acc + (i.end - i.start), 0);
+    return Math.floor(totalMs / 60000);
+};
+
+// NEU: Berechnet allgemeine Active Minutes (für Coverage Trend)
+const calculateDailyActiveMinutes = (targetDate, sessions) => {
+    const startOfDay = new Date(targetDate);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(targetDate);
+    endOfDay.setHours(23, 59, 59, 999);
+    
+    const relevantSessions = sessions.filter(s => {
+        const sStart = safeDate(s.startTime);
+        const sEnd = safeDate(s.endTime); 
+        if (!sStart) return false;
+        if (sStart > endOfDay) return false;
+        if (sEnd && sEnd < startOfDay) return false;
+        return true;
     });
 
     const intervals = relevantSessions.map(s => {
@@ -157,17 +201,13 @@ export default function Statistics() {
 
             let val = 0;
             
-            if (metricId === 'exposure') {
-                const mins = daySessions.reduce((acc, s) => {
-                    const end = s.endTime || new Date();
-                    return acc + (end - s.startTime) / 60000;
-                }, 0);
-                val = mins / 60; 
+            if (metricId === 'coverage') { // ERSETZT EXPOSURE
+                const activeMins = calculateDailyActiveMinutes(d, sessions);
+                val = (activeMins / 1440) * 100;
             } 
             else if (metricId === 'nocturnal') {
-                // Präziser Check auf 02:00 Uhr und Strumpfhose
                 const checkTime = new Date(d);
-                checkTime.setHours(2, 0, 0, 0); // User requested 02:00
+                checkTime.setHours(2, 0, 0, 0); 
                 const checkTs = checkTime.getTime();
 
                 const isWorn = sessions.some(s => {
@@ -175,13 +215,11 @@ export default function Statistics() {
                      const end = s.endTime; 
                      
                      if (!start) return false;
-                     // Zeit-Check
                      if (checkTs >= start.getTime() && (!end || checkTs <= end.getTime())) {
                          const sItemIds = s.itemIds || (s.itemId ? [s.itemId] : []);
                          return sItemIds.some(id => {
                              const item = items.find(i => i.id === id);
                              if (!item) return false;
-                             // STRIKTE FILTERUNG für Nocturnal: Nur Strumpfhose
                              const sub = (item.subCategory || '').toLowerCase();
                              return sub.includes('strumpfhose');
                          });
@@ -191,10 +229,8 @@ export default function Statistics() {
                 val = isWorn ? 100 : 0;
             }
             else if (metricId === 'nylonGap') { 
-                // 1440 Min - Effektive Tragezeit (Union) in Minuten
                 const wornMins = calculateDailyNylonWearMinutes(d, sessions, items);
                 const gapMins = 1440 - wornMins;
-                // Trend Anzeige in Stunden (dezimal)
                 val = Math.max(0, gapMins) / 60;
             }
             else if (metricId === 'resistance') {
@@ -208,7 +244,6 @@ export default function Statistics() {
                 }
             }
             else if (metricId === 'voluntarism') {
-                // NEU: Zeit-basiert statt Count-basiert
                 let totalMs = 0;
                 let volMs = 0;
                 daySessions.forEach(s => {
@@ -230,7 +265,6 @@ export default function Statistics() {
                 val = dCount > 0 ? (dMins / dCount / 60) : 0;
             }
             else if (metricId === 'nylonEnclosure') {
-                 // NEU: Zeit-basiert für den Trend (Nylon Zeit / Gesamt Zeit)
                  let globalMs = 0;
                  let nylonMs = 0;
                  daySessions.forEach(s => {
@@ -275,7 +309,7 @@ export default function Statistics() {
     };
 
     const handleCardClick = (metricId, title) => { 
-        if (['exposure', 'nocturnal', 'nylonGap', 'resistance', 'nylonEnclosure', 'compliance', 'voluntarism', 'endurance'].includes(metricId)) {
+        if (['coverage', 'nocturnal', 'nylonGap', 'resistance', 'nylonEnclosure', 'compliance', 'voluntarism', 'endurance'].includes(metricId)) {
             calculateTrend(metricId);
             setSelectedMetric({id: metricId, title}); 
         } else {
@@ -304,9 +338,9 @@ export default function Statistics() {
     }
 
     const getUnit = (metricId) => {
-        if (metricId === 'exposure') return ' h'; 
+        if (metricId === 'coverage') return ' %'; 
         if (metricId === 'endurance') return ' h';
-        if (metricId === 'nylonGap') return ' h'; // Trend Einheit
+        if (metricId === 'nylonGap') return ' h'; 
         if (metricId === 'nocturnal') return ' %';
         if (metricId === 'nylonEnclosure') return ' %';
         if (metricId === 'voluntarism') return ' %';
@@ -317,13 +351,13 @@ export default function Statistics() {
     if (loading) return <Box sx={{display:'flex', justifyContent:'center', mt:10}}><CircularProgress/></Box>;
 
     const metrics = [
-        // UPDATE: Key von 'enclosure' zu 'nylonEnclosure'
         { id: 'nylonEnclosure', title: 'Nylon Enclosure', val: `${coreMetrics.nylonEnclosure}%`, sub: 'Tragezeit-Anteil', icon: Icons.Layers, color: PALETTE.accents.pink },
         { id: 'nocturnal', title: 'Nocturnal', val: `${coreMetrics.nocturnal}%`, sub: 'Nacht-Quote', icon: Icons.Night, color: PALETTE.accents.purple },
-        { id: 'nylonGap', title: 'Nylon Gap', val: coreMetrics.nylonGap, sub: 'Ø Lücke/Tag', icon: HourglassEmptyIcon, color: '#00e5ff' }, // Cyan Signalfarbe
+        { id: 'nylonGap', title: 'Nylon Gap', val: `${coreMetrics.nylonGap} h`, sub: 'Ø Lücke/Tag', icon: HourglassEmptyIcon, color: '#00e5ff' }, // FIX: h angehängt
         { id: 'cpnh', title: 'CPNH', val: `${coreMetrics.cpnh}€`, sub: 'Cost/Hour', icon: TrendingUpIcon, color: PALETTE.accents.green },
         { id: 'compliance', title: 'Compliance Lag', val: `${coreMetrics.complianceLag}m`, sub: 'Ø Verzögerung', icon: TimerIcon, color: PALETTE.accents.red },
-        { id: 'exposure', title: 'Exposure', val: `${coreMetrics.exposure}%`, sub: 'Tragezeit-Ratio', icon: AccessTimeIcon, color: PALETTE.primary.main },
+        // FIX: Exposure durch Coverage ersetzt
+        { id: 'coverage', title: 'Coverage', val: `${coreMetrics.coverage}%`, sub: 'Abdeckung (7d)', icon: ShieldIcon, color: PALETTE.primary.main },
         { id: 'resistance', title: 'Resistance', val: `${coreMetrics.resistance}%`, sub: 'Straf-Quote', icon: SecurityIcon, color: PALETTE.accents.gold },
         { id: 'voluntarism', title: 'Voluntarism', val: coreMetrics.voluntarism, sub: 'Zeit-Verhältnis', icon: PsychologyIcon, color: PALETTE.accents.blue },
         { id: 'endurance', title: 'Endurance', val: `${coreMetrics.endurance}h`, sub: `Nyl: ${coreMetrics.enduranceNylon || 0}h • Des: ${coreMetrics.enduranceDessous || 0}h`, icon: SpeedIcon, color: PALETTE.text.secondary },
