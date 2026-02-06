@@ -29,7 +29,6 @@ import { db } from '../../firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { getTimeBankBalance, spendCredits, checkInsolvency } from '../../services/TimeBankService';
 
-// Konfiguration der Falle
 const OVERDRAFT_PENALTY = 1.5; 
 
 export default function InstructionDialog({ 
@@ -52,12 +51,18 @@ export default function InstructionDialog({
   const [credits, setCredits] = useState({ nc: 0, lc: 0 });
   const [creditReduction, setCreditReduction] = useState(0); 
   const [maxReduction, setMaxReduction] = useState(0); 
-  const [creditType, setCreditType] = useState(null); 
+  const [creditType, setCreditType] = useState('lingerie'); // Default Safety
   const [insolvencyData, setInsolvencyData] = useState({ isBlocked: false, currentDebt: 0, remainingCredit: 0 });
 
   // Calculation State für UI
   const [projectedCost, setProjectedCost] = useState(0);
   const [isOverdraft, setIsOverdraft] = useState(false);
+
+  // LOGIK FIX: Bestimmen, ob der Vault angezeigt werden soll
+  // Es ist eine Tages-Session, wenn 'day' in der ID steht ODER wenn es Tag ist (Fallback)
+  const isDayInstruction = instruction?.periodId 
+      ? instruction.periodId.toLowerCase().includes('day') 
+      : !isNight;
 
   useEffect(() => {
     const loadData = async () => {
@@ -107,27 +112,24 @@ export default function InstructionDialog({
       if (open) setSuggestedItem(null);
   }, [open]);
 
-  // --- TIME BANK LOGIC UPDATE (Robustheit erhöht) ---
+  // Logic: Can we spend? (Robuster gemacht)
   const canSpendCredits = 
       instruction && 
       !instruction.isAccepted && 
-      !isNight && // Statt instruction.periodId Check nutzen wir den Prop
-      credits && creditType &&
+      isDayInstruction && // Hier nutzen wir jetzt die korrekte Logik
       !insolvencyData.isBlocked; 
 
   useEffect(() => {
       if (canSpendCredits && instruction.durationMinutes) {
-          // Limit: 33% der Instruktion
           const limitByPolicy = Math.floor(instruction.durationMinutes / 3); 
-          setMaxReduction(limitByPolicy);
+          setMaxReduction(limitByPolicy > 0 ? limitByPolicy : 0);
       } else {
           setMaxReduction(0);
       }
-  }, [canSpendCredits, instruction, credits, creditType, insolvencyData]);
+  }, [canSpendCredits, instruction, insolvencyData]);
 
   // KOSTEN-BERECHNUNG
   useEffect(() => {
-      if (!creditType) return;
       const currentBalance = creditType === 'nylon' ? credits.nc : credits.lc;
       
       let cost = creditReduction;
@@ -362,8 +364,8 @@ export default function InstructionDialog({
                     </Box>
                 </Box>
 
-                {/* THE VAULT (TIME BANK) - FIX: Anzeige nur wenn !isNight (Robuster) */}
-                {!isNight && (
+                {/* THE VAULT (TIME BANK) - ROBUST FIX: isDayInstruction entscheidet */}
+                {isDayInstruction && (
                     <Box sx={{ 
                         mb: 3, px: 2, py: 2, 
                         border: `1px solid ${isOverdraft ? PALETTE.accents.red : PALETTE.accents.gold}`, 
@@ -510,7 +512,6 @@ export default function InstructionDialog({
         )}
       </Dialog>
 
-      {/* HARDCORE DIALOG */}
       <Dialog 
         open={hardcoreDialogOpen} 
         disableEscapeKeyDown 
