@@ -19,7 +19,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ReportProblemIcon from '@mui/icons-material/ReportProblem';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'; 
 import SavingsIcon from '@mui/icons-material/Savings'; 
-import TrendingDownIcon from '@mui/icons-material/TrendingDown'; // Für Schulden
+import TrendingDownIcon from '@mui/icons-material/TrendingDown'; 
 
 import { useNFCGlobal } from '../../contexts/NFCContext';
 import { useAuth } from '../../contexts/AuthContext';
@@ -29,7 +29,7 @@ import { db } from '../../firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { getTimeBankBalance, spendCredits, checkInsolvency } from '../../services/TimeBankService';
 
-// Konfiguration der Falle (muss synchron mit Service sein)
+// Konfiguration der Falle
 const OVERDRAFT_PENALTY = 1.5; 
 
 export default function InstructionDialog({ 
@@ -107,34 +107,25 @@ export default function InstructionDialog({
       if (open) setSuggestedItem(null);
   }, [open]);
 
-  // --- TIME BANK LOGIC UPDATE ---
-  // Overdraft erlaubt, solange Insolvenz-Limit nicht erreicht
+  // --- TIME BANK LOGIC UPDATE (Robustheit erhöht) ---
   const canSpendCredits = 
       instruction && 
       !instruction.isAccepted && 
-      instruction.periodId && instruction.periodId.includes('day') && 
+      !isNight && // Statt instruction.periodId Check nutzen wir den Prop
       credits && creditType &&
-      !insolvencyData.isBlocked; // Blockiert nur wenn HARD LIMIT (-48h) erreicht
+      !insolvencyData.isBlocked; 
 
   useEffect(() => {
       if (canSpendCredits && instruction.durationMinutes) {
-          // 1. Das logische Limit: 33% der Instruktion (Politik)
+          // Limit: 33% der Instruktion
           const limitByPolicy = Math.floor(instruction.durationMinutes / 3); 
-          
-          // 2. Das finanzielle Limit:
-          // Wie viel "Kaufkraft" habe ich noch bis zum Limit (-2880)?
-          // Guthaben (positiv) + Restkredit (bis -2880)
-          // Achtung: Für den Kredit-Teil gilt der Faktor 1.5!
-          // Wir vereinfachen hier: Wir erlauben den Slider bis 33%, 
-          // prüfen aber bei jedem Step, ob wir das Limit reißen würden.
-          
           setMaxReduction(limitByPolicy);
       } else {
           setMaxReduction(0);
       }
   }, [canSpendCredits, instruction, credits, creditType, insolvencyData]);
 
-  // KOSTEN-BERECHNUNG (Live Update beim Slider ziehen)
+  // KOSTEN-BERECHNUNG
   useEffect(() => {
       if (!creditType) return;
       const currentBalance = creditType === 'nylon' ? credits.nc : credits.lc;
@@ -142,16 +133,11 @@ export default function InstructionDialog({
       let cost = creditReduction;
       let overdraft = false;
 
-      // Haben wir genug Guthaben?
       if (currentBalance >= creditReduction) {
-          // Alles gedeckt -> Kosten 1:1
           cost = creditReduction;
       } else {
-          // Nicht gedeckt -> Overdraft Logik
           overdraft = true;
-          // Alles was gedeckt ist: 1:1
           const covered = Math.max(0, currentBalance);
-          // Rest: 1:1.5
           const remainder = creditReduction - covered;
           const penaltyPart = Math.round(remainder * OVERDRAFT_PENALTY);
           cost = covered + penaltyPart;
@@ -159,14 +145,6 @@ export default function InstructionDialog({
 
       setProjectedCost(cost);
       setIsOverdraft(overdraft);
-
-      // Check ob das Ergebnis das Limit sprengt
-      const projectedNewBalance = currentBalance - cost;
-      // MAX_DEBT_MINUTES ist 2880. Also Limit ist -2880.
-      if (projectedNewBalance < -2880) {
-          // Slider zurücksetzen/Limitieren wäre elegant, hier Warnung oder Block im UI
-          // Wir lassen den User es sehen, aber deaktivieren den Button
-      }
 
   }, [creditReduction, credits, creditType]);
 
@@ -279,7 +257,6 @@ export default function InstructionDialog({
   useEffect(() => {
       if (instruction?.isAccepted && creditReduction > 0) {
           const finalizeSpending = async () => {
-             // Hier rufen wir spendCredits auf - der Service kümmert sich um Penalty und Limits
              try {
                  await spendCredits(currentUser.uid, creditReduction, creditType);
                  
@@ -288,7 +265,7 @@ export default function InstructionDialog({
                      durationMinutes: newDuration,
                      originalDurationMinutes: instruction.durationMinutes,
                      creditsUsed: creditReduction,
-                     wasOverdraft: isOverdraft // Für Statistik
+                     wasOverdraft: isOverdraft 
                  });
                  setCreditReduction(0);
              } catch(e) {
@@ -385,8 +362,8 @@ export default function InstructionDialog({
                     </Box>
                 </Box>
 
-                {/* THE VAULT (TIME BANK) */}
-                {instruction.periodId && instruction.periodId.includes('day') && (
+                {/* THE VAULT (TIME BANK) - FIX: Anzeige nur wenn !isNight (Robuster) */}
+                {!isNight && (
                     <Box sx={{ 
                         mb: 3, px: 2, py: 2, 
                         border: `1px solid ${isOverdraft ? PALETTE.accents.red : PALETTE.accents.gold}`, 
