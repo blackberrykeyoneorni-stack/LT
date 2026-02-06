@@ -382,7 +382,7 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput) {
         const spermaRateVal = releaseStats.totalReleases > 0 
             ? (releaseStats.cleanReleases / releaseStats.totalReleases) * 100 : 0;
 
-        // --- FEM INDEX 3.0 (Erosion Metric) ---
+        // F. FEM INDEX 3.0 (Erosion Metric)
         
         // 1. PHYSIS (30%) - Körperliche Gewöhnung
         // Endurance Ziel: 12h = 100%. Enclosure Ziel: 100%.
@@ -404,6 +404,19 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput) {
             (scorePsyche * 0.30) + 
             (scoreInfiltration * 0.40)
         );
+
+        // G. BASICS TODAY (HIER WAR DER FEHLER - DIESER BLOCK FEHLTE)
+        const startOfToday = new Date(); startOfToday.setHours(0,0,0,0);
+        const sessionsToday = allSessions.filter(s => {
+            if(!s.startTime) return false;
+            const d = s.startTime.toDate ? s.startTime.toDate() : new Date(s.startTime);
+            return d >= startOfToday;
+        });
+        const uniqueItemsToday = new Set();
+        sessionsToday.forEach(s => {
+            if (s.itemId) uniqueItemsToday.add(s.itemId);
+            if (s.itemIds) s.itemIds.forEach(id => uniqueItemsToday.add(id));
+        });
 
         setKpis({
             health: { orphanCount },
