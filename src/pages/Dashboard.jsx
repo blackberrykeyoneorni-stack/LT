@@ -56,6 +56,7 @@ import LinkOffIcon from '@mui/icons-material/LinkOff';
 import AnalyticsIcon from '@mui/icons-material/Analytics';
 import LockIcon from '@mui/icons-material/Lock'; 
 import ShieldIcon from '@mui/icons-material/Shield'; 
+import WaterDropIcon from '@mui/icons-material/WaterDrop';
 
 const REFLECTION_TAGS = [
     "Sicher / Geborgen", "Erregt", "Gedemütigt", "Exponiert / Öffentlich", 
@@ -174,7 +175,7 @@ export default function Dashboard() {
   const [forcedReleaseOpen, setForcedReleaseOpen] = useState(false);
   const [forcedReleaseMethod, setForcedReleaseMethod] = useState(null);
 
-  // NEU: Gamble & TimeBank State
+  // GAMBLE & TimeBank State
   const [offerOpen, setOfferOpen] = useState(false);
   const [gambleStake, setGambleStake] = useState([]);
   const [hasGambledThisSession, setHasGambledThisSession] = useState(false);
@@ -187,9 +188,7 @@ export default function Dashboard() {
   const isPunishmentRunning = activeSessions.some(s => s.type === 'punishment');
   const isDailyGoalMet = progress.isDailyGoalMet;
   
-  // SYSTEM OVERRIDE DETECTION
   const hasVoluntarySession = activeSessions.some(s => s.type === 'voluntary' && !s.endTime);
-  
   const budgetBalance = monthlyBudget - currentSpent;
 
   const showToast = (message, severity = 'success') => setToast({ open: true, message, severity });
@@ -578,7 +577,7 @@ export default function Dashboard() {
           stakeItems={gambleStake} 
           onAccept={handleGambleAccept} 
           onDecline={handleGambleDecline}
-          hasActiveSession={hasVoluntarySession} // NEU: Prop für den Warnhinweis
+          hasActiveSession={hasVoluntarySession} 
       />
 
       <Container maxWidth="md" sx={{ pt: 2, pb: 4 }}>
@@ -621,6 +620,7 @@ export default function Dashboard() {
                     else executeStartPunishment(); 
                 }}
                 onStartAudit={handleStartAudit}
+                onOpenRelease={handleOpenRelease}
             />
 
             <ActiveSessionsList 
@@ -632,11 +632,36 @@ export default function Dashboard() {
                 onOpenRelease={handleOpenRelease}
             />
 
+            {/* NEU: PROMINENTER RELEASE BUTTON UNTERHALB SESSIONS (Wenn keine Strafe) */}
+            {!punishmentStatus.active && (
+                <Box sx={{ mb: 4 }}>
+                    <Button
+                        fullWidth variant="outlined" size="large"
+                        onClick={handleOpenRelease}
+                        startIcon={<WaterDropIcon />}
+                        sx={{
+                            py: 1.5,
+                            borderColor: 'rgba(64, 196, 255, 0.3)',
+                            color: PALETTE.accents.blue,
+                            background: 'rgba(64, 196, 255, 0.05)',
+                            fontWeight: 'bold',
+                            letterSpacing: 1,
+                            '&:hover': {
+                                borderColor: PALETTE.accents.blue,
+                                background: 'rgba(64, 196, 255, 0.1)',
+                            }
+                        }}
+                    >
+                        SPERMA ENTLADUNG
+                    </Button>
+                </Box>
+            )}
+
             <Divider sx={{ my: 4, borderColor: 'rgba(255,255,255,0.1)' }}>
                 <Typography variant="caption" color="text.secondary">METRIKEN & VERWALTUNG</Typography>
             </Divider>
 
-            {/* NEU: TimeBank an InfoTiles übergeben */}
+            {/* InfoTiles mit TimeBank Data */}
             <InfoTiles kpis={kpis} timeBank={timeBankData} />
 
             <Button

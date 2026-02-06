@@ -19,10 +19,8 @@ export default function InfoTiles({ kpis, timeBank }) {
   
   // SpermaScore
   const spermaScore = kpis?.spermaScore || { rate: 0, total: 0, count: 0 };
-  const cleanCount = spermaScore.count !== undefined ? spermaScore.count : 0;
-  const totalCount = spermaScore.total !== undefined ? spermaScore.total : 0;
 
-  // Hilfsfunktion für kleine Karten
+  // Hilfsfunktion für einheitliche kleine Karten
   const SmallCard = ({ icon, title, value, unit, color }) => (
       <Grid item xs={6}>
         <Card sx={{ height: '100%', ...DESIGN_TOKENS.glassCard }}>
@@ -41,7 +39,8 @@ export default function InfoTiles({ kpis, timeBank }) {
 
   return (
       <Grid container spacing={2} sx={{ mb: 3 }}>
-        {/* ROW 1: THE VAULT */}
+        
+        {/* REIHE 1: CREDITS (The Vault) */}
         <SmallCard 
             icon={<SavingsIcon sx={{ fontSize: 16, color: PALETTE.accents.gold }} />}
             title="Nylon Credits"
@@ -57,13 +56,13 @@ export default function InfoTiles({ kpis, timeBank }) {
             color={lc < 0 ? PALETTE.accents.red : PALETTE.accents.pink}
         />
 
-        {/* ROW 2: SCORES */}
+        {/* REIHE 2: FINANCIALS & INDEX */}
         <SmallCard 
-            icon={<WaterDropIcon sx={{ fontSize: 16, color: PALETTE.accents.blue }} />}
-            title="SpermaScore"
-            value={spermaScore.rate}
-            unit="%"
-            color={PALETTE.accents.blue}
+            icon={<EuroIcon sx={{ fontSize: 16, color: PALETTE.accents.green }} />}
+            title="Ø Cost/Wear"
+            value={typeof avgCPW === 'number' ? avgCPW.toFixed(2) : '0.00'}
+            unit="€"
+            color={PALETTE.accents.green}
         />
         <SmallCard 
             icon={<AccessTimeIcon sx={{ fontSize: 16, color: PALETTE.accents.gold }} />}
@@ -73,14 +72,7 @@ export default function InfoTiles({ kpis, timeBank }) {
             color={PALETTE.accents.gold}
         />
 
-        {/* ROW 3: FINANCIALS & HEALTH */}
-        <SmallCard 
-            icon={<EuroIcon sx={{ fontSize: 16, color: PALETTE.accents.green }} />}
-            title="Ø Cost/Wear"
-            value={typeof avgCPW === 'number' ? avgCPW.toFixed(2) : '0.00'}
-            unit="€"
-            color={PALETTE.accents.green}
-        />
+        {/* REIHE 3: ORPHANS & SPERMASCORE */}
         <Grid item xs={6}>
             <Card sx={{ 
                 height: '100%', 
@@ -98,6 +90,15 @@ export default function InfoTiles({ kpis, timeBank }) {
                 </CardContent>
             </Card>
         </Grid>
+
+        <SmallCard 
+            icon={<WaterDropIcon sx={{ fontSize: 16, color: PALETTE.accents.blue }} />}
+            title="SpermaScore"
+            value={spermaScore.rate}
+            unit="%"
+            color={PALETTE.accents.blue}
+        />
+
       </Grid>
   );
 }

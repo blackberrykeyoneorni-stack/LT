@@ -9,7 +9,6 @@ import LightModeIcon from '@mui/icons-material/LightMode';
 import LockIcon from '@mui/icons-material/Lock';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import TimerIcon from '@mui/icons-material/Timer'; 
-import WaterDropIcon from '@mui/icons-material/WaterDrop'; // Für Release
 import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
 import { isPunishmentWindowOpen } from '../../services/PunishmentService';
 import { motion } from 'framer-motion'; 
@@ -20,8 +19,7 @@ export default function ActionButtons({
   auditDue, isFreeDay, freeDayReason, 
   currentInstruction, currentPeriod, isHoldingOath, 
   isInstructionActive, isDailyGoalMet,
-  onStartPunishment, onStartAudit, onOpenInstruction,
-  onOpenRelease // NEU: Prop für Release Dialog
+  onStartPunishment, onStartAudit, onOpenInstruction
 }) {
 
   const punishmentWindowOpen = isPunishmentWindowOpen();
@@ -135,30 +133,6 @@ export default function ActionButtons({
             </Box>
           );
       })()}
-
-      {/* 4. RELEASE BUTTON (Prominent wiederhergestellt) */}
-      {/* Nur sichtbar, wenn keine Strafe aktiv ist, um Fokus zu behalten */}
-      {!punishmentStatus.active && (
-        <Box sx={{ mb: 3 }}>
-             <Button
-                fullWidth variant="outlined" size="large"
-                onClick={onOpenRelease}
-                startIcon={<WaterDropIcon />}
-                sx={{
-                    py: 1.5,
-                    borderColor: 'rgba(64, 196, 255, 0.3)',
-                    color: PALETTE.accents.blue,
-                    background: 'rgba(64, 196, 255, 0.05)',
-                    '&:hover': {
-                        borderColor: PALETTE.accents.blue,
-                        background: 'rgba(64, 196, 255, 0.1)',
-                    }
-                }}
-             >
-                 ENTLADUNG ANFRAGEN
-             </Button>
-        </Box>
-      )}
 
       {/* 5. Deferred Info */}
       {punishmentStatus.deferred && (
