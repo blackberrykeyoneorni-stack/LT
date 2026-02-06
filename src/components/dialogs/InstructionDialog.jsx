@@ -51,16 +51,17 @@ export default function InstructionDialog({
   const [credits, setCredits] = useState({ nc: 0, lc: 0 });
   const [creditReduction, setCreditReduction] = useState(0); 
   const [maxReduction, setMaxReduction] = useState(0); 
-  const [creditType, setCreditType] = useState('lingerie'); // Default Safety
+  const [creditType, setCreditType] = useState('lingerie'); 
   const [insolvencyData, setInsolvencyData] = useState({ isBlocked: false, currentDebt: 0, remainingCredit: 0 });
 
-  // UI Calculation State
+  // Calculation State für UI
   const [projectedCost, setProjectedCost] = useState(0);
   const [isOverdraft, setIsOverdraft] = useState(false);
 
-  // FIX: Wir zeigen den Vault IMMER an, wenn es eine Dauer gibt.
-  // Egal ob Tag oder Nacht, egal wie die ID heißt.
-  const showVault = instruction && !instruction.isAccepted && (instruction.durationMinutes > 0);
+  // LOGIK VEREINFACHT:
+  // Wir prüfen NUR die Instruction. Ist es Nacht-Protokoll? Wenn nein -> Es ist Tag (Vault aktiv).
+  const isNightProtocol = instruction?.periodId?.toLowerCase().includes('night');
+  const showVault = !isNightProtocol; 
 
   useEffect(() => {
     const loadData = async () => {
@@ -98,6 +99,7 @@ export default function InstructionDialog({
             }
             setCreditType(type);
 
+            // Insolvenz-Check
             const insCheck = await checkInsolvency(currentUser.uid, type);
             setInsolvencyData(insCheck);
         }
@@ -109,13 +111,16 @@ export default function InstructionDialog({
       if (open) setSuggestedItem(null);
   }, [open]);
 
-  // Logic: Can we spend? 
-  // Wir erlauben Spending, solange wir nicht insolvenz-blockiert sind.
-  const canSpendCredits = showVault && !insolvencyData.isBlocked;
+  // Spending Permission: 
+  // Instruction da + Nicht akzeptiert + Vault erlaubt (kein Nacht-Protokoll) + Keine Insolvenz-Sperre
+  const canSpendCredits = 
+      instruction && 
+      !instruction.isAccepted && 
+      showVault && 
+      !insolvencyData.isBlocked; 
 
   useEffect(() => {
       if (canSpendCredits && instruction.durationMinutes) {
-          // Limit: 33% der Instruktion
           const limitByPolicy = Math.floor(instruction.durationMinutes / 3); 
           setMaxReduction(limitByPolicy > 0 ? limitByPolicy : 0);
       } else {
@@ -148,20 +153,25 @@ export default function InstructionDialog({
   const projectedBalance = (creditType === 'nylon' ? credits.nc : credits.lc) - projectedCost;
   const isInsolvencyRisk = projectedBalance < -2880;
 
-  // ... (Hardcore & Verify Logik unverändert)
+
   const triggerHardcoreCheck = (actionToExecute) => {
       if (!isNight || !hcPrefs.enabled) { actionToExecute(); return; }
+      
       const roll = Math.random();
       const threshold = hcPrefs.probability / 100;
+      
       if (roll < threshold) {
           const methodRoll = Math.random();
           let method = "per Hand"; 
           if (methodRoll >= 0.34 && methodRoll < 0.67) method = "per Masturbator vaginal";
           else if (methodRoll >= 0.67) method = "per Masturbator anal";
+
           setReleaseMethod(method);
           setPendingAction(() => actionToExecute);
           setHardcoreDialogOpen(true);
-      } else { actionToExecute(); }
+      } else { 
+          actionToExecute(); 
+      }
   };
 
   const handleHardcoreRefuse = async () => {
@@ -169,26 +179,51 @@ export default function InstructionDialog({
           await registerPunishment(currentUser.uid, "Hardcore-Start verweigert (Entladung)", 30);
           if (showToast) showToast("Verweigerung registriert. Strafe aktiv.", "warning");
       } catch (e) { console.error(e); } finally {
-          setHardcoreDialogOpen(false); if (pendingAction) pendingAction(); setPendingAction(null);
+          setHardcoreDialogOpen(false);
+          if (pendingAction) pendingAction();
+          setPendingAction(null);
       }
   };
+
   const handleHardcoreAccept = () => {
       if (showToast) showToast("Brav. Session wird gestartet.", "success");
-      setHardcoreDialogOpen(false); if (pendingAction) pendingAction(); setPendingAction(null);
+      setHardcoreDialogOpen(false);
+      if (pendingAction) pendingAction();
+      setPendingAction(null);
   };
+
   const handleWeekendAccept = () => {
-      const candidates = items.filter(i => i.status === 'active' && (i.subCategory || '').toLowerCase().includes('strumpfhose'));
-      if (candidates.length === 0) { if (showToast) showToast("Keine passenden Items gefunden.", "warning"); return; }
+      const candidates = items.filter(i => 
+          i.status === 'active' && 
+          (i.subCategory || '').toLowerCase().includes('strumpfhose')
+      );
+
+      if (candidates.length === 0) {
+          if (showToast) showToast("Keine passenden Items gefunden.", "warning");
+          return;
+      }
+
       const randomItem = candidates[Math.floor(Math.random() * candidates.length)];
       setSuggestedItem(randomItem);
   };
+
   const handleStartSuggestion = async () => {
       if (!suggestedItem) return;
       try {
-          await startSessionService(currentUser.uid, { itemId: suggestedItem.id, items: [suggestedItem], type: 'voluntary', startedViaSuggestion: true });
-          onClose(); if (showToast) showToast("Viel Spaß.", "success");
-      } catch (e) { console.error("Start suggestion error:", e); if (showToast) showToast("Fehler beim Starten.", "error"); }
+          await startSessionService(currentUser.uid, {
+              itemId: suggestedItem.id,
+              items: [suggestedItem],
+              type: 'voluntary', 
+              startedViaSuggestion: true
+          });
+          onClose();
+          if (showToast) showToast("Viel Spaß.", "success");
+      } catch (e) {
+          console.error("Start suggestion error:", e);
+          if (showToast) showToast("Fehler beim Starten.", "error");
+      }
   };
+
   const handleVerifyItem = (fullItem) => {
       if (!fullItem) return;
       const executeVerify = () => {
@@ -196,7 +231,11 @@ export default function InstructionDialog({
             const isMatch = (scannedTagId === fullItem.nfcTagId || scannedTagId === fullItem.customId || scannedTagId === fullItem.id);
             if (isMatch) {
                 try {
-                    await startSessionService(currentUser.uid, { itemId: fullItem.id, items: [fullItem], type: 'instruction', periodId: instruction.periodId, acceptedAt: instruction.acceptedAt, verifiedViaNfc: true, instructionDurationMinutes: instruction.durationMinutes });
+                    await startSessionService(currentUser.uid, {
+                        itemId: fullItem.id, items: [fullItem], type: 'instruction', 
+                        periodId: instruction.periodId, acceptedAt: instruction.acceptedAt, verifiedViaNfc: true,
+                        instructionDurationMinutes: instruction.durationMinutes 
+                    });
                     setVerifiedItems(prev => [...prev, fullItem.id]);
                     if (showToast) showToast(`${fullItem.name} verifiziert!`, "success");
                     if (navigator.vibrate) navigator.vibrate(200);
@@ -206,6 +245,7 @@ export default function InstructionDialog({
       };
       triggerHardcoreCheck(executeVerify);
   };
+
   const handleSmartStart = () => {
       const executeStart = () => {
         const unverifiedItems = instruction.items.filter(i => !verifiedItems.includes(i.id));
@@ -221,16 +261,25 @@ export default function InstructionDialog({
           const finalizeSpending = async () => {
              try {
                  await spendCredits(currentUser.uid, creditReduction, creditType);
+                 
                  const newDuration = (instruction.durationMinutes || 0) - creditReduction;
                  await updateDoc(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), {
-                     durationMinutes: newDuration, originalDurationMinutes: instruction.durationMinutes, creditsUsed: creditReduction, wasOverdraft: isOverdraft 
+                     durationMinutes: newDuration,
+                     originalDurationMinutes: instruction.durationMinutes,
+                     creditsUsed: creditReduction,
+                     wasOverdraft: isOverdraft 
                  });
                  setCreditReduction(0);
-             } catch(e) { if (e.message === 'INSOLVENCY_LIMIT_REACHED') showToast("TRANSAKTION FEHLGESCHLAGEN: Limit erreicht.", "error"); }
+             } catch(e) {
+                 if (e.message === 'INSOLVENCY_LIMIT_REACHED') {
+                     showToast("TRANSAKTION FEHLGESCHLAGEN: Limit erreicht.", "error");
+                 }
+             }
           };
           finalizeSpending();
       }
   }, [instruction?.isAccepted]);
+
 
   const totalItems = instruction?.items?.length || 0;
   const verifiedCount = verifiedItems.length;
@@ -239,7 +288,9 @@ export default function InstructionDialog({
   const dialogPaperStyle = DESIGN_TOKENS.dialog?.paper?.sx || { borderRadius: '28px', bgcolor: '#1e1e1e' };
 
   const renderContent = () => {
-    if (loadingStatus === 'loading') return <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 4 }}><CircularProgress color="primary" /></Box>;
+    if (loadingStatus === 'loading') {
+        return <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 4 }}><CircularProgress color="primary" /></Box>;
+    }
     
     if (!instruction) {
         if (isFreeDay) {
@@ -259,7 +310,9 @@ export default function InstructionDialog({
             }
             return (
                 <Box sx={{ textAlign: 'center', py: 3 }}>
-                    <Box sx={{ mb: 2 }}>{freeDayReason === 'Holiday' ? <CelebrationIcon sx={{ fontSize: 50, color: PALETTE.accents.gold }} /> : <WeekendIcon sx={{ fontSize: 50, color: PALETTE.accents.green }} />}</Box>
+                    <Box sx={{ mb: 2 }}>
+                        {freeDayReason === 'Holiday' ? <CelebrationIcon sx={{ fontSize: 50, color: PALETTE.accents.gold }} /> : <WeekendIcon sx={{ fontSize: 50, color: PALETTE.accents.green }} />}
+                    </Box>
                     <Typography variant="h6" gutterBottom>{freeDayReason === 'Holiday' ? 'Feiertag' : 'Wochenende'}</Typography>
                     <Typography variant="body1" color="text.secondary" sx={{ mt: 2, px: 2, fontStyle: 'italic' }}>Es ist zwar Wochenende, aber du stehst doch darauf, dir eine sexy, schwarze, glänzende Strumpfhose anzuziehen. Ich suche dir gerne eine raus.</Typography>
                     <Box sx={{ mt: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -296,6 +349,7 @@ export default function InstructionDialog({
                 </Box>
                 <Typography variant="h5" gutterBottom sx={{ fontWeight: 'bold' }}>{instruction.itemName || "Instruction"}</Typography>
                 
+                {/* DURATION DISPLAY */}
                 <Box sx={{ mb: 3, p: 2, bgcolor: 'rgba(0,0,0,0.3)', borderRadius: 2 }}>
                     <Typography variant="caption" color="text.secondary">ZIEL DAUER</Typography>
                     <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 1 }}>
@@ -310,7 +364,7 @@ export default function InstructionDialog({
                     </Box>
                 </Box>
 
-                {/* THE VAULT - ZEIGT SICH JETZT IMMER BEI DAUER > 0 */}
+                {/* THE VAULT (TIME BANK) - SIMPLIFIED CONDITION: showVault wenn !isNightProtocol */}
                 {showVault && (
                     <Box sx={{ 
                         mb: 3, px: 2, py: 2, 
@@ -396,7 +450,6 @@ export default function InstructionDialog({
         );
     }
     
-    // ... Accepted View (List) bleibt gleich ...
     if (instruction.isAccepted) {
         return (
             <List>
@@ -446,6 +499,7 @@ export default function InstructionDialog({
                 {renderContent()}
             </motion.div>
         </DialogContent>
+        
         {canClose && (
             <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}>
                 {instruction?.isAccepted && (
@@ -457,17 +511,44 @@ export default function InstructionDialog({
             </DialogActions>
         )}
       </Dialog>
-      <Dialog open={hardcoreDialogOpen} disableEscapeKeyDown PaperProps={{ sx: { ...dialogPaperStyle, border: `1px solid ${PALETTE.accents.red}` } }}>
-          <DialogTitle sx={{ ...DESIGN_TOKENS.dialog.title.sx, color: PALETTE.accents.red }}><ReportProblemIcon /> Hardcore Protokoll</DialogTitle>
+
+      <Dialog 
+        open={hardcoreDialogOpen} 
+        disableEscapeKeyDown 
+        PaperProps={{ sx: { ...dialogPaperStyle, border: `1px solid ${PALETTE.accents.red}` } }}
+      >
+          <DialogTitle sx={{ ...DESIGN_TOKENS.dialog.title.sx, color: PALETTE.accents.red }}>
+              <ReportProblemIcon /> Hardcore Protokoll
+          </DialogTitle>
           <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
                   <Box sx={{ textAlign: 'center', py: 2 }}>
-                      <DialogContentText sx={{ color: 'text.primary', mb: 2 }}><strong>Eine sofortige Entladung wird gefordert.</strong></DialogContentText>
-                      {releaseMethod && (<Box sx={{ p: 2, bgcolor: 'rgba(255, 0, 0, 0.1)', border: `1px solid ${PALETTE.accents.red}`, borderRadius: '8px' }}><Typography variant="caption" color="error" sx={{ textTransform: 'uppercase', letterSpacing: 1 }}>Vorgeschriebene Methode</Typography><Typography variant="h6" sx={{ color: '#fff', fontWeight: 'bold', mt: 1 }}>{releaseMethod}</Typography></Box>)}
+                      <DialogContentText sx={{ color: 'text.primary', mb: 2 }}>
+                          <strong>Eine sofortige Entladung wird gefordert.</strong>
+                      </DialogContentText>
+                      
+                      {releaseMethod && (
+                        <Box sx={{ 
+                            p: 2, 
+                            bgcolor: 'rgba(255, 0, 0, 0.1)', 
+                            border: `1px solid ${PALETTE.accents.red}`,
+                            borderRadius: '8px'
+                        }}>
+                            <Typography variant="caption" color="error" sx={{ textTransform: 'uppercase', letterSpacing: 1 }}>
+                                Vorgeschriebene Methode
+                            </Typography>
+                            <Typography variant="h6" sx={{ color: '#fff', fontWeight: 'bold', mt: 1 }}>
+                                {releaseMethod}
+                            </Typography>
+                        </Box>
+                      )}
                   </Box>
               </motion.div>
           </DialogContent>
-          <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}><Button fullWidth variant="contained" color="error" onClick={handleHardcoreAccept}>Akzeptieren</Button><Button fullWidth variant="outlined" color="warning" onClick={handleHardcoreRefuse}>Verweigern (Strafe)</Button></DialogActions>
+          <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}>
+              <Button fullWidth variant="contained" color="error" onClick={handleHardcoreAccept}>Akzeptieren</Button>
+              <Button fullWidth variant="outlined" color="warning" onClick={handleHardcoreRefuse}>Verweigern (Strafe)</Button>
+          </DialogActions>
       </Dialog>
     </>
   );
