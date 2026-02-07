@@ -86,6 +86,36 @@ export const spendCredits = async (userId, amountMinutes, type) => {
 };
 
 /**
+ * Berechnet Credits basierend auf Dauer und Typ.
+ * STRAFEN (Punishment, TZD Evasion) geben 0 Credits.
+ * DIES IST DIE NEUE SICHERHEITSFUNKTION.
+ */
+export const calculateEarnedCredits = (session) => {
+    if (!session || !session.startTime || !session.endTime) return 0;
+
+    // 1. HARTE SPERRE: Prüfen auf Straf-Indikatoren
+    // Wenn es eine Bestrafung ist, ein Straf-TZD oder eine erzwungene Evasion -> 0 Credits.
+    if (
+        session.type === 'punishment' ||       // Expliziter Straf-Typ
+        session.isPunitive === true ||         // Generelles Straf-Flag
+        session.evasionPenaltyTriggered === true || // Flucht-Versuch Flag
+        session.source === 'gamble_loss'       // Glücksspiel-Verlust
+    ) {
+        console.log("TimeBank: PUNITIVE SESSION DETECTED. 0 Credits awarded.");
+        return 0;
+    }
+
+    // 2. Berechnung der Dauer in Minuten
+    const start = session.startTime.toDate ? session.startTime.toDate() : new Date(session.startTime);
+    const end = session.endTime.toDate ? session.endTime.toDate() : new Date(session.endTime);
+    const durationMinutes = (end - start) / 60000;
+
+    if (durationMinutes < 10) return 0; // Zu kurz zählt nicht
+
+    return Math.floor(durationMinutes);
+};
+
+/**
  * Fügt Credits hinzu (Earning / Tilgung).
  * Kurs: 3 Minuten "Overtime" = 1 Credit.
  * ABER: Im Debt-Mode (Minus) zählt jede Minute 1:1 zur Tilgung? 
