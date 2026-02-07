@@ -8,12 +8,12 @@ const HISTORY_START_DATE = new Date('2025-12-15T00:00:00');
 
 // --- HELPER FUNKTIONEN ---
 
-const fmtPct = (val) => (typeof val === 'number' ? val.toFixed(1) : '0.0');
-const fmtMoney = (val) => (typeof val === 'number' ? val.toFixed(2) : '0.00');
+const fmtPct = (val) => (typeof val === 'number' && !isNaN(val) ? val.toFixed(1) : '0.0');
+const fmtMoney = (val) => (typeof val === 'number' && !isNaN(val) ? val.toFixed(2) : '0.00');
 
 // Formatierung: Stunden & Minuten
 const fmtDuration = (minutes) => {
-    if (!minutes || minutes <= 0) return '0m';
+    if (typeof minutes !== 'number' || isNaN(minutes) || minutes <= 0) return '0m';
     const h = Math.floor(minutes / 60);
     const m = Math.round(minutes % 60);
     if (h > 0) return `${h}h ${m}m`;
@@ -133,14 +133,18 @@ const calculateDailyNylonMinutes = (dateObj, sessions, items) => {
     return Math.floor(totalMs / 60000);
 };
 
-// SIGNATUR WIEDERHERGESTELLT: Nimmt items und sessions entgegen
+/**
+ * useKPIs Hook
+ * FIX: 'export default function' hinzugefügt, damit der Import im Dashboard funktioniert.
+ */
 export default function useKPIs(items = [], activeSessionsInput, historySessionsInput) {
     const { currentUser } = useAuth();
     
-    // Manueller Trigger
+    // Manueller Trigger & Loading State
     const [refreshTrigger, setRefreshTrigger] = useState(0);
     const [loading, setLoading] = useState(true);
 
+    // Initialer State
     const [kpis, setKpis] = useState({
         health: { orphanCount: 0 },
         financials: { avgCPW: '0.00' },
@@ -173,7 +177,6 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
             setLoading(true);
             try {
                 // 1. SESSIONS LADEN (Einmalig per getDocs)
-                // Wir nutzen historySessionsInput nur wenn übergeben, sonst laden wir selbst (Standard)
                 let allSessions = [];
                 
                 if (historySessionsInput) {
@@ -188,20 +191,24 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
                     allSessions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 }
 
-                // 2. RELEASE STATS LADEN (Einmalig per getDoc)
+                // 2. RELEASE STATS LADEN
                 let releaseStats = { totalReleases: 0, cleanReleases: 0, keptOn: 0 };
-                const statsRef = doc(db, `users/${currentUser.uid}/stats/releaseStats`);
-                const statsSnap = await getDoc(statsRef);
-                if (statsSnap.exists()) {
-                     const data = statsSnap.data();
-                     releaseStats = {
-                        totalReleases: Number(data.totalReleases) || 0,
-                        cleanReleases: Number(data.cleanReleases) || 0,
-                        keptOn: Number(data.keptOn) || 0
-                     };
+                try {
+                    const statsRef = doc(db, `users/${currentUser.uid}/stats/releaseStats`);
+                    const statsSnap = await getDoc(statsRef);
+                    if (statsSnap.exists()) {
+                        const data = statsSnap.data();
+                        releaseStats = {
+                            totalReleases: Number(data.totalReleases) || 0,
+                            cleanReleases: Number(data.cleanReleases) || 0,
+                            keptOn: Number(data.keptOn) || 0
+                        };
+                    }
+                } catch (e) {
+                    console.warn("Release stats konnten nicht geladen werden", e);
                 }
 
-                // --- BERECHNUNGSLOGIK START (Identisch zur Originalversion) ---
+                // --- BERECHNUNGSLOGIK ---
                 
                 const historySessions = allSessions.filter(s => {
                     const d = s.startTime.toDate ? s.startTime.toDate() : new Date(s.startTime);
@@ -308,6 +315,8 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
                 // Voluntarism & Compliance Lag
                 let totalDurationMs = 0;
                 let voluntaryDurationMs = 0;
+                
+                // Variablen für Compliance Fix
                 let totalLagMinutes = 0;
                 let lagCount = 0;
 
@@ -318,14 +327,21 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
                     totalDurationMs += duration;
                     if (s.type === 'voluntary') voluntaryDurationMs += duration;
 
-                    if (typeof s.complianceLagMinutes === 'number') {
-                        totalLagMinutes += s.complianceLagMinutes;
+                    // FIX: Robuste Berechnung für Compliance Lag
+                    // Wir erzwingen eine Zahl und filtern ungültige Werte/Strings
+                    const rawLag = s.complianceLagMinutes;
+                    const lagNum = Number(rawLag);
+                    
+                    if (!isNaN(lagNum) && lagNum >= 0) {
+                        totalLagMinutes += lagNum;
                         lagCount++;
                     }
                 });
+                
                 const voluntarismVal = totalDurationMs > 0 ? (voluntaryDurationMs / totalDurationMs) * 100 : 0;
                 const resistanceVal = historySessions.length > 0 ? (historySessions.filter(s => s.type === 'punishment').length / historySessions.length) * 100 : 0;
                 
+                // Durchschnitt berechnen (sicher vor Division durch 0)
                 const avgLagVal = lagCount > 0 ? (totalLagMinutes / lagCount) : 0;
 
                 // ENDURANCE (Strict: Only Nylon/Lingerie)
@@ -379,6 +395,8 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
                 const scorePhysis = (scoreEndurance * 0.4) + (nylonEnclosureVal * 0.6);
 
                 // 2. PSYCHE (30%) - Mentaler Widerstand
+                // Score Compliance: 0min lag = 100 Pkt. Pro Minute Abzug.
+                // Wir nutzen hier avgLagVal, das nun garantiert eine Zahl ist (oder 0).
                 const scoreCompliance = Math.max(0, 100 - (avgLagVal * 1.6));
                 const scorePsyche = Math.max(0, ((voluntarismVal * 0.6) + (scoreCompliance * 0.4)) - (resistanceVal * 2));
 
@@ -432,7 +450,7 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
                         chastity: fmtPct(nylonEnclosureVal)
                     },
                     femIndex: { 
-                        score: Math.min(100, femScore), 
+                        score: isNaN(femScore) ? 0 : Math.min(100, femScore), // Letztes Sicherheitsnetz
                         trend: 'stable',
                         subScores: {
                             physis: Math.round(scorePhysis),
