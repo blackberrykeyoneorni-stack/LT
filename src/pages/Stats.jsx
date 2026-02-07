@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { collection, query, getDocs, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { useKPIs } from '../hooks/useKPIs'; 
+import useKPIs from '../hooks/useKPIs'; 
 import { 
     Box, Typography, Grid, Paper, Card, CardContent, CircularProgress, 
     Container, Dialog, DialogTitle, DialogContent, IconButton, Chip, Divider 

@@ -24,7 +24,7 @@ import { checkGambleTrigger, determineGambleStake, rollTheDice, isImmunityActive
 // Hooks
 import useSessionProgress from '../hooks/dashboard/useSessionProgress';
 import useFemIndex from '../hooks/dashboard/useFemIndex'; 
-import { useKPIs } from '../hooks/useKPIs'; 
+import useKPIs from '../hooks/useKPIs'; 
 
 // Components
 import TzdOverlay from '../components/dashboard/TzdOverlay'; 

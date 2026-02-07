@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { doc, onSnapshot, collection, query, where, orderBy } from 'firebase/firestore';
+import { doc, getDocs, getDoc, collection, query, where, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -11,7 +11,7 @@ const HISTORY_START_DATE = new Date('2025-12-15T00:00:00');
 const fmtPct = (val) => (typeof val === 'number' ? val.toFixed(1) : '0.0');
 const fmtMoney = (val) => (typeof val === 'number' ? val.toFixed(2) : '0.00');
 
-// Neue Formatierung: Stunden & Minuten (z.B. "5h 12m" oder "45m")
+// Formatierung: Stunden & Minuten
 const fmtDuration = (minutes) => {
     if (!minutes || minutes <= 0) return '0m';
     const h = Math.floor(minutes / 60);
@@ -133,16 +133,13 @@ const calculateDailyNylonMinutes = (dateObj, sessions, items) => {
     return Math.floor(totalMs / 60000);
 };
 
-export function useKPIs(items, activeSessionsInput, historySessionsInput) {
+// SIGNATUR WIEDERHERGESTELLT: Nimmt items und sessions entgegen
+export default function useKPIs(items = [], activeSessionsInput, historySessionsInput) {
     const { currentUser } = useAuth();
     
-    const [releaseStats, setReleaseStats] = useState({ 
-        totalReleases: 0, 
-        cleanReleases: 0,
-        keptOn: 0 
-    });
-
-    const [internalHistory, setInternalHistory] = useState([]);
+    // Manueller Trigger
+    const [refreshTrigger, setRefreshTrigger] = useState(0);
+    const [loading, setLoading] = useState(true);
 
     const [kpis, setKpis] = useState({
         health: { orphanCount: 0 },
@@ -171,297 +168,298 @@ export function useKPIs(items, activeSessionsInput, historySessionsInput) {
 
     useEffect(() => {
         if (!currentUser) return;
-        if (historySessionsInput === undefined) {
-            const q = query(
-                collection(db, `users/${currentUser.uid}/sessions`),
-                where('startTime', '>=', HISTORY_START_DATE),
-                orderBy('startTime', 'desc')
-            );
-            const unsub = onSnapshot(q, (snapshot) => {
-                const sessions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                setInternalHistory(sessions);
-            });
-            return () => unsub();
-        }
-    }, [currentUser, historySessionsInput]); 
+        
+        const fetchData = async () => {
+            setLoading(true);
+            try {
+                // 1. SESSIONS LADEN (Einmalig per getDocs)
+                // Wir nutzen historySessionsInput nur wenn übergeben, sonst laden wir selbst (Standard)
+                let allSessions = [];
+                
+                if (historySessionsInput) {
+                    allSessions = [...historySessionsInput, ...(activeSessionsInput || [])];
+                } else {
+                    const q = query(
+                        collection(db, `users/${currentUser.uid}/sessions`),
+                        where('startTime', '>=', HISTORY_START_DATE),
+                        orderBy('startTime', 'desc')
+                    );
+                    const snapshot = await getDocs(q);
+                    allSessions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                }
 
-    useEffect(() => {
-        if (!currentUser) return;
-        const statsRef = doc(db, `users/${currentUser.uid}/stats/releaseStats`);
-        const unsub = onSnapshot(statsRef, (docSnap) => {
-            if (docSnap.exists()) {
-                const data = docSnap.data();
-                setReleaseStats({
-                    totalReleases: Number(data.totalReleases) || 0,
-                    cleanReleases: Number(data.cleanReleases) || 0,
-                    keptOn: Number(data.keptOn) || 0
+                // 2. RELEASE STATS LADEN (Einmalig per getDoc)
+                let releaseStats = { totalReleases: 0, cleanReleases: 0, keptOn: 0 };
+                const statsRef = doc(db, `users/${currentUser.uid}/stats/releaseStats`);
+                const statsSnap = await getDoc(statsRef);
+                if (statsSnap.exists()) {
+                     const data = statsSnap.data();
+                     releaseStats = {
+                        totalReleases: Number(data.totalReleases) || 0,
+                        cleanReleases: Number(data.cleanReleases) || 0,
+                        keptOn: Number(data.keptOn) || 0
+                     };
+                }
+
+                // --- BERECHNUNGSLOGIK START (Identisch zur Originalversion) ---
+                
+                const historySessions = allSessions.filter(s => {
+                    const d = s.startTime.toDate ? s.startTime.toDate() : new Date(s.startTime);
+                    return d >= HISTORY_START_DATE;
                 });
-            }
-        });
-        return () => unsub();
-    }, [currentUser]);
 
-    useEffect(() => {
-        if (!Array.isArray(items)) return;
+                // A. ITEMS & ORPHANS
+                const activeItems = items.filter(i => i.status === 'active');
+                const washingItems = items.filter(i => i.status === 'washing');
+                const archivedItems = items.filter(i => i.status === 'archived');
+                const orphanCount = items.filter(i => i.status === 'active' && (!i.wearCount || i.wearCount === 0)).length;
 
-        let allSessions = [];
-        if (historySessionsInput !== undefined) {
-            allSessions = historySessionsInput;
-        } else if (internalHistory.length > 0) {
-            allSessions = internalHistory;
-        } else {
-            allSessions = activeSessionsInput || [];
-        }
+                // B. FINANCIALS
+                let totalCost = 0; 
+                let totalWears = 0;
+                items.forEach(i => { 
+                    totalCost += (parseFloat(i.cost) || 0); 
+                    totalWears += (parseInt(i.wearCount) || 0); 
+                });
+                const avgCPWVal = totalWears > 0 ? (totalCost / totalWears) : 0;
 
-        const historySessions = allSessions.filter(s => {
-            const d = s.startTime.toDate ? s.startTime.toDate() : new Date(s.startTime);
-            return d >= HISTORY_START_DATE;
-        });
+                // C. NYLON INDEX
+                const tightsItems = items.filter(i => 
+                    i.status !== 'archived' && (
+                        (i.mainCategory && i.mainCategory === 'Nylons') ||
+                        (i.subCategory && i.subCategory && i.subCategory.toLowerCase().includes('strumpfhose'))
+                    )
+                );
 
-        // A. ITEMS & ORPHANS
-        const activeItems = items.filter(i => i.status === 'active');
-        const washingItems = items.filter(i => i.status === 'washing');
-        const archivedItems = items.filter(i => i.status === 'archived');
-        const orphanCount = items.filter(i => i.status === 'active' && (!i.wearCount || i.wearCount === 0)).length;
+                const now = new Date();
+                const cutoffDate = new Date();
+                cutoffDate.setDate(now.getDate() - 30);
 
-        // B. FINANCIALS
-        let totalCost = 0; 
-        let totalWears = 0;
-        items.forEach(i => { 
-            totalCost += (parseFloat(i.cost) || 0); 
-            totalWears += (parseInt(i.wearCount) || 0); 
-        });
-        const avgCPWVal = totalWears > 0 ? (totalCost / totalWears) : 0;
+                const recentSessions = allSessions.filter(s => {
+                    const end = s.endTime ? (s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime)) : new Date();
+                    return end >= cutoffDate;
+                });
 
-        // C. NYLON INDEX
-        const tightsItems = items.filter(i => 
-            i.status !== 'archived' && (
-                (i.mainCategory && i.mainCategory === 'Nylons') ||
-                (i.subCategory && i.subCategory.toLowerCase().includes('strumpfhose'))
-            )
-        );
+                let totalRollingMinutes = 0;
+                const uniqueNylonItemsWorn = new Set(); 
 
-        const now = new Date();
-        const cutoffDate = new Date();
-        cutoffDate.setDate(now.getDate() - 30);
+                recentSessions.forEach(s => {
+                    const sItemIds = s.itemIds || (s.itemId ? [s.itemId] : []);
+                    let sessionHasNylon = false;
+                    sItemIds.forEach(id => {
+                        const item = items.find(i => i.id === id);
+                        if (!item) return;
+                        const main = item.mainCategory || '';
+                        const sub = (item.subCategory || '').toLowerCase();
+                        if (main === 'Nylons' || sub.includes('strumpfhose') || sub.includes('stockings')) {
+                            sessionHasNylon = true;
+                            uniqueNylonItemsWorn.add(id); 
+                        }
+                    });
 
-        const recentSessions = allSessions.filter(s => {
-            const end = s.endTime ? (s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime)) : new Date();
-            return end >= cutoffDate;
-        });
+                    if (sessionHasNylon) {
+                        const start = s.startTime.toDate ? s.startTime.toDate() : new Date(s.startTime);
+                        const end = s.endTime ? (s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime)) : new Date();
+                        const effectiveStart = start < cutoffDate ? cutoffDate : start;
+                        const effectiveEnd = end; 
+                        if (effectiveEnd > effectiveStart) {
+                            totalRollingMinutes += (effectiveEnd - effectiveStart) / 60000;
+                        }
+                    }
+                });
 
-        let totalRollingMinutes = 0;
-        const uniqueNylonItemsWorn = new Set(); 
+                const nylonIndexVal = uniqueNylonItemsWorn.size > 0 
+                    ? (totalRollingMinutes / uniqueNylonItemsWorn.size) / 60 
+                    : 0;
+                
+                const lifetimeTightsMinutes = tightsItems.reduce((acc, curr) => acc + (Number(curr.totalMinutes) || 0), 0);
+                const totalNylonCost = tightsItems.reduce((acc, i) => acc + (Number(i.cost) || 0), 0);
+                const totalNylonHoursLifetime = lifetimeTightsMinutes / 60;
+                const cpnhVal = totalNylonHoursLifetime > 0 ? (totalNylonCost / totalNylonHoursLifetime) : 0;
 
-        recentSessions.forEach(s => {
-            const sItemIds = s.itemIds || (s.itemId ? [s.itemId] : []);
-            let sessionHasNylon = false;
-            sItemIds.forEach(id => {
-                const item = items.find(i => i.id === id);
-                if (!item) return;
-                const main = item.mainCategory || '';
-                const sub = (item.subCategory || '').toLowerCase();
-                if (main === 'Nylons' || sub.includes('strumpfhose') || sub.includes('stockings')) {
-                    sessionHasNylon = true;
-                    uniqueNylonItemsWorn.add(id); 
+                // D. CORE METRICS
+                const coverageVal = calculateCoverage(allSessions);
+
+                let daysCount = 0;
+                let nocturnalSuccessCount = 0;
+                const loopDate = new Date(HISTORY_START_DATE);
+                while (loopDate <= now) {
+                    daysCount++;
+                    const checkTime = new Date(loopDate);
+                    checkTime.setHours(2, 0, 0, 0);
+                    if (checkTime <= now && isNocturnalComplaint(checkTime, allSessions, items)) { 
+                        nocturnalSuccessCount++;
+                    }
+                    loopDate.setDate(loopDate.getDate() + 1);
                 }
-            });
+                const nocturnalVal = daysCount > 0 ? (nocturnalSuccessCount / daysCount) * 100 : 0;
 
-            if (sessionHasNylon) {
-                const start = s.startTime.toDate ? s.startTime.toDate() : new Date(s.startTime);
-                const end = s.endTime ? (s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime)) : new Date();
-                const effectiveStart = start < cutoffDate ? cutoffDate : start;
-                const effectiveEnd = end; 
-                if (effectiveEnd > effectiveStart) {
-                    totalRollingMinutes += (effectiveEnd - effectiveStart) / 60000;
+                let totalGapHours = 0;
+                let gapDaysCount = 0;
+                const gapLoopDate = new Date(HISTORY_START_DATE);
+                while (gapLoopDate <= now) {
+                    gapDaysCount++;
+                    const wornMinutes = calculateDailyNylonMinutes(gapLoopDate, allSessions, items);
+                    totalGapHours += ((1440 - wornMinutes) / 60);
+                    gapLoopDate.setDate(gapLoopDate.getDate() + 1);
                 }
+                const avgGapVal = gapDaysCount > 0 ? (totalGapHours / gapDaysCount) : 24;
+
+                // Voluntarism & Compliance Lag
+                let totalDurationMs = 0;
+                let voluntaryDurationMs = 0;
+                let totalLagMinutes = 0;
+                let lagCount = 0;
+
+                historySessions.forEach(s => {
+                    const start = s.startTime.toDate ? s.startTime.toDate() : new Date(s.startTime);
+                    const end = s.endTime ? (s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime)) : new Date();
+                    const duration = Math.max(0, end.getTime() - start.getTime());
+                    totalDurationMs += duration;
+                    if (s.type === 'voluntary') voluntaryDurationMs += duration;
+
+                    if (typeof s.complianceLagMinutes === 'number') {
+                        totalLagMinutes += s.complianceLagMinutes;
+                        lagCount++;
+                    }
+                });
+                const voluntarismVal = totalDurationMs > 0 ? (voluntaryDurationMs / totalDurationMs) * 100 : 0;
+                const resistanceVal = historySessions.length > 0 ? (historySessions.filter(s => s.type === 'punishment').length / historySessions.length) * 100 : 0;
+                
+                const avgLagVal = lagCount > 0 ? (totalLagMinutes / lagCount) : 0;
+
+                // ENDURANCE (Strict: Only Nylon/Lingerie)
+                const relevantEnduranceSessions = historySessions.filter(s => s.startTime);
+                let globalDuration = 0; let globalCount = 0;
+                let nylonDuration = 0; let nylonCount = 0;
+                let dessousDuration = 0; let dessousCount = 0;
+
+                relevantEnduranceSessions.forEach(s => {
+                    const start = s.startTime.toDate ? s.startTime.toDate() : new Date(s.startTime);
+                    const end = s.endTime ? (s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime)) : new Date();
+                    const durationHours = Math.max(0, (end - start) / 3600000);
+                    
+                    const sessionItemIds = s.itemIds || (s.itemId ? [s.itemId] : []);
+                    const sessionItems = sessionItemIds.map(id => items.find(i => i.id === id)).filter(i => i);
+                    if (sessionItems.length === 0) return;
+
+                    const hasNylon = sessionItems.some(i => {
+                        const sub = (i.subCategory || '').toLowerCase();
+                        const cat = (i.mainCategory || '').toLowerCase();
+                        return cat.includes('nylon') || sub.includes('strumpfhose') || sub.includes('stockings');
+                    });
+                    const hasDessous = sessionItems.some(i => {
+                        const sub = (i.subCategory || '').toLowerCase();
+                        const cat = (i.mainCategory || '').toLowerCase();
+                        return cat.includes('dessous') || cat.includes('wäsche') || sub.includes('body') || sub.includes('slip') || sub.includes('bh') || cat.includes('corsage');
+                    });
+
+                    if (hasNylon || hasDessous) { 
+                        globalDuration += durationHours; 
+                        globalCount++; 
+                    }
+                    if (hasNylon) { nylonDuration += durationHours; nylonCount++; }
+                    if (hasDessous) { dessousDuration += durationHours; dessousCount++; }
+                });
+
+                const enduranceVal = globalCount > 0 ? (globalDuration / globalCount) : 0;
+                const enduranceNylonVal = nylonCount > 0 ? (nylonDuration / nylonCount) : 0;
+                const enduranceDessousVal = dessousCount > 0 ? (dessousDuration / dessousCount) : 0;
+                
+                const nylonEnclosureVal = globalDuration > 0 ? (nylonDuration / globalDuration) * 100 : 0;
+
+                // E. SCORES
+                const spermaRateVal = releaseStats.totalReleases > 0 
+                    ? (releaseStats.cleanReleases / releaseStats.totalReleases) * 100 : 0;
+
+                // F. FEM INDEX 3.0 (Erosion Metric)
+                
+                // 1. PHYSIS (30%) - Körperliche Gewöhnung
+                const scoreEndurance = Math.min(100, (enduranceVal / 12) * 100);
+                const scorePhysis = (scoreEndurance * 0.4) + (nylonEnclosureVal * 0.6);
+
+                // 2. PSYCHE (30%) - Mentaler Widerstand
+                const scoreCompliance = Math.max(0, 100 - (avgLagVal * 1.6));
+                const scorePsyche = Math.max(0, ((voluntarismVal * 0.6) + (scoreCompliance * 0.4)) - (resistanceVal * 2));
+
+                // 3. INFILTRATION (40%) - Alltags-Übernahme
+                const scoreInfiltration = (nocturnalVal * 0.5) + (coverageVal * 0.5);
+
+                // TOTAL SCORE
+                const femScore = Math.round(
+                    (scorePhysis * 0.30) + 
+                    (scorePsyche * 0.30) + 
+                    (scoreInfiltration * 0.40)
+                );
+
+                // G. BASICS TODAY
+                const startOfToday = new Date(); startOfToday.setHours(0,0,0,0);
+                const sessionsToday = allSessions.filter(s => {
+                    if(!s.startTime) return false;
+                    const d = s.startTime.toDate ? s.startTime.toDate() : new Date(s.startTime);
+                    return d >= startOfToday;
+                });
+                const uniqueItemsToday = new Set();
+                sessionsToday.forEach(s => {
+                    if (s.itemId) uniqueItemsToday.add(s.itemId);
+                    if (s.itemIds) s.itemIds.forEach(id => uniqueItemsToday.add(id));
+                });
+
+                // --- SET STATE ---
+                setKpis({
+                    health: { orphanCount },
+                    financials: { avgCPW: fmtMoney(avgCPWVal) }, 
+                    usage: { nylonIndex: fmtPct(nylonIndexVal) }, 
+                    spermaScore: { 
+                        rate: fmtPct(spermaRateVal), 
+                        total: releaseStats.totalReleases, 
+                        count: releaseStats.cleanReleases 
+                    },
+                    coreMetrics: {
+                        nylonEnclosure: fmtPct(nylonEnclosureVal),
+                        nocturnal: fmtPct(nocturnalVal),
+                        nylonGap: fmtHoursToDuration(avgGapVal), 
+                        cpnh: fmtMoney(cpnhVal),
+                        complianceLag: fmtDuration(avgLagVal), 
+                        coverage: fmtPct(coverageVal),
+                        resistance: fmtPct(resistanceVal),
+                        voluntarism: fmtPct(voluntarismVal) + '%', 
+                        endurance: fmtHoursToDuration(enduranceVal), 
+                        enduranceNylon: fmtHoursToDuration(enduranceNylonVal), 
+                        enduranceDessous: fmtHoursToDuration(enduranceDessousVal), 
+                        submission: '85.0',
+                        denial: '12.0',
+                        chastity: fmtPct(nylonEnclosureVal)
+                    },
+                    femIndex: { 
+                        score: Math.min(100, femScore), 
+                        trend: 'stable',
+                        subScores: {
+                            physis: Math.round(scorePhysis),
+                            psyche: Math.round(scorePsyche),
+                            infiltration: Math.round(scoreInfiltration)
+                        }
+                    },
+                    basics: {
+                        activeItems: activeItems.length,
+                        washing: washingItems.length,
+                        wornToday: uniqueItemsToday.size,
+                        archived: archivedItems.length
+                    }
+                });
+            } catch (err) {
+                console.error("Error fetching KPIs:", err);
+            } finally {
+                setLoading(false);
             }
-        });
+        };
 
-        const nylonIndexVal = uniqueNylonItemsWorn.size > 0 
-            ? (totalRollingMinutes / uniqueNylonItemsWorn.size) / 60 
-            : 0;
-        
-        const lifetimeTightsMinutes = tightsItems.reduce((acc, curr) => acc + (Number(curr.totalMinutes) || 0), 0);
-        const totalNylonCost = tightsItems.reduce((acc, i) => acc + (Number(i.cost) || 0), 0);
-        const totalNylonHoursLifetime = lifetimeTightsMinutes / 60;
-        const cpnhVal = totalNylonHoursLifetime > 0 ? (totalNylonCost / totalNylonHoursLifetime) : 0;
+        fetchData();
 
-        // D. CORE METRICS
-        const coverageVal = calculateCoverage(allSessions);
+    }, [items, activeSessionsInput, historySessionsInput, currentUser, refreshTrigger]);
 
-        let daysCount = 0;
-        let nocturnalSuccessCount = 0;
-        const loopDate = new Date(HISTORY_START_DATE);
-        while (loopDate <= now) {
-            daysCount++;
-            const checkTime = new Date(loopDate);
-            checkTime.setHours(2, 0, 0, 0);
-            if (checkTime <= now && isNocturnalComplaint(checkTime, allSessions, items)) { 
-                nocturnalSuccessCount++;
-            }
-            loopDate.setDate(loopDate.getDate() + 1);
-        }
-        const nocturnalVal = daysCount > 0 ? (nocturnalSuccessCount / daysCount) * 100 : 0;
+    // Exponiere die Refresh-Funktion für manuelle Updates
+    const refreshKPIs = () => setRefreshTrigger(prev => prev + 1);
 
-        let totalGapHours = 0;
-        let gapDaysCount = 0;
-        const gapLoopDate = new Date(HISTORY_START_DATE);
-        while (gapLoopDate <= now) {
-            gapDaysCount++;
-            const wornMinutes = calculateDailyNylonMinutes(gapLoopDate, allSessions, items);
-            totalGapHours += ((1440 - wornMinutes) / 60);
-            gapLoopDate.setDate(gapLoopDate.getDate() + 1);
-        }
-        const avgGapVal = gapDaysCount > 0 ? (totalGapHours / gapDaysCount) : 24;
-
-        // Voluntarism & Compliance Lag
-        let totalDurationMs = 0;
-        let voluntaryDurationMs = 0;
-        let totalLagMinutes = 0;
-        let lagCount = 0;
-
-        historySessions.forEach(s => {
-            const start = s.startTime.toDate ? s.startTime.toDate() : new Date(s.startTime);
-            const end = s.endTime ? (s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime)) : new Date();
-            const duration = Math.max(0, end.getTime() - start.getTime());
-            totalDurationMs += duration;
-            if (s.type === 'voluntary') voluntaryDurationMs += duration;
-
-            if (typeof s.complianceLagMinutes === 'number') {
-                totalLagMinutes += s.complianceLagMinutes;
-                lagCount++;
-            }
-        });
-        const voluntarismVal = totalDurationMs > 0 ? (voluntaryDurationMs / totalDurationMs) * 100 : 0;
-        const resistanceVal = historySessions.length > 0 ? (historySessions.filter(s => s.type === 'punishment').length / historySessions.length) * 100 : 0;
-        
-        const avgLagVal = lagCount > 0 ? (totalLagMinutes / lagCount) : 0;
-
-        // ENDURANCE (Strict: Only Nylon/Lingerie)
-        const relevantEnduranceSessions = historySessions.filter(s => s.startTime);
-        let globalDuration = 0; let globalCount = 0;
-        let nylonDuration = 0; let nylonCount = 0;
-        let dessousDuration = 0; let dessousCount = 0;
-
-        relevantEnduranceSessions.forEach(s => {
-            const start = s.startTime.toDate ? s.startTime.toDate() : new Date(s.startTime);
-            const end = s.endTime ? (s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime)) : new Date();
-            const durationHours = Math.max(0, (end - start) / 3600000);
-            
-            const sessionItemIds = s.itemIds || (s.itemId ? [s.itemId] : []);
-            const sessionItems = sessionItemIds.map(id => items.find(i => i.id === id)).filter(i => i);
-            if (sessionItems.length === 0) return;
-
-            const hasNylon = sessionItems.some(i => {
-                const sub = (i.subCategory || '').toLowerCase();
-                const cat = (i.mainCategory || '').toLowerCase();
-                return cat.includes('nylon') || sub.includes('strumpfhose') || sub.includes('stockings');
-            });
-            const hasDessous = sessionItems.some(i => {
-                const sub = (i.subCategory || '').toLowerCase();
-                const cat = (i.mainCategory || '').toLowerCase();
-                return cat.includes('dessous') || cat.includes('wäsche') || sub.includes('body') || sub.includes('slip') || sub.includes('bh') || cat.includes('corsage');
-            });
-
-            if (hasNylon || hasDessous) { 
-                globalDuration += durationHours; 
-                globalCount++; 
-            }
-            if (hasNylon) { nylonDuration += durationHours; nylonCount++; }
-            if (hasDessous) { dessousDuration += durationHours; dessousCount++; }
-        });
-
-        const enduranceVal = globalCount > 0 ? (globalDuration / globalCount) : 0;
-        const enduranceNylonVal = nylonCount > 0 ? (nylonDuration / nylonCount) : 0;
-        const enduranceDessousVal = dessousCount > 0 ? (dessousDuration / dessousCount) : 0;
-        
-        const nylonEnclosureVal = globalDuration > 0 ? (nylonDuration / globalDuration) * 100 : 0;
-
-        // E. SCORES
-        const spermaRateVal = releaseStats.totalReleases > 0 
-            ? (releaseStats.cleanReleases / releaseStats.totalReleases) * 100 : 0;
-
-        // F. FEM INDEX 3.0 (Erosion Metric)
-        
-        // 1. PHYSIS (30%) - Körperliche Gewöhnung
-        // Endurance Ziel: 12h = 100%. Enclosure Ziel: 100%.
-        const scoreEndurance = Math.min(100, (enduranceVal / 12) * 100);
-        const scorePhysis = (scoreEndurance * 0.4) + (nylonEnclosureVal * 0.6);
-
-        // 2. PSYCHE (30%) - Mentaler Widerstand
-        // Compliance Ziel: < 5 min = 100%.
-        const scoreCompliance = Math.max(0, 100 - (avgLagVal * 1.6));
-        const scorePsyche = Math.max(0, ((voluntarismVal * 0.6) + (scoreCompliance * 0.4)) - (resistanceVal * 2));
-
-        // 3. INFILTRATION (40%) - Alltags-Übernahme
-        // Nocturnal und Coverage sind die Schlüssel
-        const scoreInfiltration = (nocturnalVal * 0.5) + (coverageVal * 0.5);
-
-        // TOTAL SCORE
-        const femScore = Math.round(
-            (scorePhysis * 0.30) + 
-            (scorePsyche * 0.30) + 
-            (scoreInfiltration * 0.40)
-        );
-
-        // G. BASICS TODAY (HIER WAR DER FEHLER - DIESER BLOCK FEHLTE)
-        const startOfToday = new Date(); startOfToday.setHours(0,0,0,0);
-        const sessionsToday = allSessions.filter(s => {
-            if(!s.startTime) return false;
-            const d = s.startTime.toDate ? s.startTime.toDate() : new Date(s.startTime);
-            return d >= startOfToday;
-        });
-        const uniqueItemsToday = new Set();
-        sessionsToday.forEach(s => {
-            if (s.itemId) uniqueItemsToday.add(s.itemId);
-            if (s.itemIds) s.itemIds.forEach(id => uniqueItemsToday.add(id));
-        });
-
-        setKpis({
-            health: { orphanCount },
-            financials: { avgCPW: fmtMoney(avgCPWVal) }, 
-            usage: { nylonIndex: fmtPct(nylonIndexVal) }, 
-            spermaScore: { 
-                rate: fmtPct(spermaRateVal), 
-                total: releaseStats.totalReleases, 
-                count: releaseStats.cleanReleases 
-            },
-            coreMetrics: {
-                nylonEnclosure: fmtPct(nylonEnclosureVal),
-                nocturnal: fmtPct(nocturnalVal),
-                nylonGap: fmtHoursToDuration(avgGapVal), 
-                cpnh: fmtMoney(cpnhVal),
-                complianceLag: fmtDuration(avgLagVal), 
-                coverage: fmtPct(coverageVal),
-                resistance: fmtPct(resistanceVal),
-                voluntarism: fmtPct(voluntarismVal) + '%', 
-                endurance: fmtHoursToDuration(enduranceVal), 
-                enduranceNylon: fmtHoursToDuration(enduranceNylonVal), 
-                enduranceDessous: fmtHoursToDuration(enduranceDessousVal), 
-                submission: '85.0',
-                denial: '12.0',
-                chastity: fmtPct(nylonEnclosureVal)
-            },
-            // NEUE STRUKTUR FÜR DEN FEM INDEX
-            femIndex: { 
-                score: Math.min(100, femScore), 
-                trend: 'stable',
-                subScores: {
-                    physis: Math.round(scorePhysis),
-                    psyche: Math.round(scorePsyche),
-                    infiltration: Math.round(scoreInfiltration)
-                }
-            },
-            basics: {
-                activeItems: activeItems.length,
-                washing: washingItems.length,
-                wornToday: uniqueItemsToday.size,
-                archived: archivedItems.length
-            }
-        });
-
-    }, [items, activeSessionsInput, historySessionsInput, internalHistory, releaseStats]);
-
-    return kpis;
+    return { ...kpis, loading, refreshKPIs };
 }

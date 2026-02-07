@@ -69,7 +69,7 @@ export default function TzdOverlay({ active, allItems }) {
         load();
     }, [active, currentUser]);
 
-    // --- LOGIK: Timer Loop & Check-In (alle 10s) ---
+    // --- LOGIK: Timer Loop & Check-In (alle 60s) ---
     useEffect(() => {
         if (!active || !currentUser || !status?.isActive || status?.stage !== 'running') return;
 
@@ -84,7 +84,7 @@ export default function TzdOverlay({ active, allItems }) {
                     }
                 }
             } catch (e) { console.error("TZD Tick Error", e); }
-        }, 10000);
+        }, 60000);
         return () => clearInterval(interval);
     }, [active, currentUser, status?.isActive, status?.stage]);
 
