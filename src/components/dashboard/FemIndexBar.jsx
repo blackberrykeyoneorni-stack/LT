@@ -1,128 +1,159 @@
-import React from 'react';
-import { Card, CardContent, Typography, Box, LinearProgress, Stack, Tooltip } from '@mui/material';
-import { DESIGN_TOKENS } from '../../theme/obsidianDesign';
+import React, { useState } from 'react';
+import { 
+    Box, 
+    Typography, 
+    LinearProgress, 
+    Dialog, 
+    DialogTitle, 
+    DialogContent, 
+    IconButton,
+    List,
+    ListItem,
+    ListItemText,
+    Divider,
+    Paper
+} from '@mui/material';
+import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
+import InfoIcon from '@mui/icons-material/Info';
+import CloseIcon from '@mui/icons-material/Close';
+import CalculateIcon from '@mui/icons-material/Calculate';
+import { useFemIndex } from '../../hooks/dashboard/useFemIndex';
 import { motion } from 'framer-motion';
 
-// Icons für die Säulen
-import AccessibilityNewIcon from '@mui/icons-material/AccessibilityNew'; // Physis
-import PsychologyIcon from '@mui/icons-material/Psychology'; // Psyche
-import GridViewIcon from '@mui/icons-material/GridView'; // Infiltration (Alltag)
+export default function FemIndexBar() {
+    const { femIndex, details } = useFemIndex();
+    const [open, setOpen] = useState(false);
 
-const PhaseIndicator = ({ score, phase }) => (
-    <Box sx={{ position: 'relative', width: '100%', mt: 1, mb: 3 }}>
-        {/* HINTERGRUND TRACK */}
-        <Box sx={{ 
-            height: 12, 
-            borderRadius: 6, 
-            bgcolor: 'rgba(255,255,255,0.1)', 
-            overflow: 'hidden',
-            boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.5)'
-        }}>
-            <motion.div 
-                initial={{ width: 0 }} 
-                animate={{ width: `${score}%` }} 
-                transition={{ duration: 1.5, ease: "easeOut" }}
-                style={{ 
-                    height: '100%', 
-                    background: `linear-gradient(90deg, #1a1a1a 0%, ${phase.color} 100%)`,
-                    borderRadius: 6,
-                    boxShadow: `0 0 15px ${phase.color}80`
-                }} 
-            />
-        </Box>
-        
-        {/* PHASE LABEL */}
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1 }}>
-            <Typography variant="caption" sx={{ color: phase.color, fontWeight: 'bold', letterSpacing: 1.5 }}>
-                PHASE: {phase.name}
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-                {score} / 100
-            </Typography>
-        </Box>
-    </Box>
-);
+    // Farbe basierend auf Index berechnen
+    const getColor = (value) => {
+        if (value < 30) return PALETTE.accents.red;
+        if (value < 70) return PALETTE.accents.gold;
+        return PALETTE.accents.green;
+    };
 
-const DnaStrand = ({ label, value, icon, color, delay }) => (
-    <Tooltip title={`${label}: ${Math.round(value)}%`}>
-        <Box sx={{ flex: 1, textAlign: 'center' }}>
-            <motion.div 
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: delay, duration: 0.5 }}
+    const currentColor = getColor(femIndex);
+
+    // Dialog öffnen
+    const handleClick = () => {
+        setOpen(true);
+    };
+
+    return (
+        <>
+            {/* Klickbarer Container */}
+            <Box 
+                onClick={handleClick}
+                sx={{ 
+                    width: '100%', 
+                    mb: 2, 
+                    cursor: 'pointer',
+                    position: 'relative',
+                    '&:hover': { opacity: 0.9 }
+                }}
             >
-                <Box sx={{ display: 'flex', justifyContent: 'center', mb: 0.5, color: color }}>
-                    {icon}
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
+                    {/* HIER: Schrift exakt wie "Tagesziel" im ProgressBar (Caption, Secondary, Bold, Uppercase) */}
+                    <Typography 
+                        variant="caption" 
+                        sx={{ 
+                            color: 'text.secondary', 
+                            fontWeight: 'bold',
+                            textTransform: 'uppercase', // "Tagesziel" ist oft uppercase
+                            letterSpacing: '0.5px'
+                        }}
+                    >
+                        FEM-INDEX
+                    </Typography>
+                    
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                        <Typography variant="body2" fontWeight="bold" sx={{ color: currentColor }}>
+                            {femIndex}%
+                        </Typography>
+                        <InfoIcon sx={{ fontSize: 14, color: 'text.disabled' }} />
+                    </Box>
                 </Box>
+
                 <LinearProgress 
                     variant="determinate" 
-                    value={value} 
+                    value={femIndex} 
                     sx={{ 
-                        height: 4, 
-                        borderRadius: 2, 
-                        bgcolor: 'rgba(255,255,255,0.05)', 
-                        mb: 0.5,
-                        '& .MuiLinearProgress-bar': { bgcolor: color } 
+                        height: 8, 
+                        borderRadius: 4,
+                        bgcolor: 'rgba(255,255,255,0.05)',
+                        '& .MuiLinearProgress-bar': {
+                            bgcolor: currentColor,
+                            borderRadius: 4
+                        }
                     }} 
                 />
-                <Typography variant="caption" sx={{ fontSize: '0.65rem', color: 'text.secondary', textTransform: 'uppercase' }}>
-                    {label}
-                </Typography>
-            </motion.div>
-        </Box>
-    </Tooltip>
-);
+            </Box>
 
-export default function FemIndexBar({ femIndex, loading, phase, subScores }) {
-  // Fallbacks falls Hooks noch laden
-  const safeScore = femIndex || 0;
-  const safePhase = phase || { name: "INIT", color: "#333", desc: "Lade..." };
-  const safeSubs = subScores || { physis: 0, psyche: 0, infiltration: 0 };
+            {/* OVERLAY: Berechnung */}
+            <Dialog 
+                open={open} 
+                onClose={() => setOpen(false)}
+                PaperProps={{ 
+                    sx: DESIGN_TOKENS.dialog?.paper?.sx || { borderRadius: '20px', bgcolor: '#1e1e1e', p: 1 }
+                }}
+                maxWidth="xs"
+                fullWidth
+            >
+                <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', pb: 1 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <CalculateIcon color="primary" />
+                        <Typography variant="h6">Index Berechnung</Typography>
+                    </Box>
+                    <IconButton onClick={() => setOpen(false)} size="small">
+                        <CloseIcon />
+                    </IconButton>
+                </DialogTitle>
+                
+                <DialogContent>
+                    <Box sx={{ textAlign: 'center', py: 2 }}>
+                        <Typography variant="h2" sx={{ fontWeight: 'bold', color: currentColor }}>
+                            {femIndex}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                            AKTUELLER FEM-INDEX
+                        </Typography>
+                    </Box>
+                    
+                    <Divider sx={{ my: 2 }} />
 
-  if (loading) return <LinearProgress color="secondary" sx={{ my: 2 }} />;
+                    <List dense>
+                        {details.components.map((comp, index) => (
+                            <ListItem key={index} sx={{ py: 1 }}>
+                                <ListItemText 
+                                    primary={comp.label}
+                                    primaryTypographyProps={{ variant: 'body2' }}
+                                />
+                                {comp.value !== null && (
+                                    <Typography 
+                                        variant="body2" 
+                                        fontWeight="bold"
+                                        sx={{ 
+                                            color: comp.type === 'positive' ? PALETTE.accents.green : 
+                                                   comp.type === 'negative' ? PALETTE.accents.red : 'text.primary'
+                                        }}
+                                    >
+                                        {comp.value > 0 && comp.type !== 'negative' ? '+' : ''}{comp.value}
+                                    </Typography>
+                                )}
+                            </ListItem>
+                        ))}
+                    </List>
 
-  return (
-    <Card sx={{ ...DESIGN_TOKENS.glassCard, mb: 4, overflow: 'visible' }}>
-      <CardContent sx={{ p: 3 }}>
-        
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', mb: 1 }}>
-            <Typography variant="h6" sx={{ fontWeight: 'bold', letterSpacing: 1 }}>
-                EROSION METRIC
-            </Typography>
-            <Typography variant="caption" sx={{ color: 'text.secondary', fontStyle: 'italic' }}>
-                {safePhase.desc}
-            </Typography>
-        </Box>
+                    <Paper variant="outlined" sx={{ p: 2, mt: 2, bgcolor: 'rgba(0,0,0,0.2)', borderColor: 'rgba(255,255,255,0.1)' }}>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                            FORMEL
+                        </Typography>
+                        <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
+                            (Basis - Denial + Bonus) x Faktor
+                        </Typography>
+                    </Paper>
 
-        {/* MAIN BAR */}
-        <PhaseIndicator score={safeScore} phase={safePhase} />
-
-        {/* DNA STRANDS (3 SÄULEN) */}
-        <Stack direction="row" spacing={2} sx={{ mt: 2, pt: 2, borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-            <DnaStrand 
-                label="PHYSIS" 
-                value={safeSubs.physis} 
-                icon={<AccessibilityNewIcon fontSize="small"/>} 
-                color="#00e5ff" // Cyan
-                delay={0.2}
-            />
-            <DnaStrand 
-                label="PSYCHE" 
-                value={safeSubs.psyche} 
-                icon={<PsychologyIcon fontSize="small"/>} 
-                color="#ffeb3b" // Yellow
-                delay={0.4}
-            />
-            <DnaStrand 
-                label="ALLTAG" 
-                value={safeSubs.infiltration} 
-                icon={<GridViewIcon fontSize="small"/>} 
-                color="#f50057" // Pink (wichtigste Säule)
-                delay={0.6}
-            />
-        </Stack>
-
-      </CardContent>
-    </Card>
-  );
+                </DialogContent>
+            </Dialog>
+        </>
+    );
 }
