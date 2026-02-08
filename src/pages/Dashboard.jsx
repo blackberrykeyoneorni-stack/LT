@@ -125,7 +125,6 @@ export default function Dashboard() {
   const { activeSessions, progress, loading: sessionsLoading, dailyTargetHours, registerRelease: hookRegisterRelease } = useSessionProgress(currentUser, items);
   
   const kpis = useKPIs(items, activeSessions); 
-  // UPDATED HOOK CALL:
   const { femIndex, femIndexLoading, indexDetails, phase, subScores } = useFemIndex(kpis); 
 
   const [now, setNow] = useState(Date.now());
@@ -314,18 +313,19 @@ export default function Dashboard() {
                     let instr = await getLastInstruction(currentUser.uid);
                     
                     if (instr && instr.periodId === currentPeriod) {
-                        if (!instr.isAccepted && !instr.evasionPenaltyTriggered) {
-                            const genDate = instr.generatedAt?.toDate ? instr.generatedAt.toDate() : new Date(instr.generatedAt);
-                            const ageInMinutes = (new Date() - genDate) / 60000;
+                        // KORREKTUR: Initialer Check prüft jetzt auf acceptedAt, NICHT generatedAt
+                        if (instr.isAccepted && !instr.evasionPenaltyTriggered) {
+                            const acceptedDate = instr.acceptedAt?.toDate ? instr.acceptedAt.toDate() : new Date(instr.acceptedAt);
+                            const ageInMinutes = (new Date() - acceptedDate) / 60000;
                             
-                            if (ageInMinutes > 30) {
-                                console.log("Flucht erkannt! Trigger 150% TZD.");
+                            const hasActiveInstructionSession = activeSessions.some(s => s.type === 'instruction');
+
+                            if (ageInMinutes > 30 && !hasActiveInstructionSession) {
+                                console.log("Flucht erkannt (Initial Check - Post Oath)! Trigger 150% TZD.");
                                 await triggerEvasionPenalty(currentUser.uid, instr.items);
                                 
                                 await updateDoc(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), { 
-                                    evasionPenaltyTriggered: true,
-                                    isAccepted: true, 
-                                    acceptedAt: new Date().toISOString()
+                                    evasionPenaltyTriggered: true 
                                 });
                                 
                                 setTzdActive(true); 
@@ -347,7 +347,38 @@ export default function Dashboard() {
             check();
         }
     }
-  }, [items.length, sessionsLoading, currentPeriod, currentInstruction, instructionStatus, isFreeDay]);
+  }, [items.length, sessionsLoading, currentPeriod, currentInstruction, instructionStatus, isFreeDay, activeSessions]);
+
+  // --- NEU: LIVE WATCHER FÜR 30 MIN NACH OATH ---
+  useEffect(() => {
+      if (!currentInstruction || !currentInstruction.isAccepted || currentInstruction.evasionPenaltyTriggered) return;
+      if (isInstructionActive) return; // Wenn Session läuft, ist alles gut.
+
+      const timer = setInterval(async () => {
+          // Basis ist jetzt acceptedAt
+          const acceptedDate = currentInstruction.acceptedAt?.toDate ? currentInstruction.acceptedAt.toDate() : new Date(currentInstruction.acceptedAt);
+          const ageInMinutes = (Date.now() - acceptedDate) / 60000;
+
+          if (ageInMinutes > 30) {
+              console.log("Flucht erkannt (Live Watcher - Post Oath)! Trigger 150% TZD.");
+              
+              // UI Update verhindern
+              setCurrentInstruction(prev => ({ ...prev, evasionPenaltyTriggered: true }));
+              setInstructionOpen(false);
+
+              await triggerEvasionPenalty(currentUser.uid, currentInstruction.items);
+              
+              await updateDoc(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), { 
+                  evasionPenaltyTriggered: true
+              });
+              
+              setTzdActive(true); 
+              showToast("Zeitüberschreitung nach Eid: Strafe eingeleitet.", "error");
+          }
+      }, 60000); // Check jede Minute
+
+      return () => clearInterval(timer);
+  }, [currentInstruction, currentUser, isInstructionActive]);
 
   // Forced Release Persistence Check
   useEffect(() => {
@@ -601,7 +632,6 @@ export default function Dashboard() {
                 progressData={progress}
             />
 
-            {/* UPDATED FEM INDEX BAR CALL */}
             <FemIndexBar 
                 femIndex={femIndex || 0} 
                 loading={femIndexLoading} 
@@ -638,23 +668,48 @@ export default function Dashboard() {
                 onOpenRelease={handleOpenRelease}
             />
 
-            {/* NEU: PROMINENTER RELEASE BUTTON UNTERHALB SESSIONS (Wenn keine Strafe) */}
             {!punishmentStatus.active && (
                 <Box sx={{ mb: 4 }}>
                     <Button
-                        fullWidth variant="outlined" size="large"
+                        fullWidth
                         onClick={handleOpenRelease}
                         startIcon={<WaterDropIcon />}
                         sx={{
-                            py: 1.5,
-                            borderColor: 'rgba(64, 196, 255, 0.3)',
-                            color: PALETTE.accents.blue,
-                            background: 'rgba(64, 196, 255, 0.05)',
+                            mb: 0, // Wrapping box has margin if needed, but here we can manage it.
+                            py: 2, // Taller button for easier touch (approx 56px height)
+                            borderRadius: '28px', // MD3 Stadium/Pill shape
+                            
+                            // MD3 Filled Tonal Style (Dark Mode Adaptation)
+                            // Container: Secondary Container (mapped to accent color with low opacity)
+                            bgcolor: 'rgba(64, 196, 255, 0.12)', 
+                            
+                            // Label: On Secondary Container (mapped to accent color)
+                            color: '#40c4ff', 
+                            
+                            // Border: Subtle or none for Tonal. MD3 Tonal usually has no border, 
+                            // but adding a very subtle one helps in low contrast screens.
+                            border: '1px solid rgba(64, 196, 255, 0.1)', 
+                            
+                            fontSize: '0.9rem',
                             fontWeight: 'bold',
-                            letterSpacing: 1,
+                            letterSpacing: '1.25px', // Standard for buttons
+                            textTransform: 'uppercase', // Stylistic choice (MD3 is usually sentence case, but Uppercase is fine for emphasis)
+                            
+                            boxShadow: 'none', // Tonal buttons have no shadow by default in MD3 (elevation 0)
+                            
+                            transition: 'all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1)',
+                            
                             '&:hover': {
-                                borderColor: PALETTE.accents.blue,
-                                background: 'rgba(64, 196, 255, 0.1)',
+                                // State Layer: Hover (8% opacity on top of container)
+                                bgcolor: 'rgba(64, 196, 255, 0.2)', 
+                                borderColor: 'rgba(64, 196, 255, 0.3)',
+                                boxShadow: '0 0 15px rgba(64, 196, 255, 0.15)', // Subtle glow for feedback
+                                transform: 'translateY(-1px)'
+                            },
+                            '&:active': {
+                                // State Layer: Pressed
+                                bgcolor: 'rgba(64, 196, 255, 0.25)',
+                                transform: 'scale(0.98)'
                             }
                         }}
                     >
@@ -667,7 +722,6 @@ export default function Dashboard() {
                 <Typography variant="caption" color="text.secondary">METRIKEN & VERWALTUNG</Typography>
             </Divider>
 
-            {/* InfoTiles mit TimeBank Data */}
             <InfoTiles kpis={kpis} timeBank={timeBankData} />
 
             <Button
