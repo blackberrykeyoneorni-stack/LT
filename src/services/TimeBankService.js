@@ -5,7 +5,8 @@ import { doc, getDoc, updateDoc, setDoc, increment, serverTimestamp } from 'fire
 const DEBT_CONFIG = {
     MAX_DEBT_MINUTES: 2880, // 48 Stunden (Das harte Limit)
     OVERDRAFT_PENALTY: 1.5, // 50% Aufschlag bei Kreditaufnahme
-    DAILY_INTEREST_RATE: 0.10 // 10% Zinsen pro Tag
+    DAILY_INTEREST_RATE: 0.10, // 10% Zinsen pro Tag
+    INFLATION_RATE: 0.05 // 5% Inflation pro Woche für positive Bestände
 };
 
 /**
@@ -199,5 +200,43 @@ export const applyDailyInterest = async (userId) => {
         updates.lastInterestDate = serverTimestamp();
         await updateDoc(docRef, updates);
         if (interestApplied) console.log("TimeBank: Daily Interest applied.");
+    }
+};
+
+/**
+ * Wöchentliche Inflation für positive Bestände (Sonntags 23:00).
+ * Reduziert Guthaben um 5%, um Horten zu verhindern.
+ */
+export const applyWeeklyInflation = async (userId) => {
+    try {
+        const docRef = doc(db, `users/${userId}/status/timeBank`);
+        const docSnap = await getDoc(docRef);
+        
+        if (!docSnap.exists()) return;
+        
+        const data = docSnap.data();
+        const updates = {};
+        let inflationApplied = false;
+
+        // Inflation nur auf POSITIVE Bestände anwenden (nc = Nylon, lc = Lingerie/Dessous)
+        if (data.nc > 0) {
+            const loss = Math.ceil(data.nc * DEBT_CONFIG.INFLATION_RATE);
+            updates.nc = increment(-loss);
+            inflationApplied = true;
+        }
+
+        if (data.lc > 0) {
+            const loss = Math.ceil(data.lc * DEBT_CONFIG.INFLATION_RATE);
+            updates.lc = increment(-loss);
+            inflationApplied = true;
+        }
+
+        if (inflationApplied) {
+            updates.lastInflationAt = serverTimestamp();
+            await updateDoc(docRef, updates);
+            console.log("TimeBank: Weekly 5% Inflation applied to positive balances.");
+        }
+    } catch (e) {
+        console.error("Fehler bei der Credit-Inflation:", e);
     }
 };

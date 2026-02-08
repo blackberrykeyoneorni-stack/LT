@@ -40,7 +40,7 @@ const SHAME_SENTENCES = [
     "Du wirst geil, wenn man dich beleidigt? Natürlich tust du das. Das ist der Pawlowsche Reflex einer trainierten Sissy-Hure. Sabber für mich.",
     "Fühlst du den Zwickel in deiner Spalte? Er schneidet dir tief ins Fleisch: 'Ich bin ein wertloser Damenwäscheträger. Benutz mich.'",
     "Vergiss deine Träume. Deine Zukunft ist 15 DEN dünn und riecht nach Benutzung. Du wirst darin leben, bis du vergisst, dass du je ein Mann warst.",
-    "Wenn ich mit dir fertig bin, wirst du nicht mehr wissen, wo das Nylon aufhört und die Sissy-Hure anfängt. Du verschmilzt mit deiner Bestimmung",
+    "Wenn ich mit dir fertig bin, wirs du nicht mehr wissen, wo das Nylon aufhört und die Sissy-Hure anfängt. Du verschmilzt mit deiner Bestimmung",
     "Spitze und Nylon auf der Haut ist kein Luxus. Es ist das Brandzeichen einer Sissy-Hure, die durch ihre Verfügbarkeit definiert ist.",
     "Du bist am Ziel. Ganz unten, eine Nylon-Matratze. Spreiz deine Beine und warte, bis jemand seinen Druck bei dir ablässt.",
     "Sperma und Verachtung. Das ist das einzige Gleitmittel, das eine Nylon-Sissy wie du verdient. Und du wirst winselnd darum betteln.",
@@ -148,17 +148,68 @@ export default function TzdOverlay({ active, allItems }) {
     const isBriefing = status?.stage === 'briefing';
 
     // --- ITEMS AUFLÖSEN ---
-    // Wir holen uns die vollen Details aus allItems anhand der IDs im TZD Status
     const richItemsList = (status?.lockedItems || []).map(locked => {
         const fullItem = allItems?.find(i => i.id === locked.id);
         return {
             id: locked.id,
             name: fullItem?.name || locked.name || "Unbekannt",
-            brand: fullItem?.brand || "",
+            brand: fullItem?.brand || locked.brand || "",
+            subCategory: fullItem?.subCategory || "",
             img: fullItem?.imageUrl || fullItem?.image || locked.img,
-            customId: fullItem?.customId || "ID?"
+            customId: fullItem?.customId || locked.customId || "ID?"
         };
     });
+
+    const ItemListDisplay = () => (
+        <Box sx={{ textAlign: 'left', mb: 3, bgcolor: 'rgba(255,255,255,0.03)', borderRadius: 2, p: 2, border: `1px solid ${PALETTE.accents.red}40` }}>
+            <Typography variant="caption" color="error" sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+                <CheckroomIcon fontSize="small"/> GEFORDERTE AUSRÜSTUNG
+            </Typography>
+            <Divider sx={{ bgcolor: `${PALETTE.accents.red}40`, mb: 1 }} />
+            
+            <List dense disablePadding>
+                {richItemsList.length > 0 ? richItemsList.map((item, index) => (
+                    <ListItem key={item.id || index} disableGutters sx={{ mb: 1, borderBottom: '1px solid rgba(255,255,255,0.05)', pb: 1 }}>
+                        <ListItemAvatar>
+                            <Avatar 
+                                src={item.img} 
+                                variant="rounded" 
+                                sx={{ 
+                                    width: 48, height: 48, 
+                                    border: `1px solid ${PALETTE.accents.red}`,
+                                    bgcolor: '#000'
+                                }}
+                            >
+                                <LockIcon color="error" />
+                            </Avatar>
+                        </ListItemAvatar>
+                        <ListItemText 
+                            primary={`${item.name} ${item.brand ? `(${item.brand})` : ''}`}
+                            secondary={item.subCategory || "Ausrüstungsstück"}
+                            primaryTypographyProps={{ sx: { fontWeight: 'bold', color: '#fff', fontSize: '0.85rem' } }}
+                            secondaryTypographyProps={{ sx: { color: 'rgba(255,255,255,0.5)', fontSize: '0.7rem' } }}
+                        />
+                        <Chip 
+                            icon={<FingerprintIcon style={{ color: '#fff', fontSize: 12 }} />} 
+                            label={item.customId} 
+                            size="small" 
+                            sx={{ 
+                                bgcolor: PALETTE.accents.red, 
+                                color: 'white', 
+                                fontWeight: 'bold',
+                                height: 20,
+                                fontSize: '0.65rem',
+                                border: '1px solid #ff0000',
+                                boxShadow: '0 0 10px rgba(255,0,0,0.3)'
+                            }} 
+                        />
+                    </ListItem>
+                )) : (
+                    <Typography variant="body2" color="error" align="center">Keine spezifischen Items. Wähle selbst.</Typography>
+                )}
+            </List>
+        </Box>
+    );
 
     const minutes = status?.accumulatedMinutes || 0;
     const intensity = Math.min(minutes / 240, 0.9); 
@@ -209,55 +260,7 @@ export default function TzdOverlay({ active, allItems }) {
                                     </Typography>
                                 </Box>
 
-                                <Box sx={{ textAlign: 'left', mb: 3, bgcolor: 'rgba(255,255,255,0.03)', borderRadius: 2, p: 2, border: `1px solid ${PALETTE.accents.red}40` }}>
-                                    <Typography variant="caption" color="error" sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
-                                        <CheckroomIcon fontSize="small"/> GEFORDERTE AUSRÜSTUNG
-                                    </Typography>
-                                    <Divider sx={{ bgcolor: `${PALETTE.accents.red}40`, mb: 1 }} />
-                                    
-                                    <List dense disablePadding>
-                                        {richItemsList.length > 0 ? richItemsList.map((item, index) => (
-                                            <ListItem key={item.id || index} disableGutters sx={{ mb: 1, borderBottom: '1px solid rgba(255,255,255,0.05)', pb: 1 }}>
-                                                <ListItemAvatar>
-                                                    <Avatar 
-                                                        src={item.img} 
-                                                        variant="rounded" 
-                                                        sx={{ 
-                                                            width: 48, height: 48, 
-                                                            border: `1px solid ${PALETTE.accents.red}`,
-                                                            bgcolor: '#000'
-                                                        }}
-                                                    >
-                                                        <LockIcon color="error" />
-                                                    </Avatar>
-                                                </ListItemAvatar>
-                                                <ListItemText 
-                                                    primary={item.name}
-                                                    secondary={item.brand}
-                                                    primaryTypographyProps={{ sx: { fontWeight: 'bold', color: '#fff', fontSize: '0.9rem' } }}
-                                                    secondaryTypographyProps={{ sx: { color: 'rgba(255,255,255,0.5)', fontSize: '0.75rem' } }}
-                                                />
-                                                {/* CUSTOM ID CHIP */}
-                                                <Chip 
-                                                    icon={<FingerprintIcon style={{ color: '#fff', fontSize: 14 }} />} 
-                                                    label={item.customId} 
-                                                    size="small" 
-                                                    sx={{ 
-                                                        bgcolor: PALETTE.accents.red, 
-                                                        color: 'white', 
-                                                        fontWeight: 'bold',
-                                                        height: 24,
-                                                        fontSize: '0.75rem',
-                                                        border: '1px solid #ff0000',
-                                                        boxShadow: '0 0 10px rgba(255,0,0,0.4)'
-                                                    }} 
-                                                />
-                                            </ListItem>
-                                        )) : (
-                                            <Typography variant="body2" color="error" align="center">Keine spezifischen Items. Wähle selbst.</Typography>
-                                        )}
-                                    </List>
-                                </Box>
+                                <ItemListDisplay />
 
                                 <Stack spacing={2}>
                                     <Typography variant="body2" sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>
@@ -280,8 +283,8 @@ export default function TzdOverlay({ active, allItems }) {
                                 </Stack>
                             </Box>
                         ) : (
-                            /* PHASE 2: ACTIVE RUNNING (Timer & Shame) */
-                            <Box sx={{ width: '100%', textAlign: 'center', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', py: 8 }}>
+                            /* PHASE 2: ACTIVE RUNNING (Timer, Shame & Gear) */
+                            <Box sx={{ width: '100%', textAlign: 'center', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', py: 4 }}>
                                 <Box>
                                     <Typography variant="overline" sx={{ color: PALETTE.accents.red, letterSpacing: '3px', fontWeight: 'bold', display: 'block', opacity: 0.9 }}>
                                         STATUS: EIGENTUM
@@ -294,7 +297,7 @@ export default function TzdOverlay({ active, allItems }) {
                                     </Typography>
                                 </Box>
 
-                                <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', px: 2 }}>
+                                <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', px: 2, my: 2 }}>
                                     <AnimatePresence mode='wait'>
                                         <motion.div
                                             key={currentSentenceIndex}
@@ -304,11 +307,16 @@ export default function TzdOverlay({ active, allItems }) {
                                             transition={{ duration: 5, ease: "easeInOut" }}
                                             style={{ width: '100%' }}
                                         >
-                                            <Typography variant="h5" sx={{ color: '#fff', lineHeight: 1.6, fontWeight: 300, textShadow: '0 4px 20px rgba(0,0,0,1)' }}>
+                                            <Typography variant="h5" sx={{ color: '#fff', lineHeight: 1.4, fontWeight: 300, textShadow: '0 4px 20px rgba(0,0,0,1)' }}>
                                                 {SHAME_SENTENCES[currentSentenceIndex]}
                                             </Typography>
                                         </motion.div>
                                     </AnimatePresence>
+                                </Box>
+
+                                {/* GEAR DISPLAY IN ACTIVE RUNNING MODE */}
+                                <Box sx={{ width: '100%', px: 1 }}>
+                                    <ItemListDisplay />
                                 </Box>
 
                                 <Box sx={{ opacity: 0.4, transition: 'opacity 0.3s', '&:hover': { opacity: 1 } }}>
