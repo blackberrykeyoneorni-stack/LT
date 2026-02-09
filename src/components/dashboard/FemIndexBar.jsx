@@ -11,20 +11,23 @@ import {
     ListItem,
     ListItemText,
     Divider,
-    Paper
+    Paper,
+    Stack
 } from '@mui/material';
 import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
 import InfoIcon from '@mui/icons-material/Info';
 import CloseIcon from '@mui/icons-material/Close';
-import CalculateIcon from '@mui/icons-material/Calculate';
+import AnalyticsIcon from '@mui/icons-material/Analytics';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import PsychologyIcon from '@mui/icons-material/Psychology';
+import WaterDropIcon from '@mui/icons-material/WaterDrop'; // Für Infiltration/Fluidity
 import { useFemIndex } from '../../hooks/dashboard/useFemIndex';
-import { motion } from 'framer-motion';
 
 export default function FemIndexBar() {
-    const { femIndex, details } = useFemIndex();
+    const { femIndex, details, loading } = useFemIndex();
     const [open, setOpen] = useState(false);
 
-    // Farbe basierend auf Index berechnen
+    // Farbe basierend auf Index (wie im Original-Konzept: Rot -> Gold -> Grün)
     const getColor = (value) => {
         if (value < 30) return PALETTE.accents.red;
         if (value < 70) return PALETTE.accents.gold;
@@ -33,10 +36,27 @@ export default function FemIndexBar() {
 
     const currentColor = getColor(femIndex);
 
-    // Dialog öffnen
     const handleClick = () => {
         setOpen(true);
     };
+
+    // Icons für die Sub-Scores
+    const getIconForLabel = (label) => {
+        if (label.includes('Physis')) return <CheckCircleIcon sx={{ color: '#00e5ff', fontSize: 20 }} />;
+        if (label.includes('Psyche')) return <PsychologyIcon sx={{ color: '#ffeb3b', fontSize: 20 }} />;
+        if (label.includes('Infiltration')) return <WaterDropIcon sx={{ color: '#f50057', fontSize: 20 }} />;
+        return <AnalyticsIcon sx={{ color: 'text.secondary', fontSize: 20 }} />;
+    };
+    
+    // Farbe für Sub-Scores (Hardcoded passend zu den Icons im Dashboard)
+    const getColorForLabel = (label) => {
+        if (label.includes('Physis')) return '#00e5ff';
+        if (label.includes('Psyche')) return '#ffeb3b';
+        if (label.includes('Infiltration')) return '#f50057';
+        return 'text.primary';
+    };
+
+    if (loading) return null;
 
     return (
         <>
@@ -52,14 +72,14 @@ export default function FemIndexBar() {
                 }}
             >
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
-                    {/* HIER: Schrift exakt wie "Tagesziel" im ProgressBar (Caption, Secondary, Bold, Uppercase) */}
+                    {/* HIER: Schrift exakt wie "TAGESZIEL" im ProgressBar (body2, secondary, bold) */}
                     <Typography 
-                        variant="caption" 
+                        variant="body2" 
                         sx={{ 
                             color: 'text.secondary', 
                             fontWeight: 'bold',
-                            textTransform: 'uppercase', // "Tagesziel" ist oft uppercase
-                            letterSpacing: '0.5px'
+                            textTransform: 'uppercase', // "TAGESZIEL" ist uppercase
+                            letterSpacing: 1 // Matching ProgressBar spacing
                         }}
                     >
                         FEM-INDEX
@@ -82,13 +102,14 @@ export default function FemIndexBar() {
                         bgcolor: 'rgba(255,255,255,0.05)',
                         '& .MuiLinearProgress-bar': {
                             bgcolor: currentColor,
-                            borderRadius: 4
+                            borderRadius: 4,
+                            boxShadow: `0 0 8px ${currentColor}40` // Leichter Glow
                         }
                     }} 
                 />
             </Box>
 
-            {/* OVERLAY: Berechnung */}
+            {/* OVERLAY: Detaillierte Berechnung */}
             <Dialog 
                 open={open} 
                 onClose={() => setOpen(false)}
@@ -100,8 +121,8 @@ export default function FemIndexBar() {
             >
                 <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', pb: 1 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <CalculateIcon color="primary" />
-                        <Typography variant="h6">Index Berechnung</Typography>
+                        <AnalyticsIcon color="primary" />
+                        <Typography variant="h6">Index Analyse</Typography>
                     </Box>
                     <IconButton onClick={() => setOpen(false)} size="small">
                         <CloseIcon />
@@ -109,49 +130,61 @@ export default function FemIndexBar() {
                 </DialogTitle>
                 
                 <DialogContent>
-                    <Box sx={{ textAlign: 'center', py: 2 }}>
-                        <Typography variant="h2" sx={{ fontWeight: 'bold', color: currentColor }}>
+                    <Box sx={{ textAlign: 'center', py: 3 }}>
+                        <Typography variant="h2" sx={{ fontWeight: 'bold', color: currentColor, textShadow: `0 0 20px ${currentColor}40` }}>
                             {femIndex}
                         </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                            AKTUELLER FEM-INDEX
+                        <Typography variant="caption" color="text.secondary" sx={{ letterSpacing: 2 }}>
+                            GESAMT SCORE
                         </Typography>
                     </Box>
                     
-                    <Divider sx={{ my: 2 }} />
+                    <Divider sx={{ my: 2, bgcolor: 'rgba(255,255,255,0.1)' }} />
 
-                    <List dense>
+                    <Stack spacing={2} sx={{ mt: 2 }}>
                         {details.components.map((comp, index) => (
-                            <ListItem key={index} sx={{ py: 1 }}>
-                                <ListItemText 
-                                    primary={comp.label}
-                                    primaryTypographyProps={{ variant: 'body2' }}
-                                />
-                                {comp.value !== null && (
+                            <Paper 
+                                key={index} 
+                                variant="outlined" 
+                                sx={{ 
+                                    p: 1.5, 
+                                    bgcolor: 'rgba(255,255,255,0.02)', 
+                                    borderColor: 'rgba(255,255,255,0.05)',
+                                    borderRadius: 2
+                                }}
+                            >
+                                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                        {getIconForLabel(comp.label)}
+                                        <Typography variant="body2" fontWeight="bold">
+                                            {comp.label.split('(')[0].trim()}
+                                        </Typography>
+                                    </Box>
                                     <Typography 
-                                        variant="body2" 
+                                        variant="h6" 
                                         fontWeight="bold"
-                                        sx={{ 
-                                            color: comp.type === 'positive' ? PALETTE.accents.green : 
-                                                   comp.type === 'negative' ? PALETTE.accents.red : 'text.primary'
-                                        }}
+                                        sx={{ color: getColorForLabel(comp.label) }}
                                     >
-                                        {comp.value > 0 && comp.type !== 'negative' ? '+' : ''}{comp.value}
+                                        {comp.value}%
                                     </Typography>
-                                )}
-                            </ListItem>
+                                </Box>
+                                
+                                <LinearProgress 
+                                    variant="determinate" 
+                                    value={comp.value} 
+                                    sx={{ 
+                                        height: 4, 
+                                        borderRadius: 2, 
+                                        bgcolor: 'rgba(255,255,255,0.1)',
+                                        '& .MuiLinearProgress-bar': { bgcolor: getColorForLabel(comp.label) }
+                                    }} 
+                                />
+                                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                                    {comp.description}
+                                </Typography>
+                            </Paper>
                         ))}
-                    </List>
-
-                    <Paper variant="outlined" sx={{ p: 2, mt: 2, bgcolor: 'rgba(0,0,0,0.2)', borderColor: 'rgba(255,255,255,0.1)' }}>
-                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                            FORMEL
-                        </Typography>
-                        <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
-                            (Basis - Denial + Bonus) x Faktor
-                        </Typography>
-                    </Paper>
-
+                    </Stack>
                 </DialogContent>
             </Dialog>
         </>

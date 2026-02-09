@@ -1,85 +1,77 @@
-import { useState, useEffect } from 'react';
-import { doc, onSnapshot } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { useEffect, useState } from 'react';
+import useKPIs from '../useKPIs';
+import { useItems } from '../../contexts/ItemContext';
 import { useAuth } from '../../contexts/AuthContext';
 
 /**
- * Hook zur Berechnung des FEM-INDEX (früher Erosion Metric).
- * Unterstützt jetzt Hybrid-Export (Named + Default) für Kompatibilität mit Dashboard.jsx.
+ * useFemIndex Hook
+ * * Stellt die Verbindung zur zentralen KPI-Berechnung her, anstatt
+ * auf statische/falsche Daten zuzugreifen.
+ * Berechnet den Index dynamisch basierend auf:
+ * - Physis (Tragezeit, Gewöhnung)
+ * - Psyche (Willigkeit, Compliance)
+ * - Infiltration (Nacht-Tragen, Abdeckung)
  */
-export const useFemIndex = () => {
+export const useFemIndex = (preloadedKpis = null) => {
+    const { items } = useItems();
     const { currentUser } = useAuth();
-    const [femIndex, setFemIndex] = useState(0);
-    const [details, setDetails] = useState({
-        baseScore: 0,
-        denialDeduction: 0,
-        chastityBonus: 0,
-        taskMultiplier: 1,
-        components: [] // Für detaillierte Listenanzeige
+    
+    // Wir nutzen useKPIs, um die Berechnung durchzuführen.
+    // Falls KPIs von außen kommen (Optimierung), nutzen wir diese.
+    const internalKpis = useKPIs(items);
+    
+    const sourceData = preloadedKpis || internalKpis;
+    const { femIndex, loading } = sourceData;
+
+    const [formattedData, setFormattedData] = useState({
+        femIndex: 0,
+        details: {
+            score: 0,
+            components: []
+        },
+        loading: true
     });
 
     useEffect(() => {
-        if (!currentUser) return;
+        if (loading || !femIndex) return;
 
-        // Wir hören auf das User-Dokument oder Status-Dokument, wo die Metriken liegen
-        const unsub = onSnapshot(doc(db, `users/${currentUser.uid}/status/metrics`), (docSnap) => {
-            if (docSnap.exists()) {
-                const data = docSnap.data();
-                
-                // --- BERECHNUNGS-LOGIK ---
-                
-                // 1. Basiswert (z.B. durch Items im Besitz)
-                const base = data.baseScore || 50; 
-                
-                // 2. Denial Abzug (wenn man nicht brav war)
-                const denial = data.denialLevel ? data.denialLevel * 5 : 0; 
-                
-                // 3. Keuschheits-Bonus (Nächte im Käfig)
-                const chastity = data.chastityDays ? data.chastityDays * 2 : 0;
-                
-                // 4. Aufgaben-Multiplikator
-                const tasksDone = data.tasksCompleted || 0;
-                const multiplier = 1 + (tasksDone * 0.05);
+        // Extrahiere die echten berechneten Werte aus useKPIs
+        const score = femIndex.score || 0;
+        const subScores = femIndex.subScores || { physis: 0, psyche: 0, infiltration: 0 };
 
-                // Berechnung
-                let calculated = (base - denial + chastity) * multiplier;
-                
-                // Cap auf 0-100
-                calculated = Math.max(0, Math.min(100, calculated));
-
-                setFemIndex(Math.round(calculated));
-                
-                // Details für das Overlay speichern
-                setDetails({
-                    baseScore: base,
-                    denialDeduction: denial,
-                    chastityBonus: chastity,
-                    taskMultiplier: multiplier,
-                    components: [
-                        { label: 'Basiswert (Inventar)', value: base, type: 'neutral' },
-                        { label: 'Denial Strafe', value: -denial, type: 'negative' },
-                        { label: 'Keuschheits-Bonus', value: +chastity, type: 'positive' },
-                        { label: `Aufgaben Faktor (x${multiplier.toFixed(2)})`, value: null, type: 'neutral' }
-                    ]
-                });
-            } else {
-                // Fallback / Startwerte
-                setFemIndex(50);
-                setDetails({
-                    baseScore: 50,
-                    denialDeduction: 0,
-                    chastityBonus: 0,
-                    taskMultiplier: 1,
-                    components: [{ label: 'Basiswert (Standard)', value: 50, type: 'neutral' }]
-                });
-            }
+        setFormattedData({
+            femIndex: score,
+            details: {
+                score: score,
+                // Wir mappen die internen Sub-Scores auf das Anzeige-Format für das Overlay
+                components: [
+                    { 
+                        label: 'Physis (Körperliche Gewöhnung)', 
+                        value: subScores.physis, 
+                        type: 'neutral',
+                        description: 'Basierend auf Tragezeit & Nylon-Anteil'
+                    },
+                    { 
+                        label: 'Psyche (Mentaler Widerstand)', 
+                        value: subScores.psyche, 
+                        type: 'neutral',
+                        description: 'Basierend auf Freiwilligkeit & Compliance'
+                    },
+                    { 
+                        label: 'Infiltration (Alltags-Übernahme)', 
+                        value: subScores.infiltration, 
+                        type: 'neutral',
+                        description: 'Basierend auf Nacht-Tragen & 24/7 Coverage'
+                    }
+                ]
+            },
+            loading: false
         });
 
-        return () => unsub();
-    }, [currentUser]);
+    }, [femIndex, loading]);
 
-    return { femIndex, details };
+    return formattedData;
 };
 
-// Default Export hinzufügen für Kompatibilität mit Dashboard.jsx
+// Default Export für Kompatibilität mit Dashboard.jsx
 export default useFemIndex;
