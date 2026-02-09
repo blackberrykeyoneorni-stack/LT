@@ -7,40 +7,42 @@ import {
     DialogTitle, 
     DialogContent, 
     IconButton,
-    List,
-    ListItem,
-    ListItemText,
-    Divider,
     Paper,
-    Stack
+    Stack,
+    Divider
 } from '@mui/material';
 import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
-import InfoIcon from '@mui/icons-material/Info';
 import CloseIcon from '@mui/icons-material/Close';
 import AnalyticsIcon from '@mui/icons-material/Analytics';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import PsychologyIcon from '@mui/icons-material/Psychology';
-import WaterDropIcon from '@mui/icons-material/WaterDrop'; // Für Infiltration/Fluidity
+import WaterDropIcon from '@mui/icons-material/WaterDrop'; 
+import TrendingFlatIcon from '@mui/icons-material/TrendingFlat';
+import TrendingUpIcon from '@mui/icons-material/TrendingUp';
+import TrendingDownIcon from '@mui/icons-material/TrendingDown';
+
 import { useFemIndex } from '../../hooks/dashboard/useFemIndex';
 
 export default function FemIndexBar() {
     const { femIndex, details, loading } = useFemIndex();
     const [open, setOpen] = useState(false);
 
-    // Farbe basierend auf Index (wie im Original-Konzept: Rot -> Gold -> Grün)
+    // Farblogik: Rot (kritisch) -> Gold (ok) -> Grün (gut)
     const getColor = (value) => {
         if (value < 30) return PALETTE.accents.red;
         if (value < 70) return PALETTE.accents.gold;
-        return PALETTE.accents.green;
+        return PALETTE.accents.green; // oder '#00E676' passend zum ProgressBar Success
     };
 
     const currentColor = getColor(femIndex);
 
-    const handleClick = () => {
-        setOpen(true);
+    const getTrendIcon = (trend) => {
+        if (trend === 'rising') return <TrendingUpIcon fontSize="small" />;
+        if (trend === 'falling') return <TrendingDownIcon fontSize="small" />;
+        return <TrendingFlatIcon fontSize="small" />;
     };
 
-    // Icons für die Sub-Scores
+    // Sub-Komponenten Icons
     const getIconForLabel = (label) => {
         if (label.includes('Physis')) return <CheckCircleIcon sx={{ color: '#00e5ff', fontSize: 20 }} />;
         if (label.includes('Psyche')) return <PsychologyIcon sx={{ color: '#ffeb3b', fontSize: 20 }} />;
@@ -48,7 +50,6 @@ export default function FemIndexBar() {
         return <AnalyticsIcon sx={{ color: 'text.secondary', fontSize: 20 }} />;
     };
     
-    // Farbe für Sub-Scores (Hardcoded passend zu den Icons im Dashboard)
     const getColorForLabel = (label) => {
         if (label.includes('Physis')) return '#00e5ff';
         if (label.includes('Psyche')) return '#ffeb3b';
@@ -60,54 +61,75 @@ export default function FemIndexBar() {
 
     return (
         <>
-            {/* Klickbarer Container */}
-            <Box 
-                onClick={handleClick}
+            {/* HAUPT-KOMPONENTE im ProgressBar Look */}
+            <Paper 
+                elevation={0}
+                onClick={() => setOpen(true)}
                 sx={{ 
-                    width: '100%', 
-                    mb: 2, 
+                    p: 2.5, 
+                    mb: 3, 
+                    borderRadius: '16px',
+                    bgcolor: 'rgba(255,255,255,0.05)', 
+                    border: `1px solid rgba(255,255,255,0.05)`,
                     cursor: 'pointer',
-                    position: 'relative',
-                    '&:hover': { opacity: 0.9 }
+                    transition: 'border-color 0.2s, transform 0.1s',
+                    '&:hover': {
+                        borderColor: `${currentColor}40`,
+                        bgcolor: 'rgba(255,255,255,0.07)'
+                    },
+                    '&:active': {
+                        transform: 'scale(0.99)'
+                    }
                 }}
             >
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
-                    {/* HIER: Schrift exakt wie "TAGESZIEL" im ProgressBar (body2, secondary, bold) */}
-                    <Typography 
-                        variant="body2" 
-                        sx={{ 
-                            color: 'text.secondary', 
-                            fontWeight: 'bold',
-                            textTransform: 'uppercase', // "TAGESZIEL" ist uppercase
-                            letterSpacing: 1 // Matching ProgressBar spacing
-                        }}
-                    >
+                {/* Header Zeile: Titel und Wert */}
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
+                    <Typography variant="body2" sx={{ color: 'text.secondary', letterSpacing: 1, fontWeight: 'bold' }}>
                         FEM-INDEX
                     </Typography>
                     
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                        <Typography variant="body2" fontWeight="bold" sx={{ color: currentColor }}>
+                    <Box sx={{ textAlign: 'right' }}>
+                        <Typography variant="h6" sx={{ fontWeight: 'bold', lineHeight: 1, color: currentColor }}>
                             {femIndex}%
                         </Typography>
-                        <InfoIcon sx={{ fontSize: 14, color: 'text.disabled' }} />
                     </Box>
                 </Box>
 
+                {/* Der Balken */}
                 <LinearProgress 
                     variant="determinate" 
                     value={femIndex} 
                     sx={{ 
-                        height: 8, 
-                        borderRadius: 4,
-                        bgcolor: 'rgba(255,255,255,0.05)',
+                        height: 12, 
+                        borderRadius: 6,
+                        bgcolor: 'rgba(255,255,255,0.1)',
+                        mb: 1.5,
                         '& .MuiLinearProgress-bar': {
-                            bgcolor: currentColor,
-                            borderRadius: 4,
-                            boxShadow: `0 0 8px ${currentColor}40` // Leichter Glow
+                            backgroundColor: currentColor,
+                            borderRadius: 6,
+                            boxShadow: `0 0 10px ${currentColor}40`
                         }
-                    }} 
+                    }}
                 />
-            </Box>
+
+                {/* Footer Zeile: Status Text und Indikatoren */}
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: currentColor }}>
+                        {getTrendIcon(details.trend || 'stable')}
+                        <Typography variant="caption" sx={{ fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                            {femIndex >= 70 ? "OPTIMIERT" : (femIndex < 30 ? "KRITISCH" : "STABIL")}
+                        </Typography>
+                    </Box>
+
+                    {/* Kleine Icons rechts, um Physis/Psyche/Infiltration anzudeuten */}
+                    <Stack direction="row" spacing={1} alignItems="center" sx={{ opacity: 0.7 }}>
+                        <CheckCircleIcon sx={{ fontSize: 16, color: '#00e5ff' }} />
+                        <PsychologyIcon sx={{ fontSize: 16, color: '#ffeb3b' }} />
+                        <WaterDropIcon sx={{ fontSize: 16, color: '#f50057' }} />
+                    </Stack>
+                </Box>
+            </Paper>
+
 
             {/* OVERLAY: Detaillierte Berechnung */}
             <Dialog 
@@ -135,7 +157,7 @@ export default function FemIndexBar() {
                             {femIndex}
                         </Typography>
                         <Typography variant="caption" color="text.secondary" sx={{ letterSpacing: 2 }}>
-                            GESAMT SCORE
+                            COMPOSITE SCORE
                         </Typography>
                     </Box>
                     

@@ -5,19 +5,14 @@ import { useAuth } from '../../contexts/AuthContext';
 
 /**
  * useFemIndex Hook
- * * Stellt die Verbindung zur zentralen KPI-Berechnung her, anstatt
- * auf statische/falsche Daten zuzugreifen.
- * Berechnet den Index dynamisch basierend auf:
- * - Physis (Tragezeit, Gewöhnung)
- * - Psyche (Willigkeit, Compliance)
- * - Infiltration (Nacht-Tragen, Abdeckung)
+ * Verbindet UI mit der zentralen KPI Logik.
+ * Transformiert die Rohdaten in ein Format für die FemIndexBar.
  */
 export const useFemIndex = (preloadedKpis = null) => {
     const { items } = useItems();
     const { currentUser } = useAuth();
     
-    // Wir nutzen useKPIs, um die Berechnung durchzuführen.
-    // Falls KPIs von außen kommen (Optimierung), nutzen wir diese.
+    // Nutze useKPIs für die Berechnung, falls nicht vorab geladen
     const internalKpis = useKPIs(items);
     
     const sourceData = preloadedKpis || internalKpis;
@@ -27,6 +22,7 @@ export const useFemIndex = (preloadedKpis = null) => {
         femIndex: 0,
         details: {
             score: 0,
+            trend: 'stable',
             components: []
         },
         loading: true
@@ -35,33 +31,34 @@ export const useFemIndex = (preloadedKpis = null) => {
     useEffect(() => {
         if (loading || !femIndex) return;
 
-        // Extrahiere die echten berechneten Werte aus useKPIs
+        // Extrahiere Daten aus useKPIs Output
         const score = femIndex.score || 0;
+        const trend = femIndex.trend || 'stable';
         const subScores = femIndex.subScores || { physis: 0, psyche: 0, infiltration: 0 };
 
         setFormattedData({
             femIndex: score,
             details: {
                 score: score,
-                // Wir mappen die internen Sub-Scores auf das Anzeige-Format für das Overlay
+                trend: trend,
                 components: [
                     { 
                         label: 'Physis (Körperliche Gewöhnung)', 
                         value: subScores.physis, 
                         type: 'neutral',
-                        description: 'Basierend auf Tragezeit & Nylon-Anteil'
+                        description: 'Tragezeit & Nylon-Anteil'
                     },
                     { 
                         label: 'Psyche (Mentaler Widerstand)', 
                         value: subScores.psyche, 
                         type: 'neutral',
-                        description: 'Basierend auf Freiwilligkeit & Compliance'
+                        description: 'Freiwilligkeit & Compliance'
                     },
                     { 
                         label: 'Infiltration (Alltags-Übernahme)', 
                         value: subScores.infiltration, 
                         type: 'neutral',
-                        description: 'Basierend auf Nacht-Tragen & 24/7 Coverage'
+                        description: 'Nacht-Tragen & Coverage'
                     }
                 ]
             },
@@ -73,5 +70,4 @@ export const useFemIndex = (preloadedKpis = null) => {
     return formattedData;
 };
 
-// Default Export für Kompatibilität mit Dashboard.jsx
 export default useFemIndex;
