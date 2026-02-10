@@ -204,8 +204,12 @@ export const applyDailyInterest = async (userId) => {
 };
 
 /**
- * Wöchentliche Inflation für positive Bestände (Sonntags 23:00).
+ * Wöchentliche Inflation für positive Bestände.
  * Reduziert Guthaben um 5%, um Horten zu verhindern.
+ * * UPDATE (Smart Logic):
+ * Anstatt hart auf "Sonntag" zu prüfen (was fehlschlägt, wenn die App sonntags nicht geöffnet wird),
+ * prüfen wir, ob seit dem letzten Lauf 7 Tage vergangen sind.
+ * So wird die Inflation beim nächsten Login nachgeholt, falls der Termin verpasst wurde.
  */
 export const applyWeeklyInflation = async (userId) => {
     try {
@@ -215,6 +219,24 @@ export const applyWeeklyInflation = async (userId) => {
         if (!docSnap.exists()) return;
         
         const data = docSnap.data();
+        
+        // --- INTELLIGENTE ZEIT-PRÜFUNG ---
+        const now = new Date();
+        // Hole das Datum des letzten Laufs (oder Epoche 1970, falls nie gelaufen)
+        const lastInflation = data.lastInflationAt ? data.lastInflationAt.toDate() : new Date(0);
+
+        // Berechne Differenz in Tagen
+        const diffTime = Math.abs(now - lastInflation);
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+
+        // Regel: Wenn weniger als 7 Tage vergangen sind, brechen wir ab.
+        // Das stellt sicher, dass es nur 1x pro Woche passiert, egal wann man sich einloggt.
+        if (diffDays < 7) {
+            // Noch keine Woche rum -> Abbruch
+            return; 
+        }
+        // --------------------------------
+
         const updates = {};
         let inflationApplied = false;
 
@@ -231,10 +253,16 @@ export const applyWeeklyInflation = async (userId) => {
             inflationApplied = true;
         }
 
+        // Wir updaten den Zeitstempel IMMER, wenn der 7-Tage-Check bestanden wurde.
+        // Damit beginnt die neue 7-Tage-Periode ab JETZT.
+        updates.lastInflationAt = serverTimestamp();
+        
+        await updateDoc(docRef, updates);
+
         if (inflationApplied) {
-            updates.lastInflationAt = serverTimestamp();
-            await updateDoc(docRef, updates);
             console.log("TimeBank: Weekly 5% Inflation applied to positive balances.");
+        } else {
+            console.log("TimeBank: Weekly Check run (No positive balance to tax).");
         }
     } catch (e) {
         console.error("Fehler bei der Credit-Inflation:", e);
