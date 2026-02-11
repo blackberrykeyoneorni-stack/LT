@@ -1,5 +1,5 @@
 import { db } from '../firebase';
-import { doc, updateDoc, serverTimestamp, setDoc, getDoc, increment, query, collection, where, getDocs } from 'firebase/firestore';
+import { doc, updateDoc, serverTimestamp, setDoc, getDoc, increment, query, collection, where, getDocs, addDoc } from 'firebase/firestore';
 import { safeDate } from '../utils/dateUtils';
 import { registerPunishment } from './PunishmentService';
 import { setImmunity, isImmunityActive } from './OfferService'; 
@@ -65,7 +65,9 @@ export const startTZD = async (userId, targetItems, durationMatrix, overrideDura
             name: i.name,
             customId: i.customId || 'N/A',
             brand: i.brand,
-            img: i.imageUrl || (i.images && i.images[0]) || null
+            img: i.imageUrl || (i.images && i.images[0]) || null,
+            subCategory: i.subCategory || '', // Wichtig für den Swap
+            mainCategory: i.mainCategory || ''
         })),
         itemId: itemsArray[0]?.id, 
         itemName: itemsArray[0]?.name,
@@ -392,5 +394,108 @@ export const convertTZDToPlugPunishment = async (userId, allItems) => {
     } catch (e) {
         console.error("Conversion failed:", e);
         return { success: false };
+    }
+};
+
+/**
+ * ERP (Emergency Replacement Protocol):
+ * Tauscht ein defektes Item im laufenden TZD aus und archiviert das alte.
+ * archivData: { reason, defectLocation, defectCause }
+ */
+export const swapItemInTZD = async (userId, oldItemId, archiveData, allItems) => {
+    try {
+        // 1. Status und altes Item prüfen
+        const statusDocRef = doc(db, `users/${userId}/status/tzd`);
+        const statusSnap = await getDoc(statusDocRef);
+        
+        if (!statusSnap.exists()) throw new Error("Kein TZD aktiv.");
+        const tzdData = statusSnap.data();
+        
+        // Finde das zu ersetzende Item in der lockedItems Liste
+        const oldItemEntry = tzdData.lockedItems.find(i => i.id === oldItemId);
+        if (!oldItemEntry) throw new Error("Item nicht im TZD gefunden.");
+
+        const oldItemFull = allItems.find(i => i.id === oldItemId);
+        const subCat = oldItemFull ? (oldItemFull.subCategory || "") : (oldItemEntry.subCategory || "");
+        const mainCat = oldItemFull ? (oldItemFull.mainCategory || "") : (oldItemEntry.mainCategory || "");
+
+        // 2. Ersatz suchen
+        // Prio A: Gleiche Subkategorie, Active Status, nicht das alte Item
+        let candidates = allItems.filter(i => 
+            i.id !== oldItemId && 
+            i.status === 'active' && 
+            i.subCategory === subCat
+        );
+
+        // Prio B: Gleiche Hauptkategorie (Fallback)
+        if (candidates.length === 0) {
+            candidates = allItems.filter(i => 
+                i.id !== oldItemId && 
+                i.status === 'active' && 
+                i.mainCategory === mainCat
+            );
+        }
+
+        // Prio C: Notfall (irgendein actives Item, sehr unwahrscheinlich)
+        if (candidates.length === 0) {
+            candidates = allItems.filter(i => i.id !== oldItemId && i.status === 'active');
+        }
+
+        if (candidates.length === 0) throw new Error("Kein Ersatz im Inventar verfügbar.");
+
+        // Zufällige Wahl aus Kandidaten
+        const replacement = candidates[Math.floor(Math.random() * candidates.length)];
+
+        // 3. Archivierung des alten Items
+        await updateDoc(doc(db, `users/${userId}/items`, oldItemId), {
+            status: 'archived',
+            archiveReason: archiveData.reason,
+            defectLocation: archiveData.defectLocation || '',
+            defectCause: archiveData.defectCause || '',
+            archivedAt: serverTimestamp()
+        });
+
+        // 4. Update des TZD Docs (Array Manipulation)
+        const newLockedItems = tzdData.lockedItems.map(item => {
+            if (item.id === oldItemId) {
+                return {
+                    id: replacement.id,
+                    name: replacement.name,
+                    customId: replacement.customId || 'N/A',
+                    brand: replacement.brand,
+                    img: replacement.imageUrl || (replacement.images && replacement.images[0]) || null,
+                    subCategory: replacement.subCategory || '',
+                    mainCategory: replacement.mainCategory || ''
+                };
+            }
+            return item;
+        });
+
+        const updates = {
+            lockedItems: newLockedItems
+        };
+
+        // Falls das Haupt-Item getauscht wurde
+        if (tzdData.itemId === oldItemId) {
+            updates.itemId = replacement.id;
+            updates.itemName = replacement.name;
+        }
+
+        await updateDoc(statusDocRef, updates);
+
+        // 5. History Log
+        await addDoc(collection(db, `users/${userId}/history`), {
+            type: 'tzd_swap',
+            oldItemName: oldItemFull ? oldItemFull.name : 'Unknown',
+            newItemName: replacement.name,
+            reason: archiveData.reason,
+            timestamp: serverTimestamp()
+        });
+
+        return { success: true, newItemName: replacement.name };
+
+    } catch (e) {
+        console.error("Swap failed:", e);
+        return { success: false, error: e.message };
     }
 };
