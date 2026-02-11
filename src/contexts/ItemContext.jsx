@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { db } from '../firebase';
 import { collection, query, onSnapshot, doc, setDoc, deleteDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { useAuth } from './AuthContext';
+import * as ItemService from '../services/ItemService';
 
 const ItemContext = createContext();
 
@@ -61,33 +62,33 @@ export function ItemProvider({ children }) {
     }
   }, [currentUser]);
 
-  // CRUD Operationen (Bleiben gleich)
+  // CRUD Operationen
   const addItem = async (itemData, customId = null) => {
     if (!currentUser) return;
-    const itemsRef = collection(db, 'users', currentUser.uid, 'items');
     
     if (customId) {
+        const itemsRef = collection(db, 'users', currentUser.uid, 'items');
         await setDoc(doc(itemsRef, customId), {
             ...itemData,
-            createdAt: serverTimestamp()
+            createdAt: serverTimestamp(),
+            wearCount: 0,
+            totalMinutes: 0,
+            status: 'active',
+            historyLog: []
         });
     } else {
-        const newDocRef = doc(itemsRef);
-        await setDoc(newDocRef, {
-            ...itemData,
-            createdAt: serverTimestamp()
-        });
+        await ItemService.addItem(currentUser.uid, itemData);
     }
   };
 
   const deleteItem = async (id) => {
      if (!currentUser) return;
-     await deleteDoc(doc(db, 'users', currentUser.uid, 'items', id));
+     await ItemService.deleteItem(currentUser.uid, id);
   };
 
   const updateItem = async (id, data) => {
       if (!currentUser) return;
-      await updateDoc(doc(db, 'users', currentUser.uid, 'items', id), data);
+      await ItemService.updateItem(currentUser.uid, id, data);
   };
 
   const value = {

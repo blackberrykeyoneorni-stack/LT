@@ -1,8 +1,7 @@
 import { db } from '../firebase';
 import { 
-    collection, doc, writeBatch, serverTimestamp, getDoc, addDoc, updateDoc 
+    collection, doc, writeBatch, serverTimestamp, getDoc, addDoc, updateDoc, increment 
 } from 'firebase/firestore';
-import { updateWearStats } from './ItemService';
 import { addCredits, getTimeBankBalance } from './TimeBankService';
 
 /**
@@ -163,7 +162,7 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
         } catch (e) { console.error(e); }
     }
 
-    // Session schließen
+    // 1. Session schließen
     const updateData = {
         endTime: serverTimestamp(),
         isActive: false,
@@ -176,62 +175,58 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
     }
     batch.update(sessionRef, updateData);
 
-    // Item Status zurücksetzen
+    // 2. Item Updates (Status & Stats im Batch)
     const itemIds = sessionData.itemIds || (sessionData.itemId ? [sessionData.itemId] : []);
-    itemIds.forEach(id => {
-        const itemRef = doc(db, `users/${userId}/items`, id);
-        batch.update(itemRef, { status: 'active', lastWorn: serverTimestamp() });
-    });
+    const itemDetails = [];
 
-    await batch.commit(); 
-
-    // Stats Updates
     for (const id of itemIds) {
-        await updateWearStats(userId, id, durationMinutes);
+        const itemRef = doc(db, `users/${userId}/items`, id);
+        batch.update(itemRef, { 
+            status: 'active', 
+            lastWorn: serverTimestamp(),
+            wearCount: increment(1),
+            totalMinutes: increment(durationMinutes)
+        });
+
+        // Vorab laden für Credit-Typ Check
+        try {
+            const iSnap = await getDoc(itemRef);
+            if (iSnap.exists()) itemDetails.push(iSnap.data());
+        } catch (e) { console.error(e); }
     }
 
-    // TIME BANK: Earning & Tilgung
+    // 3. TIME BANK: Earning & Tilgung
+    let creditCalculated = false;
     if (sessionData.type !== 'punishment' && !sessionData.tzdExecuted) {
         let eligibleMinutes = 0;
 
         if (sessionData.isDebtSession) {
-            // Bei Schulden zählt jede Minute zur Tilgung (1:1)
             eligibleMinutes = durationMinutes;
         } else if (sessionData.type === 'voluntary') {
-            // Normales Earnen
             eligibleMinutes = durationMinutes;
         } else if (sessionData.type === 'instruction') {
-            // FIX: Robustere Berechnung für Instruction Overtime
             const target = Number(sessionData.targetDurationMinutes) || 0;
             if (target > 0 && durationMinutes > target) {
-                // Nur die Differenz wird gutgeschrieben (Overtime)
                 eligibleMinutes = durationMinutes - target;
-                console.log(`Instruction Overtime: ${durationMinutes} worn - ${target} target = ${eligibleMinutes} eligible.`);
             }
         }
 
-        // Wenn Guthaben verdient wurde, rufen wir den Service auf.
-        // Der Service teilt voluntary/overtime Minuten durch 3 (sofern Konto im Plus).
         if (eligibleMinutes > 0) {
-            let creditType = 'lingerie';
-            try {
-                const firstItemId = itemIds[0];
-                const itemSnap = await getDoc(doc(db, `users/${userId}/items`, firstItemId));
-                if (itemSnap.exists()) {
-                    const item = itemSnap.data();
-                    const sub = (item.subCategory || '').toLowerCase();
-                    const cat = (item.mainCategory || '').toLowerCase();
-                    
-                    if (sub.includes('strumpfhose') || sub.includes('tights') || 
-                        sub.includes('halterlose') || sub.includes('stockings') || 
-                        cat.includes('nylons')) {
-                        creditType = 'nylon';
-                    }
-                }
-                await addCredits(userId, eligibleMinutes, creditType);
-            } catch(e) { console.error("Error calculating credits", e); }
+            const hasNylon = itemDetails.some(item => {
+                const sub = (item.subCategory || '').toLowerCase();
+                const cat = (item.mainCategory || '').toLowerCase();
+                return sub.includes('strumpfhose') || sub.includes('tights') || 
+                       sub.includes('halterlose') || sub.includes('stockings') || 
+                       cat.includes('nylons');
+            });
+
+            const creditType = hasNylon ? 'nylon' : 'lingerie';
+            await addCredits(userId, eligibleMinutes, creditType);
+            creditCalculated = true;
         }
     }
 
-    return { ...sessionData, endTime, durationMinutes };
+    await batch.commit(); 
+
+    return { id: sessionId, ...sessionData, endTime, durationMinutes, creditCalculated };
 };

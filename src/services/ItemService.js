@@ -83,7 +83,7 @@ export const calculateItemRecoveryStatus = (item, sessions, restingHoursSetting 
     return null;
 };
 
-// --- CRUD & STATS LOGIK (Das fehlte) ---
+// --- CRUD & STATS LOGIK ---
 
 /**
  * Abonniert alle Items eines Users (Realtime).
@@ -138,7 +138,6 @@ export const deleteItem = async (userId, itemId) => {
 
 /**
  * Aktualisiert die Trage-Statistiken eines Items nach einer Session.
- * WICHTIG: Wird vom SessionService aufgerufen.
  */
 export const updateWearStats = async (userId, itemId, durationMinutes) => {
     if (!userId || !itemId) return;

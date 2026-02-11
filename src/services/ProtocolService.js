@@ -3,21 +3,25 @@ import {
     doc, setDoc, onSnapshot, getDoc, collection, query, where, getDocs, orderBy, Timestamp, serverTimestamp 
 } from 'firebase/firestore';
 import { DEFAULT_PROTOCOL_RULES } from '../config/defaultRules';
-import { getAllSuspensions } from './SuspensionService'; // NEU: Import für Ausfallzeiten
+import { getAllSuspensions } from './SuspensionService'; 
 
 // --- HELPER ---
 
-// Berechnet den Montag der aktuellen Woche (00:00 Uhr)
+/**
+ * Berechnet den Montag der aktuellen Woche (00:00 Uhr)
+ */
 const getStartOfWeek = (date) => {
     const d = new Date(date);
     const day = d.getDay();
-    const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Montag berechnen
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1); 
     d.setDate(diff);
     d.setHours(0, 0, 0, 0);
     return d;
 };
 
-// TZD Berechnung (Linear + Wurzeldämpfung)
+/**
+ * TZD Berechnung (Linear + Wurzeldämpfung)
+ */
 export const calculateTZDEffectiveHours = (durationMinutes) => {
     const durationHours = durationMinutes / 60;
     // 1. Lineare Verteilung (6h=100%, 36h=40%) -> Faktor = 1.12 - 0.02 * t
@@ -29,7 +33,10 @@ export const calculateTZDEffectiveHours = (durationMinutes) => {
     return dampenedHours;
 };
 
-// KERN-ALGORITHMUS: Berechnet Statistiken für einen Zeitraum
+/**
+ * KERN-ALGORITHMUS: Berechnet Statistiken für einen Zeitraum.
+ * Korrektur Schwachstelle 4: Präzise Divisor-Logik und Ausschluss von Wochenend-Boni.
+ */
 const calculateStatsForPeriod = async (userId, startDate, endDate, currentGoal) => {
     const q = query(
         collection(db, `users/${userId}/sessions`),
@@ -46,7 +53,7 @@ const calculateStatsForPeriod = async (userId, startDate, endDate, currentGoal) 
         const data = doc.data();
         
         // FILTER: Nur Tag-Sessions (kein 'night' im Period-String)
-        const isNight = data.period && data.period.toLowerCase().includes('night');
+        const isNight = data.periodId && data.periodId.toLowerCase().includes('night');
         if (isNight) return;
 
         // FILTER: Nacht-Compliance Check
@@ -68,40 +75,40 @@ const calculateStatsForPeriod = async (userId, startDate, endDate, currentGoal) 
             effectiveHours = durationMinutes / 60;
         }
 
-        validSessions.push(effectiveHours);
+        // Korrektur Schwachstelle 4: Sessions am Wochenende (Sa/So) werden für den 
+        // Wochenschnitt ignoriert, um den Schnitt nicht künstlich aufzublähen.
+        const sessionDate = data.startTime.toDate();
+        const dayOfWeek = sessionDate.getDay();
+        if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+            validSessions.push(effectiveHours);
+        }
     });
 
-    // --- NEU: DIVISOR ANPASSUNG (Ausfallzeiten berücksichtigen) ---
-    let effectiveDivisor = 5; // Standard: 5 Tage
+    // --- DIVISOR ANPASSUNG (Ausfallzeiten berücksichtigen) ---
+    let effectiveDivisor = 5; // Standard: 5 Werktage
     
     try {
         const allSuspensions = await getAllSuspensions(userId);
         let suspensionDaysCount = 0;
 
-        // Wir iterieren durch jeden Tag des Zeitraums (startDate bis endDate)
         let loopDate = new Date(startDate);
-        // Sicherstellen, dass wir keine Zeitzonen-Probleme haben, Loop auf 12:00 Uhr
         loopDate.setHours(12, 0, 0, 0);
 
         const endLimit = new Date(endDate);
         endLimit.setHours(12, 0, 0, 0);
 
         while (loopDate < endLimit) {
-            const dayOfWeek = loopDate.getDay(); // 0=So, 1=Mo, ..., 6=Sa
+            const dayOfWeek = loopDate.getDay(); 
             
-            // Wir prüfen nur Mo(1) bis Fr(5), da dies die Basis für die "5 Tage" ist
+            // Wir prüfen nur Mo(1) bis Fr(5)
             if (dayOfWeek >= 1 && dayOfWeek <= 5) {
-                
-                // Prüfen, ob dieser Tag in einer Suspension liegt
                 const isSuspended = allSuspensions.some(sus => {
                     const sStart = sus.startDate instanceof Date ? sus.startDate : sus.startDate.toDate();
                     const sEnd = sus.endDate instanceof Date ? sus.endDate : sus.endDate.toDate();
                     
-                    // Normalisierung auf Tagesbasis für den Vergleich
                     const sStartDay = new Date(sStart); sStartDay.setHours(0,0,0,0);
                     const sEndDay = new Date(sEnd); sEndDay.setHours(23,59,59,999);
                     
-                    // CheckDate (loopDate ist auf 12:00 gesetzt)
                     return loopDate >= sStartDay && loopDate <= sEndDay;
                 });
 
@@ -109,33 +116,25 @@ const calculateStatsForPeriod = async (userId, startDate, endDate, currentGoal) 
                     suspensionDaysCount++;
                 }
             }
-            
-            // Einen Tag weiter
             loopDate.setDate(loopDate.getDate() + 1);
         }
 
-        // Divisor reduzieren (aber mind. 1, um Division durch 0 zu vermeiden)
         if (suspensionDaysCount > 0) {
-            console.log(`Divisor adjustment: Found ${suspensionDaysCount} suspension days in period.`);
             effectiveDivisor = Math.max(1, 5 - suspensionDaysCount);
         }
 
     } catch (e) {
         console.error("Fehler bei der Berechnung der Ausfalltage:", e);
-        // Fallback bleibt bei 5
     }
 
-    // 4. Durchschnitt berechnen (Summe / Effektiver Divisor)
     const sumHours = validSessions.reduce((a, b) => a + b, 0);
     const average = validSessions.length > 0 ? (sumHours / effectiveDivisor) : 0;
 
-    // 5. Ratchet Logic
     let nextGoal = currentGoal;
     if (average > currentGoal) {
         nextGoal = average;
     }
 
-    // Absolute Obergrenze (Hard Cap) von 12 Stunden
     if (nextGoal > 12) {
         nextGoal = 12;
     }
@@ -145,7 +144,7 @@ const calculateStatsForPeriod = async (userId, startDate, endDate, currentGoal) 
         nextGoal: parseFloat(nextGoal.toFixed(2)),
         sessionCount: validSessions.length,
         currentGoal,
-        effectiveDivisor // Für Debugging hilfreich
+        effectiveDivisor 
     };
 };
 
@@ -153,22 +152,25 @@ const calculateStatsForPeriod = async (userId, startDate, endDate, currentGoal) 
 
 /**
  * Berechnet das vorgeschlagene Ziel für die nächste Woche (Preview).
- * Basiert auf der laufenden Woche (seit Montag).
+ * Korrektur Schwachstelle 3: Nutzt Singleton-Daten falls verfügbar.
  */
 export const getProjectedGoal = async (userId) => {
     try {
-        // 1. Aktuelles Ziel laden
-        const settingsRef = doc(db, `users/${userId}/settings/protocol`);
-        const settingsSnap = await getDoc(settingsRef);
-        const currentGoal = settingsSnap.exists() ? (settingsSnap.data().currentDailyGoal || 4) : 4;
+        let currentGoal = 4;
+        
+        // Versuche erst vom Singleton zu lesen (Schwachstelle 3)
+        if (protocolService.rules && protocolService.rules.currentDailyGoal) {
+            currentGoal = protocolService.rules.currentDailyGoal;
+        } else {
+            const settingsRef = doc(db, `users/${userId}/settings/protocol`);
+            const settingsSnap = await getDoc(settingsRef);
+            currentGoal = settingsSnap.exists() ? (settingsSnap.data().currentDailyGoal || 4) : 4;
+        }
 
-        // 2. Zeitraum: Dieser Montag bis Jetzt
         const now = new Date();
         const thisMonday = getStartOfWeek(now);
-        
-        // Ende ist "Jetzt" (für Preview)
         const endOfPeriod = new Date();
-        endOfPeriod.setDate(endOfPeriod.getDate() + 1); // Sicherheitshalber morgen, um heute komplett einzuschließen
+        endOfPeriod.setDate(endOfPeriod.getDate() + 1);
 
         const stats = await calculateStatsForPeriod(userId, thisMonday, endOfPeriod, currentGoal);
 
@@ -188,7 +190,6 @@ export const getProjectedGoal = async (userId) => {
 
 /**
  * PRÜFT UND FÜHRT WOCHEN-UPDATE DURCH (AUTOMATISCH)
- * Wird beim Start der App aufgerufen.
  */
 export const checkAndRunWeeklyUpdate = async (userId) => {
     try {
@@ -209,27 +210,19 @@ export const checkAndRunWeeklyUpdate = async (userId) => {
         const now = new Date();
         const currentWeekStart = getStartOfWeek(now);
 
-        // Check: Wurde diese Woche schon geupdatet?
-        // Wenn lastUpdateDate existiert UND im gleichen Wochen-Intervall liegt wie "jetzt", abbrechen.
         if (lastUpdateDate && getStartOfWeek(lastUpdateDate).getTime() === currentWeekStart.getTime()) {
-            // Update für diese Woche schon gelaufen.
             return;
         }
 
-        console.log("Weekly Protocol Update: Triggered.");
-
-        // Wir brauchen die Stats der VORHERIGEN Woche
         const lastWeekStart = new Date(currentWeekStart);
         lastWeekStart.setDate(lastWeekStart.getDate() - 7);
         
-        // Zeitraum: Letzter Montag bis Diesen Montag (exklusive)
         const stats = await calculateStatsForPeriod(userId, lastWeekStart, currentWeekStart, currentGoal);
 
-        // Update durchführen
         await setDoc(settingsRef, {
             currentDailyGoal: stats.nextGoal,
-            lastGoalUpdate: serverTimestamp(), // Wichtig: Server-Zeit für Konsistenz
-            lastWeekStats: { // Optional: Historie speichern
+            lastGoalUpdate: serverTimestamp(),
+            lastWeekStats: {
                 average: stats.average,
                 previousGoal: currentGoal,
                 date: new Date(),
@@ -237,7 +230,6 @@ export const checkAndRunWeeklyUpdate = async (userId) => {
             }
         }, { merge: true });
 
-        console.log(`Weekly Goal updated from ${currentGoal}h to ${stats.nextGoal}h based on avg ${stats.average}h (Divisor: ${stats.effectiveDivisor})`);
         return stats.nextGoal;
 
     } catch (e) {
@@ -245,13 +237,9 @@ export const checkAndRunWeeklyUpdate = async (userId) => {
     }
 };
 
-/**
- * Manuelles Fixieren (Legacy/Debug)
- */
 export const commitNewWeeklyGoal = async (userId) => {
     return checkAndRunWeeklyUpdate(userId);
 };
-
 
 // --- PROTOCOL SERVICE CLASS ---
 class ProtocolService {
@@ -260,6 +248,10 @@ class ProtocolService {
         this.unsubscribe = null;
     }
 
+    /**
+     * Initialisiert den Echtzeit-Listener.
+     * Korrektur Schwachstelle 3: Zentrale Datenquelle für die gesamte App.
+     */
     init(userId) {
         if (!userId) return;
 
@@ -286,12 +278,9 @@ class ProtocolService {
                         }
                     },
                     punishment: { ...DEFAULT_PROTOCOL_RULES.punishment, ...(data.punishment || {}) },
-                    
-                    // WICHTIG: Hier wird das Ziel geladen
                     currentDailyGoal: data.currentDailyGoal || 4
                 };
             } else {
-                console.log("No protocol rules found. Creating defaults.");
                 const initialData = {
                     ...DEFAULT_PROTOCOL_RULES,
                     currentDailyGoal: 4
