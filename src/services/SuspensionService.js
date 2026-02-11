@@ -47,7 +47,7 @@ export const getSuspensions = async (userId) => {
 };
 
 /**
- * NEU: Lädt ALLE Aussetzungen (auch vergangene) für den Kalender.
+ * Lädt ALLE Aussetzungen (auch vergangene) für den Kalender.
  */
 export const getAllSuspensions = async (userId) => {
     try {
@@ -72,13 +72,12 @@ export const getAllSuspensions = async (userId) => {
 /**
  * Prüft beim App-Start, ob HEUTE eine Aussetzung aktiv ist.
  * Schaltet 'scheduled' automatisch auf 'active' um, wenn die Zeit gekommen ist.
- * KORREKTUR: Berücksichtigt Protokoll-Zeiten (07:30 Start, 23:00 Ende).
- * ZUSATZ: Mit Fallback für DEFAULT_PROTOCOL_RULES gegen Import-Probleme.
+ * FIX: Beendet bei Aktivierung AUTOMATISCH alle laufenden TZD-Strafen.
  */
 export const checkActiveSuspension = async (userId) => {
     const now = new Date();
     
-    // Sicherheits-Fallback, falls Import fehlschlägt oder undefined ist
+    // Sicherheits-Fallback
     const timeRules = DEFAULT_PROTOCOL_RULES?.time || { 
         dayStartHour: 7, 
         dayStartMinute: 30, 
@@ -99,13 +98,19 @@ export const checkActiveSuspension = async (userId) => {
         const end = data.endDate.toDate();
 
         // Check: Ist sie abgelaufen?
-        // Ende ist am letzten Tag um 23:00 Uhr (nightStartHour)
         const endOfSuspension = new Date(end);
         endOfSuspension.setHours(timeRules.nightStartHour, timeRules.nightStartMinute, 0, 0);
 
         if (endOfSuspension < now) {
             // Aussetzung ist vorbei -> Status auf 'completed'
             await updateDoc(doc(db, `users/${userId}/${COLLECTION}`, docSnap.id), { status: 'completed' });
+            
+            // Suspension Flag im Daily Doc entfernen, damit Protokoll wieder greifen kann
+            await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), { 
+                activeSuspension: false,
+                suspensionReason: null
+            });
+            
             return null;
         }
         return { id: docSnap.id, ...data, startDate: data.startDate.toDate(), endDate: end };
@@ -123,14 +128,35 @@ export const checkActiveSuspension = async (userId) => {
         const start = data.startDate.toDate();
         const end = data.endDate.toDate();
         
-        // Startzeitpunkt prüfen
-        // Start ist am ersten Tag um 07:30 Uhr (dayStartHour)
+        // Startzeitpunkt prüfen (z.B. 07:30)
         const startOfSuspension = new Date(start);
         startOfSuspension.setHours(timeRules.dayStartHour, timeRules.dayStartMinute, 0, 0);
 
         if (startOfSuspension <= now) {
-            // Zeit erreicht -> Aktivierung!
+            // ZEIT ERREICHT -> AKTIVIERUNG
             await updateDoc(doc(db, `users/${userId}/${COLLECTION}`, d.id), { status: 'active' });
+            
+            // --- CRITICAL FIX: KOLLISIONS-BEREINIGUNG ---
+            // Wenn die Aussetzung startet, müssen Altlasten (TZD vom Vortag) sofort sterben.
+            
+            // A) TZD Status Doc killen (das Overlay verschwindet)
+            await updateDoc(doc(db, `users/${userId}/status/tzd`), {
+                isActive: false,
+                result: 'terminated_by_suspension',
+                endTime: Timestamp.now()
+            });
+
+            // B) Daily Instruction säubern (Die Strafe wird deaktiviert)
+            await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), {
+                evasionPenaltyTriggered: false, // WICHTIG: Stoppt die 150% Logik
+                tzdDurationMinutes: 0,
+                activeSuspension: true, // Markiert User als 'entschuldigt'
+                suspensionReason: data.reason
+            });
+            
+            console.log(`Suspension activated. TZD terminated. Reason: ${data.reason}`);
+            // ----------------------------------------------
+
             return { id: d.id, ...data, status: 'active', startDate: start, endDate: end };
         }
     }
@@ -145,5 +171,11 @@ export const terminateSuspension = async (userId, suspensionId) => {
     await updateDoc(doc(db, `users/${userId}/${COLLECTION}`, suspensionId), {
         status: 'terminated',
         terminatedAt: Timestamp.now()
+    });
+    
+    // Auch das Daily Flag resetten, damit man sofort wieder teilnehmen kann
+    await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), { 
+        activeSuspension: false,
+        suspensionReason: null
     });
 };

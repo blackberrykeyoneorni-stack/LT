@@ -4,6 +4,14 @@ import { safeDate } from '../utils/dateUtils';
 import { registerPunishment } from './PunishmentService';
 import { setImmunity, isImmunityActive } from './OfferService'; 
 
+// --- KONFIGURATION (NEU) ---
+const TZD_CONFIG = {
+    DEFAULT_MULTIPLIER: 1.5,
+    PENALTY_MINUTES: 15,
+    MAX_HOURS_HARD_CAP: 24,
+    ABORT_PUNISHMENT_DURATION: 360 // 6 Stunden Plug
+};
+
 // --- FALLBACK KONSTANTEN ---
 const FALLBACK_TRIGGER_CHANCE = 0.12; 
 const FALLBACK_MATRIX = [
@@ -97,7 +105,8 @@ export const triggerEvasionPenalty = async (userId, instructionItems) => {
             }
         }
 
-        const penaltyMinutes = Math.round((maxWallHours * 1.5) * 60);
+        // Berechnung: 150% der Einstellung (über TZD_CONFIG)
+        const penaltyMinutes = Math.round((maxWallHours * TZD_CONFIG.DEFAULT_MULTIPLIER) * 60);
         console.log(`Evasion Detected. Triggering TZD Penalty: ${penaltyMinutes} minutes.`);
 
         await startTZD(userId, instructionItems, null, penaltyMinutes);
@@ -129,7 +138,31 @@ export const isItemEligibleForTZD = (item) => {
 export const checkForTZDTrigger = async (userId, activeSessions, items) => {
     // 0. Status-Check: Keine Überlappung erlauben
     const currentStatus = await getTZDStatus(userId);
-    if (currentStatus && currentStatus.isActive) return false;
+    if (currentStatus && currentStatus.isActive) {
+        // --- FIX BEGIN: ZOMBIE SCHUTZ (40h Bug) ---
+        // Wenn TZD aktiv ist, prüfen wir, ob wir Strafminuten addieren müssen.
+        // ABER NICHT, wenn der User suspendiert/immun ist.
+        
+        // Schnell-Check auf Immunität
+        const immune = await isImmunityActive(userId);
+        if (immune) {
+             console.log("TZD Wächter: Immunität aktiv. Keine Strafe.");
+             return false;
+        }
+        
+        // Schnell-Check auf Suspension (z.B. Medical)
+        const dailyRef = doc(db, `users/${userId}/status/dailyInstruction`);
+        const dailySnap = await getDoc(dailyRef);
+        if (dailySnap.exists() && dailySnap.data().activeSuspension) {
+             console.log("TZD Wächter: Suspension aktiv. Keine Strafe.");
+             return false;
+        }
+        
+        // Wenn KEINE Ausnahme -> Strafe für App-Nutzung während TZD
+        await penalizeTZDAppOpen(userId);
+        return true; // Triggered penalty
+        // --- FIX END ---
+    }
 
     // 1. Immunitäts-Check
     const immune = await isImmunityActive(userId);
@@ -236,12 +269,13 @@ export const penalizeTZDAppOpen = async (userId) => {
     try {
         const status = await getTZDStatus(userId);
         if (status && status.isActive && status.stage === 'running') {
-            const penaltyMinutes = 15;
+            const penaltyMinutes = TZD_CONFIG.PENALTY_MINUTES;
             await updateDoc(doc(db, `users/${userId}/status/tzd`), {
                 targetDurationMinutes: increment(penaltyMinutes),
                 penaltyCount: increment(1),
                 lastPenaltyAt: serverTimestamp()
             });
+            console.log(`TZD Penalty: +${penaltyMinutes} min`);
             return true; 
         }
         return false; 
@@ -268,6 +302,11 @@ export const terminateTZD = async (userId, success = true) => {
     });
 
     if (success) {
+        // Reset auch das Daily Flag bei Erfolg
+        await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), {
+            evasionPenaltyTriggered: false
+        });
+
         if (status && status.targetDurationMinutes >= 1440) {
             await setImmunity(userId, 24);
             console.log("24h TZD überstanden. Cooldown (Immunität) aktiviert.");
@@ -302,4 +341,56 @@ export const terminateTZD = async (userId, success = true) => {
 export const emergencyBailout = async (userId) => {
     await registerPunishment(userId, "NOT-ABBRUCH: Zeitloses Diktat verweigert", 90);
     await terminateTZD(userId, false);
+};
+
+/**
+ * NEU: Wandelt ein abgebrochenes TZD in eine physische Item-Strafe um.
+ * Sucht nach Buttplug/Plug und startet 6h Strafe.
+ * Beendet das TZD sofort.
+ */
+export const convertTZDToPlugPunishment = async (userId, allItems) => {
+    try {
+        // 1. Finde einen Plug
+        const plug = allItems.find(i => {
+            const name = (i.name || "").toLowerCase();
+            const sub = (i.subCategory || "").toLowerCase();
+            const cat = (i.mainCategory || "").toLowerCase();
+            return (
+                name.includes("plug") || sub.includes("plug") || cat.includes("anal") ||
+                name.includes("butt") || sub.includes("butt")
+            );
+        });
+
+        // Fallback: Irgendein Toy oder das erste Item, wenn kein Plug da ist
+        const penaltyItem = plug || allItems.find(i => i.category === 'Toy') || allItems[0];
+
+        if (!penaltyItem) throw new Error("No penalty item found");
+
+        // 2. Registriere die Strafe (6 Stunden / 360 min)
+        await registerPunishment(
+            userId, 
+            "TZD Abbruch / Verweigerung", 
+            TZD_CONFIG.ABORT_PUNISHMENT_DURATION, 
+            penaltyItem.id
+        );
+
+        // 3. TZD BEENDEN (Wichtig!)
+        await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), {
+            evasionPenaltyTriggered: false,
+            tzdDurationMinutes: 0,
+            tzdStartTime: null
+        });
+        
+        // Auch das normale TZD Status Doc resetten
+        await updateDoc(doc(db, `users/${userId}/status/tzd`), {
+            isActive: false,
+            result: 'aborted_punished'
+        });
+
+        return { success: true, item: penaltyItem.name };
+
+    } catch (e) {
+        console.error("Conversion failed:", e);
+        return { success: false };
+    }
 };

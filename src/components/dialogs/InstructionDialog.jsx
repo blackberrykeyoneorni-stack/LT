@@ -22,6 +22,7 @@ import SavingsIcon from '@mui/icons-material/Savings';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown'; 
 import TimerIcon from '@mui/icons-material/Timer';
 import AccessibilityNewIcon from '@mui/icons-material/AccessibilityNew';
+import FingerprintIcon from '@mui/icons-material/Fingerprint';
 
 import { useNFCGlobal } from '../../contexts/NFCContext';
 import { useAuth } from '../../contexts/AuthContext';
@@ -69,7 +70,7 @@ export default function InstructionDialog({
 
   // LOGIK FÜR SLIDER-ANZEIGE
   const safePeriodId = (instruction?.periodId || "").toLowerCase();
-  const isNightProtocol = safePeriodId.includes('night');
+  const isNightProtocol = safePeriodId.includes('night') || isNight;
   const showVault = safePeriodId ? !isNightProtocol : !isNight;
 
   // Initialisierung: Prüfen ob bereits accepted
@@ -103,11 +104,11 @@ export default function InstructionDialog({
   }, [viewState, instruction]);
 
   // --- NFC SCAN LOGIC ---
-  useEffect(() => {
-      if (open && instruction) {
-          startBindingScan(handleNfcAutoStart);
-      }
-  }, [open, instruction, viewState]); // viewState als Dependency wichtig
+  // AUTOMATISCHER SCAN ENTFERNT. Wird jetzt per Button ausgelöst.
+  const activateNfcScan = () => {
+      if (showToast) showToast("Scanner aktiv. Halte das Item an.", "info");
+      startBindingScan(handleNfcAutoStart);
+  };
 
   // Diese Funktion wird aufgerufen, wenn irgendein Tag gescannt wird
   const handleNfcAutoStart = async (scannedId) => {
@@ -147,9 +148,6 @@ export default function InstructionDialog({
           if (creditReduction > 0) {
              try {
                  await spendCredits(currentUser.uid, creditReduction, creditType);
-                 // Firestore Update Teil 1 (nur Credit Infos, Status update folgt)
-                 // Wir machen das zusammen im updateDoc unten oder hier vorab. 
-                 // Sicherer ist alles zusammen, aber spendCredits ist eigener Service.
              } catch(e) {
                  if (showToast) showToast("Kauf fehlgeschlagen.", "error");
                  return; 
@@ -390,9 +388,21 @@ export default function InstructionDialog({
       const currentDuration = originalDuration - creditReduction;
       const currentBalance = creditType === 'nylon' ? credits.nc : credits.lc;
 
+      // Formatierung: 0h vermeiden bei < 60 min
+      const formatTime = (mins) => {
+          if (mins <= 0) return "0m";
+          const h = Math.floor(mins / 60);
+          const m = Math.floor(mins % 60);
+          if (h > 0) return `${h}h ${m > 0 ? `${m}m` : ''}`;
+          return `${m}m`;
+      };
+
       return (
             <Box sx={{ textAlign: 'center' }}>
-                <Typography variant="overline" color="text.secondary" sx={{ letterSpacing: 2 }}>{isNight ? "NACHT PROTOKOLL" : "TAGES ANWEISUNG"}</Typography>
+                <Typography variant="overline" color="text.secondary" sx={{ letterSpacing: 2 }}>
+                    {isNightProtocol ? "NACHT PROTOKOLL" : "TAGES ANWEISUNG"}
+                </Typography>
+                
                 <Box sx={{ my: 3 }}>
                     <Box sx={{ width: 120, height: 120, borderRadius: '50%', border: `2px dashed ${PALETTE.primary.main}`, display: 'flex', alignItems: 'center', justifyContent: 'center', mx: 'auto', bgcolor: 'rgba(0,0,0,0.3)' }}>
                         <LockIcon sx={{ fontSize: 40, color: PALETTE.primary.main }} />
@@ -406,20 +416,31 @@ export default function InstructionDialog({
                 
                 {/* DURATION DISPLAY */}
                 <Box sx={{ mb: 3, p: 2, bgcolor: 'rgba(0,0,0,0.3)', borderRadius: 2 }}>
-                    <Typography variant="caption" color="text.secondary">ZIEL DAUER</Typography>
+                    <Typography variant="caption" color="text.secondary">
+                        {isNightProtocol ? "ZEITRAUM" : "ZIEL DAUER"}
+                    </Typography>
                     <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 1 }}>
                         <Typography variant="h4" sx={{ color: creditReduction > 0 ? PALETTE.accents.green : '#fff', fontWeight: 'bold' }}>
-                            {Math.round(currentDuration / 60)}h {(currentDuration % 60) > 0 ? `${currentDuration % 60}m` : ''}
+                            {isNightProtocol ? "ÜBER NACHT" : formatTime(currentDuration)}
                         </Typography>
-                        {creditReduction > 0 && (
+                        
+                        {/* Bei Nacht: Reduktion nur als Hinweis anzeigen */}
+                        {isNightProtocol && creditReduction > 0 && (
+                            <Typography variant="caption" sx={{ color: PALETTE.accents.green }}>
+                                (-{formatTime(creditReduction)})
+                            </Typography>
+                        )}
+
+                        {/* Bei Tag: Durchgestrichener Originalwert */}
+                        {!isNightProtocol && creditReduction > 0 && (
                             <Typography variant="body2" sx={{ textDecoration: 'line-through', color: 'text.secondary' }}>
-                                {Math.round(originalDuration / 60)}h
+                                {formatTime(originalDuration)}
                             </Typography>
                         )}
                     </Box>
                 </Box>
 
-                {/* THE VAULT (TIME BANK) */}
+                {/* THE VAULT (TIME BANK) - Slider nur anzeigen, wenn erlaubt */}
                 {showVault && (
                     <Box sx={{ 
                         mb: 3, px: 2, py: 2, 
@@ -427,6 +448,7 @@ export default function InstructionDialog({
                         borderRadius: 2, 
                         bgcolor: isOverdraft ? 'rgba(255, 0, 0, 0.05)' : 'rgba(255, 215, 0, 0.05)' 
                     }}>
+                        {/* ... Slider Content unchanged ... */}
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                 {isOverdraft ? <TrendingDownIcon sx={{ color: PALETTE.accents.red }} /> : <SavingsIcon sx={{ color: PALETTE.accents.gold }} />}
@@ -531,9 +553,18 @@ export default function InstructionDialog({
             <Typography variant="h5" gutterBottom sx={{ fontWeight: 'bold' }}>{displayItem.name || displayItem.brand}</Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>{displayItem.subCategory} • {displayItem.color}</Typography>
             
+            {/* ID Display */}
+            <Chip 
+                icon={<FingerprintIcon />} 
+                label={`ID: ${displayItem.customId || displayItem.id}`} 
+                size="small" 
+                variant="outlined"
+                sx={{ mb: 1, borderColor: 'rgba(255,255,255,0.1)', color: 'text.secondary' }} 
+            />
+            
             {/* Location Hint if available */}
              {displayItem.location && (
-                <Chip label={`Lagerort: ${displayItem.location}`} size="small" sx={{ mb: 3, bgcolor: 'rgba(255,255,255,0.1)' }} />
+                <Chip label={`Lagerort: ${displayItem.location}`} size="small" sx={{ mb: 3, display: 'flex', mx: 'auto', maxWidth: 'fit-content', bgcolor: 'rgba(255,255,255,0.1)' }} />
              )}
 
             <Alert severity="info" sx={{ mb: 3, textAlign: 'left', bgcolor: 'rgba(2, 136, 209, 0.1)' }}>
@@ -545,12 +576,16 @@ export default function InstructionDialog({
                 <Button fullWidth variant="contained" size="large" onClick={() => handleSessionStart(false)}
                         startIcon={<LaunchIcon />}
                         sx={{ py: 2, bgcolor: PALETTE.accents.green, '&:hover': { bgcolor: PALETTE.accents.green } }}>
-                        SESSION STARTEN
+                        SESSION STARTEN (MANUELL)
                 </Button>
                 
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <NfcIcon fontSize="small" /> Oder scannen zum Starten
-                </Typography>
+                {/* Manual Scan Button */}
+                <Button fullWidth variant="outlined" size="large" onClick={activateNfcScan}
+                        startIcon={<NfcIcon />}
+                        disabled={isScanning}
+                        sx={{ py: 1.5, borderColor: 'rgba(255,255,255,0.3)', color: 'text.primary' }}>
+                        {isScanning ? "SCANNER LÄUFT..." : "SCAN STARTEN (NFC)"}
+                </Button>
                 
                 <Button color="inherit" onClick={onClose}>Später fortsetzen</Button>
             </Box>
@@ -566,7 +601,7 @@ export default function InstructionDialog({
     // Fall 1: Keine Instruction & Frei (Wochenende etc.)
     if (!instruction) {
         if (isFreeDay) {
-            // ... (Code für FreeDay bleibt identisch wie im Original, hier gekürzt der Übersicht halber) ...
+            // ... (unverändert) ...
             if (suggestedItem) {
                 return (
                     <Box sx={{ textAlign: 'center', py: 2 }}>
@@ -635,7 +670,6 @@ export default function InstructionDialog({
             </motion.div>
         </DialogContent>
         
-        {/* Buttons werden jetzt direkt im Content gerendert für mehr Kontrolle */}
         {!instruction && canClose && (
             <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}>
                 <Button onClick={onClose} fullWidth color="inherit">Schließen</Button>
