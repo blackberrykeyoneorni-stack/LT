@@ -11,7 +11,8 @@ import {
     serverTimestamp,
     getDoc,
     setDoc,
-    increment 
+    increment,
+    arrayUnion
 } from 'firebase/firestore';
 import { safeDate } from '../utils/dateUtils';
 
@@ -83,7 +84,7 @@ export const calculateItemRecoveryStatus = (item, sessions, restingHoursSetting 
     return null;
 };
 
-// --- CRUD & STATS LOGIK ---
+// --- CRUD & STATS LOGIK (Das fehlte) ---
 
 /**
  * Abonniert alle Items eines Users (Realtime).
@@ -138,6 +139,7 @@ export const deleteItem = async (userId, itemId) => {
 
 /**
  * Aktualisiert die Trage-Statistiken eines Items nach einer Session.
+ * WICHTIG: Wird vom SessionService aufgerufen.
  */
 export const updateWearStats = async (userId, itemId, durationMinutes) => {
     if (!userId || !itemId) return;
@@ -157,4 +159,18 @@ export const updateWearStats = async (userId, itemId, durationMinutes) => {
 export const setItemStatus = async (userId, itemId, status) => {
     const itemRef = doc(db, `users/${userId}/${COLLECTION_NAME}`, itemId);
     await updateDoc(itemRef, { status });
+};
+
+/**
+ * Fügt einen Eintrag zur Item-Historie hinzu.
+ */
+export const addItemHistoryEntry = async (userId, itemId, entry) => {
+    if (!userId || !itemId) return;
+    const itemRef = doc(db, `users/${userId}/${COLLECTION_NAME}`, itemId);
+    await updateDoc(itemRef, {
+        historyLog: arrayUnion({
+            ...entry,
+            timestamp: new Date().toISOString()
+        })
+    });
 };
