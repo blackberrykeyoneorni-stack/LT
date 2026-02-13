@@ -225,19 +225,21 @@ export default function InstructionDialog({
             setCredits(balance);
             setCreditReduction(0); 
             
-            // Typ bestimmen
+            // Typ bestimmen durch Prüfung aller Items (Neu)
             let type = 'lingerie';
             if (instruction.items && instruction.items.length > 0) {
-                const fullItem = items.find(i => i.id === instruction.items[0].id);
-                if (fullItem) {
-                    const sub = (fullItem.subCategory || '').toLowerCase();
-                    const cat = (fullItem.mainCategory || '').toLowerCase();
-                    if (sub.includes('strumpfhose') || sub.includes('tights') || 
-                        sub.includes('halterlose') || sub.includes('stockings') || 
-                        cat.includes('nylons')) {
-                        type = 'nylon';
+                const hasNylon = instruction.items.some(instrItem => {
+                    const fullItem = items.find(i => i.id === instrItem.id);
+                    if (fullItem) {
+                        const sub = (fullItem.subCategory || '').toLowerCase();
+                        const cat = (fullItem.mainCategory || '').toLowerCase();
+                        return sub.includes('strumpfhose') || sub.includes('tights') || 
+                               sub.includes('halterlose') || sub.includes('stockings') || 
+                               cat.includes('nylons');
                     }
-                }
+                    return false;
+                });
+                if (hasNylon) type = 'nylon';
             }
             setCreditType(type);
 
@@ -533,7 +535,10 @@ export default function InstructionDialog({
 
   // Phase 2: PREPARATION / REVEAL VIEW
   const renderPreparationPhase = () => {
-      const displayItem = items.find(i => i.id === instruction.items[0]?.id) || instruction.items[0];
+      // Map durch alle zugewiesenen Items für die dynamische Anzeige (Neu)
+      const displayItems = instruction.items.map(instrItem => 
+          items.find(i => i.id === instrItem.id) || instrItem
+      );
 
       return (
         <Box sx={{ textAlign: 'center' }}>
@@ -542,33 +547,36 @@ export default function InstructionDialog({
                  <Chip icon={<TimerIcon />} label={timeLeftStr} color="warning" variant="outlined" size="small" />
             </Box>
 
-            <Box sx={{ my: 3 }}>
-                {displayItem.img || displayItem.imageUrl ? (
-                    <Avatar src={displayItem.img || displayItem.imageUrl} sx={{ width: 140, height: 140, border: `2px solid ${PALETTE.primary.main}`, mx: 'auto', boxShadow: '0 0 20px rgba(0,0,0,0.5)' }} />
-                ) : (
-                    <Box sx={{ width: 140, height: 140, borderRadius: '50%', border: `2px solid ${PALETTE.primary.main}`, display: 'flex', alignItems: 'center', justifyContent: 'center', mx: 'auto', bgcolor: 'rgba(0,0,0,0.3)' }}><AccessibilityNewIcon sx={{ fontSize: 50 }} /></Box>
-                )}
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 2, my: 3 }}>
+                {displayItems.map((displayItem, idx) => (
+                    <Box key={idx} sx={{ textAlign: 'center', flex: '1 1 140px', maxWidth: 160 }}>
+                        {displayItem.img || displayItem.imageUrl ? (
+                            <Avatar src={displayItem.img || displayItem.imageUrl} sx={{ width: 100, height: 100, border: `2px solid ${PALETTE.primary.main}`, mx: 'auto', mb: 1, boxShadow: '0 0 15px rgba(0,0,0,0.5)' }} />
+                        ) : (
+                            <Box sx={{ width: 100, height: 100, borderRadius: '50%', border: `2px solid ${PALETTE.primary.main}`, display: 'flex', alignItems: 'center', justifyContent: 'center', mx: 'auto', mb: 1, bgcolor: 'rgba(0,0,0,0.3)' }}>
+                                <AccessibilityNewIcon sx={{ fontSize: 40 }} />
+                            </Box>
+                        )}
+                        <Typography variant="subtitle1" sx={{ fontWeight: 'bold', lineHeight: 1.2 }}>{displayItem.name || displayItem.brand}</Typography>
+                        <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>{displayItem.subCategory} {displayItem.color ? `• ${displayItem.color}` : ''}</Typography>
+                        
+                        <Chip 
+                            icon={<FingerprintIcon />} 
+                            label={displayItem.customId || displayItem.id?.substring(0,6)} 
+                            size="small" 
+                            variant="outlined"
+                            sx={{ mb: 0.5, borderColor: 'rgba(255,255,255,0.1)', color: 'text.secondary', fontSize: '0.65rem', height: 20 }} 
+                        />
+                        
+                         {displayItem.location && (
+                            <Chip label={`${displayItem.location}`} size="small" sx={{ display: 'flex', mx: 'auto', maxWidth: 'fit-content', bgcolor: 'rgba(255,255,255,0.1)', fontSize: '0.65rem', height: 20 }} />
+                         )}
+                    </Box>
+                ))}
             </Box>
-            
-            <Typography variant="h5" gutterBottom sx={{ fontWeight: 'bold' }}>{displayItem.name || displayItem.brand}</Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>{displayItem.subCategory} • {displayItem.color}</Typography>
-            
-            {/* ID Display */}
-            <Chip 
-                icon={<FingerprintIcon />} 
-                label={`ID: ${displayItem.customId || displayItem.id}`} 
-                size="small" 
-                variant="outlined"
-                sx={{ mb: 1, borderColor: 'rgba(255,255,255,0.1)', color: 'text.secondary' }} 
-            />
-            
-            {/* Location Hint if available */}
-             {displayItem.location && (
-                <Chip label={`Lagerort: ${displayItem.location}`} size="small" sx={{ mb: 3, display: 'flex', mx: 'auto', maxWidth: 'fit-content', bgcolor: 'rgba(255,255,255,0.1)' }} />
-             )}
 
             <Alert severity="info" sx={{ mb: 3, textAlign: 'left', bgcolor: 'rgba(2, 136, 209, 0.1)' }}>
-                Item suchen und anziehen. Danach Session starten.
+                Item(s) suchen und anziehen. Danach Session starten.
             </Alert>
 
             {/* ACTION BUTTONS */}
