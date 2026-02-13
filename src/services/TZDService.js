@@ -84,9 +84,13 @@ export const startTZD = async (userId, targetItems, durationMatrix, overrideDura
 
     // Historie für alle betroffenen Items vermerken
     for (const item of itemsArray) {
+        const messageText = overrideDurationMinutes 
+            ? `Straf-TZD wegen Fluchtversuch gestartet (Dauer: ${Math.round(targetDuration)} Min).`
+            : `Zeitloses Diktat gestartet (Dauer: ${Math.round(targetDuration)} Min).`;
+            
         await addItemHistoryEntry(userId, item.id, {
             type: 'tzd_briefing',
-            message: `Zeitloses Diktat gestartet (Dauer: ${Math.round(targetDuration)} Min).`,
+            message: messageText,
             isPenalty: !!overrideDurationMinutes
         });
     }
@@ -105,21 +109,28 @@ export const triggerEvasionPenalty = async (userId, instructionItems) => {
             return false;
         }
 
-        let maxWallHours = 12; 
-        const settingsSnap = await getDoc(doc(db, `users/${userId}/settings/protocol`));
+        let baseDurationMinutes = 120; // Fallback
+        const dailySnap = await getDoc(doc(db, `users/${userId}/status/dailyInstruction`));
         
-        if (settingsSnap.exists()) {
-            const data = settingsSnap.data();
-            if (data.tzd && Array.isArray(data.tzd.durationMatrix)) {
-                const maxInMatrix = Math.max(...data.tzd.durationMatrix.map(z => z.max || z.maxHours || 0));
-                if (maxInMatrix > 0) maxWallHours = maxInMatrix;
+        if (dailySnap.exists()) {
+            const data = dailySnap.data();
+            if (data.originalDurationMinutes) {
+                baseDurationMinutes = data.originalDurationMinutes;
+            } else if (data.durationMinutes) {
+                baseDurationMinutes = data.durationMinutes;
             }
         }
 
-        const penaltyMinutes = Math.round((maxWallHours * TZD_CONFIG.DEFAULT_MULTIPLIER) * 60);
+        const penaltyMinutes = Math.round(baseDurationMinutes * TZD_CONFIG.DEFAULT_MULTIPLIER);
         console.log(`Evasion Detected. Triggering TZD Penalty: ${penaltyMinutes} minutes.`);
 
         await startTZD(userId, instructionItems, null, penaltyMinutes);
+        
+        await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), {
+            evasionPenaltyTriggered: true,
+            tzdDurationMinutes: penaltyMinutes
+        });
+        
         await registerPunishment(userId, "Fluchtversuch vor Anweisung (Blockade umgangen)", 0); 
 
         return true;
@@ -174,11 +185,11 @@ export const checkForTZDTrigger = async (userId, activeSessions, items) => {
 
     let inWindow = false;
     if (day === 0) { 
-        if (hour === 23 && min >= 30) inWindow = true;
+        if (hour === 23 && min >= 0) inWindow = true;
     } else if (day >= 1 && day <= 3) { 
         inWindow = true;
     } else if (day === 4) { 
-        if (hour < 12 || (hour === 12 && min <= 30)) inWindow = true;
+        if (hour < 12) inWindow = true;
     }
 
     if (!inWindow) return false;
