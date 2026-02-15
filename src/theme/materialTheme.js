@@ -1,51 +1,51 @@
 import { createTheme } from '@mui/material/styles';
 
 /**
- * ANDROID 16 / MATERIAL DESIGN 3 - DEEP DARK THEME
+ * ANDROID 16 / MATERIAL DESIGN 3 - DARK BOUDOIR THEME
  * Basierend auf der Google Material 3 Spezifikation.
- * Seed Color: #00E5FF (Cyan) -> Generierte Tonal Palette für Dark Mode.
+ * Seed Color: Edles Magenta / Roségold -> Generierte Tonal Palette für Dark Mode.
  */
 
 const m3Tokens = {
   // PRIMARY: Prominenteste Aktionen (FAB, Filled Buttons)
   // M3 nutzt in Dark Mode Pastelltöne (Tone 80), keine Neonfarben.
-  primary: '#EBE7E1',          // Ein technisches, modernes Porcelain
-  onPrimary: '#522302',        // Dunkler Text auf Primary
-  primaryContainer: '#321200', // Container Hintergrund
-  onPrimaryContainer: '#FFF8F4', // Text/Icon im Container
+  primary: '#FFAEE3',          // Edles Magenta / Fuchsia
+  onPrimary: '#5C114F',        // Dunkler Text auf Primary
+  primaryContainer: '#7E2A6F', // Container Hintergrund
+  onPrimaryContainer: '#FFD7F3', // Text/Icon im Container
 
   // SECONDARY: Weniger dominante Elemente (Filter Chips, Toggles)
-  secondary: '#B3CCBE',
-  onSecondary: '#1F352B',
-  secondaryContainer: '#354B41',
-  onSecondaryContainer: '#CFE9D9',
+  secondary: '#E6C1A4',        // Roségold / Champagner
+  onSecondary: '#432C17',
+  secondaryContainer: '#5E422C',
+  onSecondaryContainer: '#FFDCC1',
 
   // TERTIARY: Akzente (hier: für den Fetisch-Kontext / Warnungen)
-  tertiary: '#FFB2BC',         // Kühles Pink/Rot
-  onTertiary: '#660023',
-  tertiaryContainer: '#900035',
-  onTertiaryContainer: '#FFD9DF',
+  tertiary: '#FFB2BA',         // Kühles Pink/Rot -> Dunkles Weinrot / Bordeaux Basis
+  onTertiary: '#670020',
+  tertiaryContainer: '#910031',
+  onTertiaryContainer: '#FFD9DC',
 
-  error: '#FFB4AB',
+  error: '#FFB4AB',            // Karminrot (Crimson)
   onError: '#690005',
   errorContainer: '#93000A',
   onErrorContainer: '#FFDAD6',
 
   // SURFACES: Die Hierarchie der Tiefe (Neutral)
   // Android 16 Deep Dark: Fast Schwarz, aber leicht getönt.
-  background: '#0F1211',       
-  onBackground: '#DEE4E0',
-  surface: '#0F1211',
-  onSurface: '#DEE4E0',
+  background: '#0A050A',       // Extrem tiefes Aubergine/Pflaume
+  onBackground: '#EEDEEA',
+  surface: '#0A050A',
+  onSurface: '#EEDEEA',
   
   // SURFACE CONTAINER (Ersetzt die alte "Elevation" Logik)
-  surfaceContainerLow: '#171D1A',   // Hintergrund für Listen
-  surfaceContainer: '#1B211E',      // Standard Cards
-  surfaceContainerHigh: '#252B28',  // Dialoge, Navigation
-  surfaceContainerHighest: '#303633', // Input Fields
+  surfaceContainerLow: '#140A14',   // Hintergrund für Listen
+  surfaceContainer: '#1B0E1B',      // Standard Cards (Warmes Dunkelgrau-Violett)
+  surfaceContainerHigh: '#241324',  // Dialoge, Navigation
+  surfaceContainerHighest: '#2F1A2F', // Input Fields
 
-  outline: '#89938D',
-  outlineVariant: '#404944',
+  outline: '#8B728B',
+  outlineVariant: '#4A374A',
 };
 
 export const materialTheme = createTheme({
