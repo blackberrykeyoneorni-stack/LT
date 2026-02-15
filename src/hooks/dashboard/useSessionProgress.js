@@ -71,37 +71,25 @@ export default function useSessionProgress(currentUser, items) {
         return () => unsub();
     }, [currentUser]);
 
-    // 2. NACHT-COMPLIANCE LADEN (VIA SESSION END-TIME)
+    // 2. NACHT-COMPLIANCE LADEN (VIA STATUS DOC)
+    // Striktes Lauschen auf das durch Checkpoints verifizierte Dokument
     useEffect(() => {
         if (!currentUser) return;
         
-        const startOfDay = new Date();
-        startOfDay.setHours(0,0,0,0);
-
-        const qNightEnded = query(
-            collection(db, `users/${currentUser.uid}/sessions`),
-            where('type', '==', 'instruction'),
-            where('endTime', '>=', startOfDay)
-        );
-
-        const unsub = onSnapshot(qNightEnded, (snapshot) => {
-            const hasEndedNightSession = snapshot.docs.some(doc => {
-                const data = doc.data();
-                return data.period && data.period.toLowerCase().includes('night');
-            });
-
-            if (hasEndedNightSession) {
-                setNightCompliance(true);
-            } else {
-                // Fallback: Status Doc prüfen
-                getDoc(doc(db, `users/${currentUser.uid}/status/nightCompliance`)).then(snap => {
-                   if(snap.exists() && snap.data().success && snap.data().date === new Date().toISOString().split('T')[0]) {
-                       setNightCompliance(true);
-                   } else {
-                       setNightCompliance(false);
-                   }
-                });
-            }
+        const todayStr = new Date().toISOString().split('T')[0];
+        const statusRef = doc(db, `users/${currentUser.uid}/status/nightCompliance`);
+        
+        const unsub = onSnapshot(statusRef, (snap) => {
+           if(snap.exists()) {
+               const data = snap.data();
+               if (data.date === todayStr) {
+                   setNightCompliance(data.success);
+               } else {
+                   setNightCompliance(null); // Noch nicht verifiziert für heute
+               }
+           } else {
+               setNightCompliance(null);
+           }
         });
 
         return () => unsub();
@@ -142,8 +130,8 @@ export default function useSessionProgress(currentUser, items) {
 
             snapshot.docs.forEach(doc => {
                 const data = doc.data();
-                // Nacht-Sessions ignorieren für den Tages-Balken
-                const isNight = data.period && data.period.toLowerCase().includes('night');
+                // FIX: Korrekter Abruf über periodId
+                const isNight = data.periodId && data.periodId.toLowerCase().includes('night');
 
                 if (!isNight && data.endTime) {
                     const duration = (data.endTime.toDate() - data.startTime.toDate()) / 60000;
@@ -162,13 +150,14 @@ export default function useSessionProgress(currentUser, items) {
     // 4. Progress Berechnung (MIT 23:00 UHR RESET LOGIK)
     const calculateProgress = () => {
         const now = new Date();
+        const targetMinutes = dailyTargetHours * 60;
         
         // RESET-CHECK: Ist es nach 23:00 Uhr (oder der eingestellten Startzeit)?
         // Wenn ja, ist der "Tag" vorbei und der Balken wird auf 0 gesetzt.
         if (now.getHours() >= nightStartHour) {
             return {
                 currentContinuousMinutes: 0,
-                dailyTargetMinutes: dailyTargetHours * 60,
+                dailyTargetMinutes: targetMinutes,
                 percentage: 0,
                 isDailyGoalMet: false, // Tag vorbei -> Reset
                 isLive: false,
@@ -176,11 +165,24 @@ export default function useSessionProgress(currentUser, items) {
             };
         }
 
+        // --- HARD BLOCK: TAGES-ERFOLG IST VON DER NACHT ABHÄNGIG ---
+        if (nightCompliance === false) {
+            return {
+                currentContinuousMinutes: 0, // Zeit friert bei 0 ein
+                dailyTargetMinutes: targetMinutes,
+                percentage: 0,
+                isDailyGoalMet: false,
+                isLive: false,
+                nightCompliance
+            };
+        }
+
         // --- Normale Berechnung (vor 23:00 Uhr) ---
         
+        // FIX: Korrekter Abruf über periodId
         const activeInstruction = activeSessions.find(s => 
             s.type === 'instruction' && 
-            (!s.period || !s.period.includes('night'))
+            (!s.periodId || !s.periodId.includes('night'))
         );
 
         let currentMinutes = 0;
@@ -194,7 +196,6 @@ export default function useSessionProgress(currentUser, items) {
             currentMinutes = Math.floor(completedTodayMinutes);
         }
 
-        const targetMinutes = dailyTargetHours * 60;
         const isGoalMet = currentMinutes >= targetMinutes;
 
         if (!isLive && !isGoalMet) {
