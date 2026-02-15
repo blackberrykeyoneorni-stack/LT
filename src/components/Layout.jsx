@@ -114,11 +114,11 @@ export default function Layout() {
           }}
           sx={{ bgcolor: 'transparent', height: 70 }}
         >
-          <BottomNavigationAction label="Home" icon={<DashboardIcon />} sx={{ '&.Mui-selected': { color: PALETTE.primary.main } }} />
-          <BottomNavigationAction label="Items" icon={<CheckroomIcon />} sx={{ '&.Mui-selected': { color: PALETTE.accents.purple } }} />
-          <BottomNavigationAction label="Stats" icon={<EqualizerIcon />} sx={{ '&.Mui-selected': { color: PALETTE.accents.green } }} />
-          <BottomNavigationAction label="Kalender" icon={<CalendarMonthIcon />} sx={{ '&.Mui-selected': { color: PALETTE.accents.gold } }} />
-          <BottomNavigationAction label="Optionen" icon={<SettingsIcon />} sx={{ '&.Mui-selected': { color: PALETTE.text.secondary } }} />
+          <BottomNavigationAction label="Home" icon={<DashboardIcon />} sx={{ '&.Mui-selected': { color: PALETTE.primary.main, opacity: 0.85 } }} />
+          <BottomNavigationAction label="Items" icon={<CheckroomIcon />} sx={{ '&.Mui-selected': { color: PALETTE.primary.main, opacity: 0.85 } }} />
+          <BottomNavigationAction label="Stats" icon={<EqualizerIcon />} sx={{ '&.Mui-selected': { color: PALETTE.primary.main, opacity: 0.85 } }} />
+          <BottomNavigationAction label="Kalender" icon={<CalendarMonthIcon />} sx={{ '&.Mui-selected': { color: PALETTE.primary.main, opacity: 0.85 } }} />
+          <BottomNavigationAction label="Optionen" icon={<SettingsIcon />} sx={{ '&.Mui-selected': { color: PALETTE.primary.main, opacity: 0.85 } }} />
         </BottomNavigation>
       </Paper>
     </Box>

@@ -328,40 +328,40 @@ export const confirmTZDBriefing = async (userId) => {
     }
 };
 
-export const terminateTZD = async (userId, success = true) => {
+export const terminateTZD = async (userId, success = true, customResult = null) => {
     const endTime = serverTimestamp();
     const status = await getTZDStatus(userId);
     
+    const finalResult = customResult ? customResult : (success ? 'completed' : 'failed');
+
     await updateDoc(doc(db, `users/${userId}/status/tzd`), { 
         isActive: false, 
         endTime: endTime, 
-        result: success ? 'completed' : 'failed' 
+        result: finalResult 
     });
 
-    if (success) {
-        await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), {
-            evasionPenaltyTriggered: false
-        });
+    // BUGFIX: tzdExecuted muss IMMER gesetzt werden, egal ob success oder failed.
+    // Sonst triggert die laufende Session bei false sofort das nächste TZD in der Dashboard Schleife!
+    try {
+        const q = query(
+            collection(db, `users/${userId}/sessions`),
+            where('type', '==', 'instruction'),
+            where('endTime', '==', null)
+        );
+        const querySnapshot = await getDocs(q);
+        if (!querySnapshot.empty) {
+            const activeSessionDoc = querySnapshot.docs[0];
+            await updateDoc(activeSessionDoc.ref, {
+                tzdExecuted: true,
+                tzdDurationMinutes: status?.accumulatedMinutes || status?.targetDurationMinutes || 0
+            });
+        }
+    } catch (e) { console.error("Fehler beim Setzen von tzdExecuted:", e); }
 
+    if (success) {
         if (status && status.targetDurationMinutes >= 1440) {
             await setImmunity(userId, 24);
         }
-
-        try {
-            const q = query(
-                collection(db, `users/${userId}/sessions`),
-                where('type', '==', 'instruction'),
-                where('endTime', '==', null)
-            );
-            const querySnapshot = await getDocs(q);
-            if (!querySnapshot.empty) {
-                const activeSessionDoc = querySnapshot.docs[0];
-                await updateDoc(activeSessionDoc.ref, {
-                    tzdExecuted: true,
-                    tzdDurationMinutes: status.accumulatedMinutes || status.targetDurationMinutes || 0
-                });
-            }
-        } catch (e) { console.error(e); }
     }
 
     if (status && status.lockedItems) {
@@ -377,7 +377,7 @@ export const terminateTZD = async (userId, success = true) => {
                 type: success ? 'tzd_completed' : 'tzd_failed',
                 message: success 
                     ? `Zeitloses Diktat erfolgreich beendet (${finalMinutes} Min getragen).`
-                    : "Zeitloses Diktat abgebrochen oder gescheitert."
+                    : `Zeitloses Diktat abgebrochen (${finalResult}).`
             });
         }
     }
@@ -385,7 +385,7 @@ export const terminateTZD = async (userId, success = true) => {
 
 export const emergencyBailout = async (userId) => {
     await registerPunishment(userId, "NOT-ABBRUCH: Zeitloses Diktat verweigert", 90);
-    await terminateTZD(userId, false);
+    await terminateTZD(userId, false, 'aborted_emergency');
 };
 
 export const convertTZDToPlugPunishment = async (userId, allItems) => {
@@ -410,16 +410,15 @@ export const convertTZDToPlugPunishment = async (userId, allItems) => {
             penaltyItem.id
         );
 
+        // BUGFIX: evasionPenaltyTriggered wird NICHT mehr auf false gesetzt!
+        // Das löschte den Flucht-Flag und ließ die 30-Min-Falle des Dashboards sofort wieder zuschnappen.
         await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), {
-            evasionPenaltyTriggered: false,
             tzdDurationMinutes: 0,
             tzdStartTime: null
         });
         
-        await updateDoc(doc(db, `users/${userId}/status/tzd`), {
-            isActive: false,
-            result: 'aborted_punished'
-        });
+        // BUGFIX: Nutzt nun die offizielle terminateTZD Methode, damit Session-Handling (tzdExecuted) sauber läuft
+        await terminateTZD(userId, false, 'aborted_punished');
 
         return { success: true, item: penaltyItem.name };
     } catch (e) {
