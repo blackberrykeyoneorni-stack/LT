@@ -5,9 +5,12 @@ import { PALETTE } from '../../theme/obsidianDesign';
 
 export default function ProgressBar({ currentMinutes, targetHours, isGoalMetToday, progressData }) {
     
-    const targetMinutes = targetHours * 60;
+    // Zielzeit = Ursprungsziel (aus Protokoll) minus erkauften Rabatt
+    let targetMinutes = (targetHours * 60) - (progressData?.discountMinutes || 0);
+    if (targetMinutes < 0) targetMinutes = 0; // Fallback, falls Rabatt größer als Ziel ist
+
     // Balken darf max 100% sein für die Anzeige
-    const progressPercent = Math.min(100, Math.max(0, (currentMinutes / targetMinutes) * 100));
+    const progressPercent = targetMinutes > 0 ? Math.min(100, Math.max(0, (currentMinutes / targetMinutes) * 100)) : 100;
     
     // Status der Nacht extrahieren
     const nightFailed = progressData?.nightCompliance === false;
@@ -46,15 +49,22 @@ export default function ProgressBar({ currentMinutes, targetHours, isGoalMetToda
         >
             {/* Header Zeile: Titel und Zeit */}
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
-                <Typography variant="body2" sx={{ color: isStrictlySuccessful ? activeColor : 'text.secondary', letterSpacing: 1, fontWeight: 'bold' }}>
-                    TAGESZIEL
-                </Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                    <Typography variant="body2" sx={{ color: isStrictlySuccessful ? activeColor : 'text.secondary', letterSpacing: 1, fontWeight: 'bold' }}>
+                        TAGESZIEL
+                    </Typography>
+                    {/* NEU: Visueller Hinweis auf TimeBank-Rabatt */}
+                    {progressData?.discountMinutes > 0 && (
+                        <Typography variant="caption" sx={{ color: PALETTE.primary.main, ml: 1, fontWeight: 'bold' }}>
+                            (-{progressData.discountMinutes}m TimeBank)
+                        </Typography>
+                    )}
+                </Box>
                 
                 <Box sx={{ textAlign: 'right' }}>
                     <Typography variant="h6" sx={{ fontWeight: 'bold', lineHeight: 1, color: isStrictlySuccessful ? '#fff' : 'text.primary' }}>
                         {formatTime(currentMinutes)}
                     </Typography>
-                    {/* FORMAT-FIX: targetHours wird nun in targetMinutes umgerechnet und ebenfalls formatiert */}
                     <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                         von {formatTime(targetMinutes)}
                     </Typography>

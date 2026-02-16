@@ -50,40 +50,75 @@ export const checkInsolvency = async (userId, type) => {
 };
 
 /**
- * Zieht Credits ab (Spending).
- * Im "Debt Mode" wird hier der Strafaufschlag berechnet.
+ * Zieht Credits ab (Spending) und registriert den Discount für den Balken.
+ * HYBRID-LOGIK: Prüft die aktuelle Tagesanweisung und zieht ggf. beide Konten ab.
  */
-export const spendCredits = async (userId, amountMinutes, type) => {
+export const spendCredits = async (userId, amountMinutes, requestedType) => {
     if (amountMinutes <= 0) return true;
     
-    const field = type === 'nylon' ? 'nc' : 'lc';
     const docRef = doc(db, `users/${userId}/status/timeBank`);
     const balanceSnap = await getDoc(docRef);
-    const currentBalance = balanceSnap.exists() ? balanceSnap.data()[field] : 0;
+    const data = balanceSnap.exists() ? balanceSnap.data() : { nc: 0, lc: 0 };
+
+    // 1. Kontext-Prüfung: Welche Items werden heute getragen?
+    const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
+    const instrSnap = await getDoc(instrRef);
+    
+    let chargeNc = false;
+    let chargeLc = false;
+
+    if (instrSnap.exists() && instrSnap.data().items) {
+        const items = instrSnap.data().items;
+        items.forEach(i => {
+            const cat = (i.mainCategory || '').toLowerCase();
+            const sub = (i.subCategory || '').toLowerCase();
+            const name = (i.name || '').toLowerCase();
+            if (cat.includes('nylon') || sub.includes('strumpf') || name.includes('strumpf')) chargeNc = true;
+            if (cat.includes('dessous') || sub.includes('höschen') || cat.includes('lingerie') || cat.includes('wäsche') || name.includes('höschen')) chargeLc = true;
+        });
+    }
+
+    // Fallback, falls keine Items da sind (dann nutzen wir den Button-Typ aus der UI)
+    if (!chargeNc && !chargeLc) {
+        if (requestedType === 'nylon') chargeNc = true;
+        else chargeLc = true;
+    }
 
     let finalCost = amountMinutes;
+    const updates = {};
 
-    // DEBT LOGIK: Wenn wir bereits im Minus sind ODER durch die Buchung ins Minus rutschen
-    if (currentBalance < 0 || (currentBalance - amountMinutes) < 0) {
-        // Wir berechnen den Aufschlag auf den TEIL, der Kredit ist.
-        // Vereinfachung: Sobald man den Dispo nutzt, kostet ALLES 50% mehr.
-        // Das ist die Strafe für schlechtes Haushalten.
-        finalCost = Math.round(amountMinutes * DEBT_CONFIG.OVERDRAFT_PENALTY);
-        console.log(`TimeBank: Debt Penalty applied. Base: ${amountMinutes}, Cost: ${finalCost}`);
+    // Helper: Berechnet Aufschlag bei Dispo-Nutzung
+    const calcCost = (balance) => {
+        if (balance < 0 || (balance - amountMinutes) < 0) {
+            return Math.round(amountMinutes * DEBT_CONFIG.OVERDRAFT_PENALTY);
+        }
+        return amountMinutes;
+    };
+
+    if (chargeNc) {
+        const costNc = calcCost(data.nc);
+        if ((data.nc - costNc) < -DEBT_CONFIG.MAX_DEBT_MINUTES) throw new Error("INSOLVENCY_LIMIT_REACHED");
+        updates.nc = increment(-Math.abs(costNc));
+    }
+    if (chargeLc) {
+        const costLc = calcCost(data.lc);
+        if ((data.lc - costLc) < -DEBT_CONFIG.MAX_DEBT_MINUTES) throw new Error("INSOLVENCY_LIMIT_REACHED");
+        updates.lc = increment(-Math.abs(costLc));
+    }
+
+    updates.lastTransaction = serverTimestamp();
+
+    // 2. Atomares Update der TimeBank
+    await updateDoc(docRef, updates);
+
+    // 3. Discount an den Fortschrittsbalken melden (dailyInstruction)
+    if (instrSnap.exists()) {
+        await updateDoc(instrRef, {
+            discountMinutes: increment(amountMinutes)
+        });
     }
     
-    // Check Limit vor Buchung (doppelte Sicherheit)
-    if ((currentBalance - finalCost) < -DEBT_CONFIG.MAX_DEBT_MINUTES) {
-        throw new Error("INSOLVENCY_LIMIT_REACHED");
-    }
-
-    // Atomares Update
-    await updateDoc(docRef, {
-        [field]: increment(-Math.abs(finalCost)),
-        lastTransaction: serverTimestamp()
-    });
-    
-    return finalCost; // Gibt die tatsächlichen Kosten zurück (für UI Anzeige)
+    return finalCost; 
 };
 
 /**
@@ -95,12 +130,11 @@ export const calculateEarnedCredits = (session) => {
     if (!session || !session.startTime || !session.endTime) return 0;
 
     // 1. HARTE SPERRE: Prüfen auf Straf-Indikatoren
-    // Wenn es eine Bestrafung ist, ein Straf-TZD oder eine erzwungene Evasion -> 0 Credits.
     if (
-        session.type === 'punishment' ||       // Expliziter Straf-Typ
-        session.isPunitive === true ||         // Generelles Straf-Flag
-        session.evasionPenaltyTriggered === true || // Flucht-Versuch Flag
-        session.source === 'gamble_loss'       // Glücksspiel-Verlust
+        session.type === 'punishment' ||       
+        session.isPunitive === true ||         
+        session.evasionPenaltyTriggered === true || 
+        session.source === 'gamble_loss'       
     ) {
         console.log("TimeBank: PUNITIVE SESSION DETECTED. 0 Credits awarded.");
         return 0;
@@ -118,16 +152,6 @@ export const calculateEarnedCredits = (session) => {
 
 /**
  * Fügt Credits hinzu (Earning / Tilgung).
- * Kurs: 3 Minuten "Overtime" = 1 Credit.
- * ABER: Im Debt-Mode (Minus) zählt jede Minute 1:1 zur Tilgung? 
- * NEIN: Wir bleiben beim harten 1:3 Kurs. Schuldenabbau ist harte Arbeit.
- * User muss 3 Min tragen um 1 Min Schuld zu tilgen? Das wäre extrem brutal.
- * * KORREKTUR: Um "56 Stunden am Stück" zu tragen, muss der Kurs 1:1 sein bei Tilgung.
- * Wenn der Kurs 1:3 wäre, müsstest du für 48h Schulden -> 144 Stunden tragen.
- * * Entscheidung: 
- * - Im Plus: Earning Ratio 1:3 (Luxus erarbeiten ist schwer).
- * - Im Minus (Tilgung): Ratio 1:1 (Schulden sind Nomimalwert).
- * Der "Strafaufschlag" passierte ja schon beim Leihen (x1.5).
  */
 export const addCredits = async (userId, rawMinutes, type) => {
     const field = type === 'nylon' ? 'nc' : 'lc';
@@ -141,8 +165,6 @@ export const addCredits = async (userId, rawMinutes, type) => {
 
     if (currentBalance < 0) {
         // TILGUNG: 1:1 (Jede Minute zählt, um aus dem Loch zu kommen)
-        // Aber Achtung: Wenn wir die Nulllinie kreuzen, wechselt der Kurs.
-        // Vereinfachung: Alles wird 1:1 gutgeschrieben, wenn Startsaldo negativ.
         earnedCredits = rawMinutes;
     } else {
         // VERDIENST: 1:3 (Luxus ist teuer)
@@ -162,8 +184,8 @@ export const addCredits = async (userId, rawMinutes, type) => {
 };
 
 /**
- * WIRD VOM SYSTEM EINMAL TÄGLICH AUFGERUFEN (z.B. beim ersten App-Öffnen am Tag)
- * Berechnet Zinsen auf negative Salden.
+ * WIRD VOM FRONTEND AUDITOR AUFGERUFEN.
+ * Berechnet rückwirkend Zinseszins auf negative Salden.
  */
 export const applyDailyInterest = async (userId) => {
     const docRef = doc(db, `users/${userId}/status/timeBank`);
@@ -172,44 +194,44 @@ export const applyDailyInterest = async (userId) => {
     if (!docSnap.exists()) return;
     
     const data = docSnap.data();
+    
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+
+    const lastInterest = data.lastInterestDate ? data.lastInterestDate.toDate() : new Date();
+    lastInterest.setHours(0, 0, 0, 0);
+
+    const diffTime = Math.abs(now - lastInterest);
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+
+    if (diffDays < 1) return; // Noch kein Tag vergangen
+
     const updates = {};
     let interestApplied = false;
 
-    // Datum prüfen, um doppelte Zinsen am selben Tag zu verhindern
-    const lastInterestDate = data.lastInterestDate ? data.lastInterestDate.toDate().toDateString() : null;
-    const today = new Date().toDateString();
-
-    if (lastInterestDate === today) return; // Schon gelaufen heute
-
-    // Nylon Zinsen
-    if (data.nc < 0) {
-        const interest = Math.round(data.nc * DEBT_CONFIG.DAILY_INTEREST_RATE); // Zins ist negativ (erhöht Schuld)
-        // Bsp: -100 * 0.1 = -10. Neu: -110.
-        updates.nc = increment(interest); // interest ist negativ, also addieren wir negativen Wert
+    // RÜCKWIRKENDE ZINSESZINS BERECHNUNG (Compound)
+    let newNc = data.nc;
+    if (newNc < 0) {
+        newNc = Math.floor(newNc * Math.pow(1 + DEBT_CONFIG.DAILY_INTEREST_RATE, diffDays));
+        updates.nc = newNc;
         interestApplied = true;
     }
 
-    // Lingerie Zinsen
-    if (data.lc < 0) {
-        const interest = Math.round(data.lc * DEBT_CONFIG.DAILY_INTEREST_RATE);
-        updates.lc = increment(interest);
+    let newLc = data.lc;
+    if (newLc < 0) {
+        newLc = Math.floor(newLc * Math.pow(1 + DEBT_CONFIG.DAILY_INTEREST_RATE, diffDays));
+        updates.lc = newLc;
         interestApplied = true;
     }
 
-    if (interestApplied || lastInterestDate !== today) {
-        updates.lastInterestDate = serverTimestamp();
-        await updateDoc(docRef, updates);
-        if (interestApplied) console.log("TimeBank: Daily Interest applied.");
-    }
+    updates.lastInterestDate = serverTimestamp();
+    await updateDoc(docRef, updates);
+
+    if (interestApplied) console.log(`TimeBank: Applied ${diffDays} days of retroactive interest.`);
 };
 
 /**
- * Wöchentliche Inflation für positive Bestände.
- * Reduziert Guthaben um 5%, um Horten zu verhindern.
- * * UPDATE (Smart Logic):
- * Anstatt hart auf "Sonntag" zu prüfen (was fehlschlägt, wenn die App sonntags nicht geöffnet wird),
- * prüfen wir, ob seit dem letzten Lauf 7 Tage vergangen sind.
- * So wird die Inflation beim nächsten Login nachgeholt, falls der Termin verpasst wurde.
+ * Wöchentliche Inflation für positive Bestände (Rückwirkend).
  */
 export const applyWeeklyInflation = async (userId) => {
     try {
@@ -219,52 +241,50 @@ export const applyWeeklyInflation = async (userId) => {
         if (!docSnap.exists()) return;
         
         const data = docSnap.data();
-        
-        // --- INTELLIGENTE ZEIT-PRÜFUNG ---
         const now = new Date();
-        // Hole das Datum des letzten Laufs (oder Epoche 1970, falls nie gelaufen)
-        const lastInflation = data.lastInflationAt ? data.lastInflationAt.toDate() : new Date(0);
+        const lastInflation = data.lastInflationAt ? data.lastInflationAt.toDate() : new Date();
 
-        // Berechne Differenz in Tagen
         const diffTime = Math.abs(now - lastInflation);
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+        const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24)); 
+        const weeksPassed = Math.floor(diffDays / 7);
 
-        // Regel: Wenn weniger als 7 Tage vergangen sind, brechen wir ab.
-        // Das stellt sicher, dass es nur 1x pro Woche passiert, egal wann man sich einloggt.
-        if (diffDays < 7) {
-            // Noch keine Woche rum -> Abbruch
-            return; 
-        }
-        // --------------------------------
+        if (weeksPassed < 1) return; 
 
         const updates = {};
         let inflationApplied = false;
 
-        // Inflation nur auf POSITIVE Bestände anwenden (nc = Nylon, lc = Lingerie/Dessous)
-        if (data.nc > 0) {
-            const loss = Math.ceil(data.nc * DEBT_CONFIG.INFLATION_RATE);
-            updates.nc = increment(-loss);
+        // Inflation rückwirkend auf POSITIVE Bestände (Compound Loss)
+        let newNc = data.nc;
+        if (newNc > 0) {
+            newNc = Math.floor(newNc * Math.pow(1 - DEBT_CONFIG.INFLATION_RATE, weeksPassed));
+            updates.nc = newNc;
             inflationApplied = true;
         }
 
-        if (data.lc > 0) {
-            const loss = Math.ceil(data.lc * DEBT_CONFIG.INFLATION_RATE);
-            updates.lc = increment(-loss);
+        let newLc = data.lc;
+        if (newLc > 0) {
+            newLc = Math.floor(newLc * Math.pow(1 - DEBT_CONFIG.INFLATION_RATE, weeksPassed));
+            updates.lc = newLc;
             inflationApplied = true;
         }
 
-        // Wir updaten den Zeitstempel IMMER, wenn der 7-Tage-Check bestanden wurde.
-        // Damit beginnt die neue 7-Tage-Periode ab JETZT.
         updates.lastInflationAt = serverTimestamp();
-        
         await updateDoc(docRef, updates);
 
-        if (inflationApplied) {
-            console.log("TimeBank: Weekly 5% Inflation applied to positive balances.");
-        } else {
-            console.log("TimeBank: Weekly Check run (No positive balance to tax).");
-        }
+        if (inflationApplied) console.log(`TimeBank: Applied ${weeksPassed} weeks of retroactive inflation.`);
     } catch (e) {
         console.error("Fehler bei der Credit-Inflation:", e);
+    }
+};
+
+/**
+ * MASTER-AUDITOR: Wird vom Dashboard beim Start aufgerufen.
+ */
+export const runTimeBankAuditor = async (userId) => {
+    try {
+        await applyDailyInterest(userId);
+        await applyWeeklyInflation(userId);
+    } catch (e) {
+        console.error("Fehler im TimeBank Auditor:", e);
     }
 };

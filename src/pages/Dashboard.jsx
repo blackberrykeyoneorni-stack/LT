@@ -21,6 +21,7 @@ import { checkForTZDTrigger, getTZDStatus, triggerEvasionPenalty } from '../serv
 import { registerRelease as apiRegisterRelease } from '../services/ReleaseService'; 
 import { startSession as startSessionService, stopSession as stopSessionService } from '../services/SessionService';
 import { checkGambleTrigger, determineGambleStake, rollTheDice, isImmunityActive, recordGambleAction } from '../services/OfferService';
+import { runTimeBankAuditor } from '../services/TimeBankService'; // NEU IMPORTIERT: Der Auditor
 
 // Hooks
 import useSessionProgress from '../hooks/dashboard/useSessionProgress';
@@ -58,7 +59,7 @@ import AnalyticsIcon from '@mui/icons-material/Analytics';
 import LockIcon from '@mui/icons-material/Lock'; 
 import ShieldIcon from '@mui/icons-material/Shield'; 
 import WaterDropIcon from '@mui/icons-material/WaterDrop';
-import TrendingUpIcon from '@mui/icons-material/TrendingUp'; // NEU IMPORTIERT FÜR WOCHEN-DIALOG
+import TrendingUpIcon from '@mui/icons-material/TrendingUp'; 
 
 const REFLECTION_TAGS = [
     "Sicher / Geborgen", "Erregt", "Gedemütigt", "Exponiert / Öffentlich", 
@@ -191,7 +192,6 @@ export default function Dashboard() {
   const [immunityActive, setImmunityActive] = useState(false);
   const [timeBankData, setTimeBankData] = useState({ nc: 0, lc: 0 });
 
-  // NEU: Weekly Report State
   const [weeklyReport, setWeeklyReport] = useState(null);
 
   // Derived State
@@ -211,6 +211,9 @@ export default function Dashboard() {
     if (!currentUser) return;
     const initLoad = async () => {
         try {
+            // FRONTEND AUDITOR TRIGGER
+            await runTimeBankAuditor(currentUser.uid);
+
             const pSnap = await getDoc(doc(db, `users/${currentUser.uid}/settings/preferences`));
             if(pSnap.exists()) setMaxInstructionItems(pSnap.data().maxInstructionItems || 1);
 
@@ -345,7 +348,6 @@ export default function Dashboard() {
                             const acceptedDate = instr.acceptedAt?.toDate ? instr.acceptedAt.toDate() : new Date(instr.acceptedAt);
                             const ageInMinutes = (new Date() - acceptedDate) / 60000;
                             
-                            // NEU: Datenbankabfrage statt momentaner Snapshot-Prüfung
                             const qSession = query(
                                 collection(db, `users/${currentUser.uid}/sessions`),
                                 where('periodId', '==', instr.periodId),
@@ -392,7 +394,6 @@ export default function Dashboard() {
           const ageInMinutes = (Date.now() - acceptedDate) / 60000;
 
           if (ageInMinutes > 30) {
-              // NEU: Datenbankabfrage vor der Bestrafung
               const qSession = query(
                   collection(db, `users/${currentUser.uid}/sessions`),
                   where('periodId', '==', currentInstruction.periodId),
@@ -415,7 +416,6 @@ export default function Dashboard() {
                   setTzdActive(true); 
                   showToast("Zeitüberschreitung nach Eid: Strafe eingeleitet.", "error");
               }
-              // Egal ob bestraft oder erfolgreich beendet: Der Timer hat seinen Zweck erfüllt und wird gestoppt
               clearInterval(timer);
           }
       }, 60000); 

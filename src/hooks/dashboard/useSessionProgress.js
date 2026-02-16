@@ -9,13 +9,11 @@ export default function useSessionProgress(currentUser, items) {
     const [activeSessions, setActiveSessions] = useState([]);
     const [loading, setLoading] = useState(true);
     const [nightCompliance, setNightCompliance] = useState(null);
+    const [discountMinutes, setDiscountMinutes] = useState(0); // NEU: Tages-Rabatt
     
     // Startwert 4 (Fallback)
     const [dailyTargetHours, setDailyTargetHours] = useState(DEFAULT_PROTOCOL_RULES.currentDailyGoal || 4); 
-    
-    // NEU: Wir laden auch den Nacht-Start, um den Reset-Zeitpunkt zu kennen (Default 23 Uhr)
     const [nightStartHour, setNightStartHour] = useState(23); 
-
     const [completedTodayMinutes, setCompletedTodayMinutes] = useState(0);
 
     // 0. AUTOMATISCHER WOCHEN-CHECK
@@ -27,22 +25,19 @@ export default function useSessionProgress(currentUser, items) {
         runUpdate();
     }, [currentUser]);
 
-    // 1. ZIEL & ZEITEN LADEN (MIT LEGACY FALLBACK)
+    // 1. ZIEL & ZEITEN LADEN
     useEffect(() => {
         if (!currentUser) return;
         
-        // Listener auf das NEUE Protokoll-System
         const settingsRef = doc(db, `users/${currentUser.uid}/settings/protocol`);
         
         const unsub = onSnapshot(settingsRef, async (docSnap) => {
             if (docSnap.exists()) {
                 const data = docSnap.data();
                 
-                // A) Ziel laden
                 if (data.currentDailyGoal !== undefined) {
                     setDailyTargetHours(data.currentDailyGoal);
                 } else {
-                    // Fallback auf Legacy Settings, wenn im neuen Doc nichts steht
                     try {
                         const prefSnap = await getDoc(doc(db, `users/${currentUser.uid}/settings/preferences`));
                         if (prefSnap.exists() && prefSnap.data().dailyTargetHours) {
@@ -55,13 +50,11 @@ export default function useSessionProgress(currentUser, items) {
                     }
                 }
 
-                // B) Nacht-Start laden (für den Reset um 23:00 Uhr)
                 if (data.time && data.time.nightStartHour !== undefined) {
                     setNightStartHour(data.time.nightStartHour);
                 }
 
             } else {
-                // Wenn Dokument gar nicht existiert -> Fallback auf Defaults
                 setDailyTargetHours(4);
                 setNightStartHour(23);
             }
@@ -76,7 +69,6 @@ export default function useSessionProgress(currentUser, items) {
     useEffect(() => {
         if (!currentUser) return;
 
-        // Zeitzonensichere Datumserstellung (lokales Datum)
         const getLocalISODate = (date) => {
             const offset = date.getTimezoneOffset() * 60000;
             return new Date(date.getTime() - offset).toISOString().split('T')[0];
@@ -94,7 +86,7 @@ export default function useSessionProgress(currentUser, items) {
                if (data.date === todayStr) {
                    setNightCompliance(data.success);
                } else {
-                   setNightCompliance(null); // Veraltet, noch nicht verifiziert für heute
+                   setNightCompliance(null); 
                    needsVerification = true;
                }
            } else {
@@ -102,8 +94,6 @@ export default function useSessionProgress(currentUser, items) {
                needsVerification = true;
            }
 
-           // --- FRONTEND AUDITOR LOGIK ---
-           // Wenn der Status fehlt, triggert das Dashboard die Prüfung nach 06:00 Uhr selbst
            if (needsVerification) {
                const checkAndVerify = async () => {
                    if (new Date().getHours() >= 6) {
@@ -112,9 +102,8 @@ export default function useSessionProgress(currentUser, items) {
                    }
                };
                
-               checkAndVerify(); // Sofort prüfen
+               checkAndVerify(); 
                
-               // Wenn es noch vor 6 Uhr ist, Interval setzen, damit es exakt um 06:00 Uhr umspringt
                if (new Date().getHours() < 6 && !intervalId) {
                    intervalId = setInterval(checkAndVerify, 60000);
                }
@@ -129,11 +118,24 @@ export default function useSessionProgress(currentUser, items) {
         };
     }, [currentUser]);
 
+    // 2b. NEU: DISCOUNT LISTENER (Time Bank Rabatt live abfragen)
+    useEffect(() => {
+        if (!currentUser) return;
+        const instrRef = doc(db, `users/${currentUser.uid}/status/dailyInstruction`);
+        const unsub = onSnapshot(instrRef, (snap) => {
+            if (snap.exists() && snap.data().discountMinutes) {
+                setDiscountMinutes(snap.data().discountMinutes);
+            } else {
+                setDiscountMinutes(0);
+            }
+        });
+        return () => unsub();
+    }, [currentUser]);
+
     // 3. Aktive Sessions & Historie Heute laden
     useEffect(() => {
         if (!currentUser) return;
 
-        // A) Aktive Sessions
         const qActive = query(
             collection(db, `users/${currentUser.uid}/sessions`),
             where('endTime', '==', null)
@@ -149,7 +151,6 @@ export default function useSessionProgress(currentUser, items) {
             setLoading(false);
         });
 
-        // B) Historische Sessions von HEUTE
         const startOfDay = new Date();
         startOfDay.setHours(0,0,0,0);
         
@@ -180,37 +181,38 @@ export default function useSessionProgress(currentUser, items) {
         };
     }, [currentUser]);
 
-    // 4. Progress Berechnung (MIT 23:00 UHR RESET LOGIK)
+    // 4. Progress Berechnung (MIT RABATT-LOGIK)
     const calculateProgress = () => {
         const now = new Date();
-        const targetMinutes = dailyTargetHours * 60;
         
-        // RESET-CHECK: Ist es nach 23:00 Uhr (oder der eingestellten Startzeit)?
-        // Wenn ja, ist der "Tag" vorbei und der Balken wird auf 0 gesetzt.
+        // MATHEMATIK: Basis-Ziel minus erkauften Rabatt
+        let targetMinutes = (dailyTargetHours * 60) - discountMinutes;
+        if (targetMinutes < 0) targetMinutes = 0; // Kein negatives Ziel
+        
         if (now.getHours() >= nightStartHour) {
             return {
                 currentContinuousMinutes: 0,
                 dailyTargetMinutes: targetMinutes,
                 percentage: 0,
-                isDailyGoalMet: false, // Tag vorbei -> Reset
+                isDailyGoalMet: false, 
                 isLive: false,
-                nightCompliance
+                nightCompliance,
+                discountMinutes
             };
         }
 
-        // --- HARD BLOCK: TAGES-ERFOLG IST VON DER NACHT ABHÄNGIG ---
         if (nightCompliance === false) {
             return {
-                currentContinuousMinutes: 0, // Zeit friert bei 0 ein
+                currentContinuousMinutes: 0, 
                 dailyTargetMinutes: targetMinutes,
                 percentage: 0,
                 isDailyGoalMet: false,
                 isLive: false,
-                nightCompliance
+                nightCompliance,
+                discountMinutes
             };
         }
 
-        // --- Normale Berechnung (vor 23:00 Uhr) ---
         const activeInstruction = activeSessions.find(s => 
             s.type === 'instruction' && 
             (!s.periodId || !s.periodId.includes('night'))
@@ -239,7 +241,8 @@ export default function useSessionProgress(currentUser, items) {
             percentage: Math.min(100, Math.max(0, (currentMinutes / targetMinutes) * 100)),
             isDailyGoalMet: isGoalMet,
             isLive,
-            nightCompliance
+            nightCompliance,
+            discountMinutes // Zur Anzeige im Balken weiterleiten
         };
     };
 
