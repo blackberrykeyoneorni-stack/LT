@@ -19,7 +19,7 @@ import { generateAndSaveInstruction, getLastInstruction } from '../services/Inst
 import { checkForTZDTrigger, getTZDStatus, triggerEvasionPenalty } from '../services/TZDService';
 import { registerRelease as apiRegisterRelease } from '../services/ReleaseService'; 
 import { startSession as startSessionService, stopSession as stopSessionService } from '../services/SessionService';
-import { checkGambleTrigger, determineGambleStake, rollTheDice, isImmunityActive } from '../services/OfferService';
+import { checkGambleTrigger, determineGambleStake, rollTheDice, isImmunityActive, recordGambleAction } from '../services/OfferService';
 
 // Hooks
 import useSessionProgress from '../hooks/dashboard/useSessionProgress';
@@ -177,6 +177,7 @@ export default function Dashboard() {
   // GAMBLE & TimeBank State
   const [offerOpen, setOfferOpen] = useState(false);
   const [gambleStake, setGambleStake] = useState([]);
+  const [isForcedGamble, setIsForcedGamble] = useState(false);
   const [hasGambledThisSession, setHasGambledThisSession] = useState(false);
   const [immunityActive, setImmunityActive] = useState(false);
   const [timeBankData, setTimeBankData] = useState({ nc: 0, lc: 0 });
@@ -264,11 +265,13 @@ export default function Dashboard() {
                 
                 // --- GAMBLE CHECK ---
                 if (!hasGambledThisSession && items.length > 0) {
-                    const triggerGamble = await checkGambleTrigger(currentUser.uid, false, isInstructionActive);
-                    if (triggerGamble) {
+                    const activePunishItem = punishmentStatus.active ? punishmentItem : null;
+                    const gambleResult = await checkGambleTrigger(currentUser.uid, false, isInstructionActive, activePunishItem);
+                    if (gambleResult.trigger) {
                         const stake = determineGambleStake(items);
                         if (stake.length > 0) {
                             setGambleStake(stake);
+                            setIsForcedGamble(gambleResult.isForced);
                             setOfferOpen(true);
                             setHasGambledThisSession(true);
                         }
@@ -298,7 +301,7 @@ export default function Dashboard() {
         interval = setInterval(checkTZD, 300000); 
     }
     return () => clearInterval(interval);
-  }, [currentUser, items, activeSessions, itemsLoading, tzdActive, isInstructionActive, hasGambledThisSession]);
+  }, [currentUser, items, activeSessions, itemsLoading, tzdActive, isInstructionActive, hasGambledThisSession, punishmentStatus, punishmentItem]);
 
   // 4. Instruction / Period
   useEffect(() => {
@@ -313,7 +316,6 @@ export default function Dashboard() {
                     let instr = await getLastInstruction(currentUser.uid);
                     
                     if (instr && instr.periodId === currentPeriod) {
-                        // KORREKTUR: Initialer Check prüft jetzt auf acceptedAt, NICHT generatedAt
                         if (instr.isAccepted && !instr.evasionPenaltyTriggered) {
                             const acceptedDate = instr.acceptedAt?.toDate ? instr.acceptedAt.toDate() : new Date(instr.acceptedAt);
                             const ageInMinutes = (new Date() - acceptedDate) / 60000;
@@ -349,20 +351,17 @@ export default function Dashboard() {
     }
   }, [items.length, sessionsLoading, currentPeriod, currentInstruction, instructionStatus, isFreeDay, activeSessions]);
 
-  // --- NEU: LIVE WATCHER FÜR 30 MIN NACH OATH ---
   useEffect(() => {
       if (!currentInstruction || !currentInstruction.isAccepted || currentInstruction.evasionPenaltyTriggered) return;
-      if (isInstructionActive) return; // Wenn Session läuft, ist alles gut.
+      if (isInstructionActive) return; 
 
       const timer = setInterval(async () => {
-          // Basis ist jetzt acceptedAt
           const acceptedDate = currentInstruction.acceptedAt?.toDate ? currentInstruction.acceptedAt.toDate() : new Date(currentInstruction.acceptedAt);
           const ageInMinutes = (Date.now() - acceptedDate) / 60000;
 
           if (ageInMinutes > 30) {
               console.log("Flucht erkannt (Live Watcher - Post Oath)! Trigger 150% TZD.");
               
-              // UI Update verhindern
               setCurrentInstruction(prev => ({ ...prev, evasionPenaltyTriggered: true }));
               setInstructionOpen(false);
 
@@ -375,12 +374,11 @@ export default function Dashboard() {
               setTzdActive(true); 
               showToast("Zeitüberschreitung nach Eid: Strafe eingeleitet.", "error");
           }
-      }, 60000); // Check jede Minute
+      }, 60000); 
 
       return () => clearInterval(timer);
   }, [currentInstruction, currentUser, isInstructionActive]);
 
-  // Forced Release Persistence Check
   useEffect(() => {
       if (isInstructionActive && currentInstruction) {
           const fr = currentInstruction.forcedRelease;
@@ -406,6 +404,7 @@ export default function Dashboard() {
 
   // HANDLERS (Gamble)
   const handleGambleAccept = async () => {
+      await recordGambleAction(currentUser.uid, 'accept');
       const result = await rollTheDice(currentUser.uid, gambleStake);
       setOfferOpen(false);
       
@@ -435,7 +434,8 @@ export default function Dashboard() {
       }
   };
 
-  const handleGambleDecline = () => {
+  const handleGambleDecline = async () => {
+      await recordGambleAction(currentUser.uid, 'decline');
       setOfferOpen(false);
       showToast("Sicher ist sicher...", "info");
   };
@@ -609,6 +609,7 @@ export default function Dashboard() {
           onAccept={handleGambleAccept} 
           onDecline={handleGambleDecline}
           hasActiveSession={hasVoluntarySession} 
+          isForced={isForcedGamble}
       />
 
       <Container maxWidth="md" sx={{ pt: 2, pb: 4 }}>
@@ -675,39 +676,25 @@ export default function Dashboard() {
                         onClick={handleOpenRelease}
                         startIcon={<WaterDropIcon />}
                         sx={{
-                            mb: 0, // Wrapping box has margin if needed, but here we can manage it.
-                            py: 2, // Taller button for easier touch (approx 56px height)
-                            borderRadius: '28px', // MD3 Stadium/Pill shape
-                            
-                            // MD3 Filled Tonal Style (Dark Mode Adaptation)
-                            // Container: Secondary Container (mapped to accent color with low opacity)
+                            mb: 0, 
+                            py: 2, 
+                            borderRadius: '28px', 
                             bgcolor: 'rgba(64, 196, 255, 0.12)', 
-                            
-                            // Label: On Secondary Container (mapped to accent color)
                             color: '#40c4ff', 
-                            
-                            // Border: Subtle or none for Tonal. MD3 Tonal usually has no border, 
-                            // but adding a very subtle one helps in low contrast screens.
                             border: '1px solid rgba(64, 196, 255, 0.1)', 
-                            
                             fontSize: '0.9rem',
                             fontWeight: 'bold',
-                            letterSpacing: '1.25px', // Standard for buttons
-                            textTransform: 'uppercase', // Stylistic choice (MD3 is usually sentence case, but Uppercase is fine for emphasis)
-                            
-                            boxShadow: 'none', // Tonal buttons have no shadow by default in MD3 (elevation 0)
-                            
+                            letterSpacing: '1.25px', 
+                            textTransform: 'uppercase', 
+                            boxShadow: 'none', 
                             transition: 'all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1)',
-                            
                             '&:hover': {
-                                // State Layer: Hover (8% opacity on top of container)
                                 bgcolor: 'rgba(64, 196, 255, 0.2)', 
                                 borderColor: 'rgba(64, 196, 255, 0.3)',
-                                boxShadow: '0 0 15px rgba(64, 196, 255, 0.15)', // Subtle glow for feedback
+                                boxShadow: '0 0 15px rgba(64, 196, 255, 0.15)', 
                                 transform: 'translateY(-1px)'
                             },
                             '&:active': {
-                                // State Layer: Pressed
                                 bgcolor: 'rgba(64, 196, 255, 0.25)',
                                 transform: 'scale(0.98)'
                             }

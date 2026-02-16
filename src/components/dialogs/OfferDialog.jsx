@@ -8,16 +8,15 @@ import { motion, AnimatePresence } from 'framer-motion';
 import CasinoIcon from '@mui/icons-material/Casino';
 import ShieldIcon from '@mui/icons-material/Shield';
 import LockIcon from '@mui/icons-material/Lock';
-import ReportProblemIcon from '@mui/icons-material/ReportProblem'; // Importiert für den Warnhinweis
+import ReportProblemIcon from '@mui/icons-material/ReportProblem';
 
-export default function OfferDialog({ open, stakeItems, onAccept, onDecline, hasActiveSession }) {
+export default function OfferDialog({ open, stakeItems, onAccept, onDecline, hasActiveSession, isForced }) {
     const [isFlipping, setIsFlipping] = useState(false);
 
     const handlePlay = () => {
         setIsFlipping(true);
-        // Künstliche Verzögerung für Spannung
         setTimeout(() => {
-            onAccept(); // Trigger Logik im Parent
+            onAccept(); 
         }, 2000);
     };
 
@@ -32,12 +31,12 @@ export default function OfferDialog({ open, stakeItems, onAccept, onDecline, has
             PaperProps={{ 
                 sx: { 
                     ...DESIGN_TOKENS.dialog.paper.sx, 
-                    border: `1px solid ${PALETTE.accents.gold}`,
-                    boxShadow: `0 0 20px ${PALETTE.accents.gold}40`
+                    border: `1px solid ${isForced ? PALETTE.accents.red : PALETTE.accents.gold}`,
+                    boxShadow: `0 0 20px ${isForced ? PALETTE.accents.red : PALETTE.accents.gold}40`
                 } 
             }}
         >
-            <DialogTitle sx={{ ...DESIGN_TOKENS.dialog.title.sx, color: PALETTE.accents.gold, justifyContent: 'center' }}>
+            <DialogTitle sx={{ ...DESIGN_TOKENS.dialog.title.sx, color: isForced ? PALETTE.accents.red : PALETTE.accents.gold, justifyContent: 'center' }}>
                 <CasinoIcon sx={{ mr: 1 }} /> THE GAMBLE
             </DialogTitle>
             
@@ -45,9 +44,15 @@ export default function OfferDialog({ open, stakeItems, onAccept, onDecline, has
                 <Box sx={{ textAlign: 'center', py: 2 }}>
                     {!isFlipping ? (
                         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-                            <Typography variant="h5" sx={{ fontWeight: 'bold', color: '#fff', mb: 3 }}>
-                                ALLES ODER NICHTS
+                            <Typography variant="h5" sx={{ fontWeight: 'bold', color: isForced ? PALETTE.accents.red : '#fff', mb: isForced ? 1 : 3 }}>
+                                {isForced ? "KONTROLLÜBERNAHME" : "ALLES ODER NICHTS"}
                             </Typography>
+
+                            {isForced && (
+                                <Typography variant="body2" sx={{ color: PALETTE.accents.red, mb: 3, fontWeight: 'bold' }}>
+                                    DEIN FLUCHTKONTINGENT IST ERSCHÖPFT. DAS SYSTEM ERZWINGT DIESES SPIEL.
+                                </Typography>
+                            )}
                             
                             {/* RISIKO VS GEWINN */}
                             <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, mb: 4 }}>
@@ -60,7 +65,7 @@ export default function OfferDialog({ open, stakeItems, onAccept, onDecline, has
                                 <Box sx={{ textAlign: 'center', width: '45%' }}>
                                     <LockIcon sx={{ fontSize: 40, color: PALETTE.accents.red, mb: 1 }} />
                                     <Typography variant="body2" sx={{ color: PALETTE.accents.red, fontWeight: 'bold' }}>VERLUST</Typography>
-                                    <Typography variant="caption" color="text.secondary">24h TZD sofort</Typography>
+                                    <Typography variant="caption" color="text.secondary">24h Spiel-TZD</Typography>
                                 </Box>
                             </Box>
 
@@ -78,7 +83,7 @@ export default function OfferDialog({ open, stakeItems, onAccept, onDecline, has
                                             sx={{ 
                                                 width: 70, 
                                                 height: 70, 
-                                                border: `1px solid ${PALETTE.accents.gold}`,
+                                                border: `1px solid ${isForced ? PALETTE.accents.red : PALETTE.accents.gold}`,
                                                 mx: 'auto',
                                                 mb: 1
                                             }} 
@@ -90,7 +95,7 @@ export default function OfferDialog({ open, stakeItems, onAccept, onDecline, has
                                         >
                                             {item.name || item.brand || 'Unbekannt'}
                                         </Typography>
-                                        <Typography variant="caption" sx={{ fontSize: '0.65rem', color: PALETTE.accents.gold, display: 'block' }}>
+                                        <Typography variant="caption" sx={{ fontSize: '0.65rem', color: isForced ? PALETTE.accents.red : PALETTE.accents.gold, display: 'block' }}>
                                             {item.customId || 'ID ???'}
                                         </Typography>
                                         <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.secondary', display: 'block' }}>
@@ -122,7 +127,7 @@ export default function OfferDialog({ open, stakeItems, onAccept, onDecline, has
                         </motion.div>
                     ) : (
                         <Box sx={{ py: 6 }}>
-                            <CircularProgress sx={{ color: PALETTE.accents.gold }} />
+                            <CircularProgress sx={{ color: isForced ? PALETTE.accents.red : PALETTE.accents.gold }} />
                             <Typography variant="overline" sx={{ display: 'block', mt: 2, animation: 'pulse 1s infinite' }}>
                                 FATE IS DECIDING...
                             </Typography>
@@ -138,7 +143,7 @@ export default function OfferDialog({ open, stakeItems, onAccept, onDecline, has
                         variant="contained" 
                         onClick={handlePlay}
                         sx={{ 
-                            bgcolor: PALETTE.accents.gold, 
+                            bgcolor: isForced ? PALETTE.accents.red : PALETTE.accents.gold, 
                             color: '#000', 
                             fontWeight: 'bold',
                             '&:hover': { bgcolor: '#fff' } 
@@ -146,14 +151,17 @@ export default function OfferDialog({ open, stakeItems, onAccept, onDecline, has
                     >
                         SPIELEN (RISIKO)
                     </Button>
-                    <Button 
-                        fullWidth 
-                        onClick={onDecline} 
-                        color="inherit"
-                        sx={{ opacity: 0.6 }}
-                    >
-                        Ablehnen (Sicher)
-                    </Button>
+                    
+                    {!isForced && (
+                        <Button 
+                            fullWidth 
+                            onClick={onDecline} 
+                            color="inherit"
+                            sx={{ opacity: 0.6 }}
+                        >
+                            Ablehnen (Sicher)
+                        </Button>
+                    )}
                 </DialogActions>
             )}
         </Dialog>

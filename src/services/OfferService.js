@@ -1,10 +1,12 @@
 import { db } from '../firebase';
-import { doc, getDoc, setDoc, updateDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, serverTimestamp, Timestamp, increment } from 'firebase/firestore';
 import { startTZD } from './TZDService';
 
 // --- KONFIGURATION ---
-const GAMBLE_CHANCE = 0.20; // 20% Trigger Wahrscheinlichkeit
-const WIN_CHANCE = 0.40;    // 40% Chance auf Immunität (60% Verlust)
+const GAMBLE_CHANCE = 0.03; // 3% Micro-Chance alle 5 Minuten
+const WIN_CHANCE = 0.50;    // 50% eiskalter Münzwurf
+const COOLDOWN_HOURS = 12;  // Hard Cooldown nach jedem Angebot
+const FORCED_GAMBLE_THRESHOLD = 5; // Nach 5 Ablehnungen greift der Zwang
 
 /**
  * Setzt den Immunitäts-Status für X Stunden.
@@ -47,17 +49,61 @@ export const isImmunityActive = async (userId) => {
 };
 
 /**
- * Prüft, ob ein Gamble ausgelöst werden soll.
+ * Prüft, ob ein Gamble ausgelöst werden soll (inkl. Cooldown & Zwang).
  */
-export const checkGambleTrigger = async (userId, isTzdActive, isInstructionActive) => {
-    if (isTzdActive || isInstructionActive) return false;
+export const checkGambleTrigger = async (userId, isTzdActive, isInstructionActive, activePunishmentItem) => {
+    // 1. SCHUTZRAUM: Keine Gambles bei Pflichtaufgaben
+    if (isTzdActive || isInstructionActive) return { trigger: false };
 
-    // 1. Prüfe Immunität
+    // 2. AUSNAHME: Buttplug-Strafen erlauben Gambles
+    if (activePunishmentItem) {
+        const name = (activePunishmentItem.name || "").toLowerCase();
+        const sub = (activePunishmentItem.subCategory || "").toLowerCase();
+        const cat = (activePunishmentItem.mainCategory || "").toLowerCase();
+        const isPlug = name.includes("plug") || sub.includes("plug") || cat.includes("anal") || name.includes("butt") || sub.includes("butt");
+        
+        if (!isPlug) {
+            return { trigger: false }; // Normale Strafe blockiert weiterhin
+        }
+    }
+
+    // 3. IMMUNITÄT PRÜFEN
     const immunityActive = await isImmunityActive(userId);
-    if (immunityActive) return false;
+    if (immunityActive) return { trigger: false };
 
-    // 2. Würfle Trigger (20%)
-    return Math.random() < GAMBLE_CHANCE;
+    // 4. STATS & COOLDOWN PRÜFEN
+    const statsRef = doc(db, `users/${userId}/status/gambleStats`);
+    const statsSnap = await getDoc(statsRef);
+    let consecutiveDeclines = 0;
+    
+    if (statsSnap.exists()) {
+        const data = statsSnap.data();
+        consecutiveDeclines = data.consecutiveDeclines || 0;
+        
+        if (data.lastGambleOfferedAt) {
+            const lastOffered = data.lastGambleOfferedAt.toDate();
+            const now = new Date();
+            const hoursSince = (now - lastOffered) / (1000 * 60 * 60);
+            if (hoursSince < COOLDOWN_HOURS) {
+                return { trigger: false };
+            }
+        }
+    }
+
+    // 5. WÜRFELN (Die 3% Micro-Chance)
+    if (Math.random() < GAMBLE_CHANCE) {
+        // Trigger erfolgreich! Cooldown sofort setzen (Exploit-Schutz)
+        await setDoc(statsRef, {
+            lastGambleOfferedAt: serverTimestamp()
+        }, { merge: true });
+
+        return { 
+            trigger: true, 
+            isForced: consecutiveDeclines >= FORCED_GAMBLE_THRESHOLD 
+        };
+    }
+
+    return { trigger: false };
 };
 
 /**
@@ -96,6 +142,18 @@ export const determineGambleStake = (items) => {
 };
 
 /**
+ * Registriert die Entscheidung des Nutzers persistent.
+ */
+export const recordGambleAction = async (userId, action) => {
+    const statsRef = doc(db, `users/${userId}/status/gambleStats`);
+    if (action === 'accept') {
+        await setDoc(statsRef, { consecutiveDeclines: 0 }, { merge: true });
+    } else if (action === 'decline') {
+        await setDoc(statsRef, { consecutiveDeclines: increment(1) }, { merge: true });
+    }
+};
+
+/**
  * Führt den Münzwurf aus.
  * FIX: Gibt immer penaltyDuration (number oder null) zurück.
  */
@@ -109,12 +167,12 @@ export const rollTheDice = async (userId, stakeItems) => {
         return { 
             win: true, 
             type: 'immunity',
-            penaltyDuration: null // <--- DAS HAT GEFEHLT
+            penaltyDuration: null 
         };
     } else {
         // VERLUST
-        const duration = 1440;
-        await startTZD(userId, stakeItems, null, duration); 
+        const duration = 1440; // Exakt 24 Stunden
+        await startTZD(userId, stakeItems, null, duration, 'spiel_tzd'); 
         return { 
             win: false, 
             type: 'tzd_lock',

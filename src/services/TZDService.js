@@ -46,7 +46,7 @@ const determineSecretDuration = (matrix) => {
 /**
  * Startet das Protokoll. 
  */
-export const startTZD = async (userId, targetItems, durationMatrix, overrideDurationMinutes = null) => {
+export const startTZD = async (userId, targetItems, durationMatrix, overrideDurationMinutes = null, customType = null) => {
     let targetDuration;
 
     if (overrideDurationMinutes) {
@@ -77,21 +77,27 @@ export const startTZD = async (userId, targetItems, durationMatrix, overrideDura
         lastCheckIn: serverTimestamp(),
         stage: 'briefing',
         isFailed: false,
-        isPenalty: !!overrideDurationMinutes 
+        isPenalty: !!overrideDurationMinutes || customType === 'spiel_tzd',
+        protocolType: customType || (overrideDurationMinutes ? 'evasion_penalty' : 'regular')
     };
 
     await setDoc(doc(db, `users/${userId}/status/tzd`), tzdData);
 
     // Historie für alle betroffenen Items vermerken
     for (const item of itemsArray) {
-        const messageText = overrideDurationMinutes 
-            ? `Straf-TZD wegen Fluchtversuch gestartet (Dauer: ${Math.round(targetDuration)} Min).`
-            : `Zeitloses Diktat gestartet (Dauer: ${Math.round(targetDuration)} Min).`;
+        let messageText = '';
+        if (customType === 'spiel_tzd') {
+            messageText = `Spiel-TZD gestartet (Verlorenes Spiel, Dauer: ${Math.round(targetDuration)} Min).`;
+        } else if (overrideDurationMinutes) {
+            messageText = `Straf-TZD wegen Fluchtversuch gestartet (Dauer: ${Math.round(targetDuration)} Min).`;
+        } else {
+            messageText = `Zeitloses Diktat gestartet (Dauer: ${Math.round(targetDuration)} Min).`;
+        }
             
         await addItemHistoryEntry(userId, item.id, {
             type: 'tzd_briefing',
             message: messageText,
-            isPenalty: !!overrideDurationMinutes
+            isPenalty: !!overrideDurationMinutes || customType === 'spiel_tzd'
         });
     }
 
@@ -340,8 +346,6 @@ export const terminateTZD = async (userId, success = true, customResult = null) 
         result: finalResult 
     });
 
-    // BUGFIX: tzdExecuted muss IMMER gesetzt werden, egal ob success oder failed.
-    // Sonst triggert die laufende Session bei false sofort das nächste TZD in der Dashboard Schleife!
     try {
         const q = query(
             collection(db, `users/${userId}/sessions`),
@@ -410,14 +414,11 @@ export const convertTZDToPlugPunishment = async (userId, allItems) => {
             penaltyItem.id
         );
 
-        // BUGFIX: evasionPenaltyTriggered wird NICHT mehr auf false gesetzt!
-        // Das löschte den Flucht-Flag und ließ die 30-Min-Falle des Dashboards sofort wieder zuschnappen.
         await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), {
             tzdDurationMinutes: 0,
             tzdStartTime: null
         });
         
-        // BUGFIX: Nutzt nun die offizielle terminateTZD Methode, damit Session-Handling (tzdExecuted) sauber läuft
         await terminateTZD(userId, false, 'aborted_punished');
 
         return { success: true, item: penaltyItem.name };
