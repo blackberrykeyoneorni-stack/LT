@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   collection, doc, updateDoc, serverTimestamp, 
-  addDoc, arrayUnion, writeBatch, getDoc, onSnapshot 
+  addDoc, arrayUnion, writeBatch, getDoc, onSnapshot,
+  query, where, getDocs // NEU HINZUGEFÜGT FÜR FLUCHT-BUGFIX
 } from 'firebase/firestore'; 
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
@@ -320,9 +321,16 @@ export default function Dashboard() {
                             const acceptedDate = instr.acceptedAt?.toDate ? instr.acceptedAt.toDate() : new Date(instr.acceptedAt);
                             const ageInMinutes = (new Date() - acceptedDate) / 60000;
                             
-                            const hasActiveInstructionSession = activeSessions.some(s => s.type === 'instruction');
+                            // NEU: Datenbankabfrage statt momentaner Snapshot-Prüfung
+                            const qSession = query(
+                                collection(db, `users/${currentUser.uid}/sessions`),
+                                where('periodId', '==', instr.periodId),
+                                where('type', '==', 'instruction')
+                            );
+                            const sessionSnap = await getDocs(qSession);
+                            const hasEverStarted = !sessionSnap.empty;
 
-                            if (ageInMinutes > 30 && !hasActiveInstructionSession) {
+                            if (ageInMinutes > 30 && !hasEverStarted) {
                                 console.log("Flucht erkannt (Initial Check - Post Oath)! Trigger 150% TZD.");
                                 await triggerEvasionPenalty(currentUser.uid, instr.items);
                                 
@@ -360,19 +368,31 @@ export default function Dashboard() {
           const ageInMinutes = (Date.now() - acceptedDate) / 60000;
 
           if (ageInMinutes > 30) {
-              console.log("Flucht erkannt (Live Watcher - Post Oath)! Trigger 150% TZD.");
-              
-              setCurrentInstruction(prev => ({ ...prev, evasionPenaltyTriggered: true }));
-              setInstructionOpen(false);
+              // NEU: Datenbankabfrage vor der Bestrafung
+              const qSession = query(
+                  collection(db, `users/${currentUser.uid}/sessions`),
+                  where('periodId', '==', currentInstruction.periodId),
+                  where('type', '==', 'instruction')
+              );
+              const sessionSnap = await getDocs(qSession);
 
-              await triggerEvasionPenalty(currentUser.uid, currentInstruction.items);
-              
-              await updateDoc(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), { 
-                  evasionPenaltyTriggered: true
-              });
-              
-              setTzdActive(true); 
-              showToast("Zeitüberschreitung nach Eid: Strafe eingeleitet.", "error");
+              if (sessionSnap.empty) {
+                  console.log("Flucht erkannt (Live Watcher - Post Oath)! Trigger 150% TZD.");
+                  
+                  setCurrentInstruction(prev => ({ ...prev, evasionPenaltyTriggered: true }));
+                  setInstructionOpen(false);
+
+                  await triggerEvasionPenalty(currentUser.uid, currentInstruction.items);
+                  
+                  await updateDoc(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), { 
+                      evasionPenaltyTriggered: true
+                  });
+                  
+                  setTzdActive(true); 
+                  showToast("Zeitüberschreitung nach Eid: Strafe eingeleitet.", "error");
+              }
+              // Egal ob bestraft oder erfolgreich beendet: Der Timer hat seinen Zweck erfüllt und wird gestoppt
+              clearInterval(timer);
           }
       }, 60000); 
 

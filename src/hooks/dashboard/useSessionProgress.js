@@ -3,6 +3,7 @@ import { collection, query, where, onSnapshot, doc, getDoc } from 'firebase/fire
 import { db } from '../../firebase';
 import { DEFAULT_PROTOCOL_RULES } from '../../config/defaultRules';
 import { checkAndRunWeeklyUpdate } from '../../services/ProtocolService';
+import { verifyNightCompliance } from '../../services/InstructionService'; 
 
 export default function useSessionProgress(currentUser, items) {
     const [activeSessions, setActiveSessions] = useState([]);
@@ -71,28 +72,61 @@ export default function useSessionProgress(currentUser, items) {
         return () => unsub();
     }, [currentUser]);
 
-    // 2. NACHT-COMPLIANCE LADEN (VIA STATUS DOC)
-    // Striktes Lauschen auf das durch Checkpoints verifizierte Dokument
+    // 2. NACHT-COMPLIANCE LADEN & AUTOMATISCH VERIFIZIEREN
     useEffect(() => {
         if (!currentUser) return;
-        
-        const todayStr = new Date().toISOString().split('T')[0];
+
+        // Zeitzonensichere Datumserstellung (lokales Datum)
+        const getLocalISODate = (date) => {
+            const offset = date.getTimezoneOffset() * 60000;
+            return new Date(date.getTime() - offset).toISOString().split('T')[0];
+        };
+
+        const todayStr = getLocalISODate(new Date());
         const statusRef = doc(db, `users/${currentUser.uid}/status/nightCompliance`);
         
+        let intervalId;
+
         const unsub = onSnapshot(statusRef, (snap) => {
+           let needsVerification = false;
            if(snap.exists()) {
                const data = snap.data();
                if (data.date === todayStr) {
                    setNightCompliance(data.success);
                } else {
-                   setNightCompliance(null); // Noch nicht verifiziert für heute
+                   setNightCompliance(null); // Veraltet, noch nicht verifiziert für heute
+                   needsVerification = true;
                }
            } else {
                setNightCompliance(null);
+               needsVerification = true;
+           }
+
+           // --- FRONTEND AUDITOR LOGIK ---
+           // Wenn der Status fehlt, triggert das Dashboard die Prüfung nach 06:00 Uhr selbst
+           if (needsVerification) {
+               const checkAndVerify = async () => {
+                   if (new Date().getHours() >= 6) {
+                       if (intervalId) clearInterval(intervalId);
+                       await verifyNightCompliance(currentUser.uid);
+                   }
+               };
+               
+               checkAndVerify(); // Sofort prüfen
+               
+               // Wenn es noch vor 6 Uhr ist, Interval setzen, damit es exakt um 06:00 Uhr umspringt
+               if (new Date().getHours() < 6 && !intervalId) {
+                   intervalId = setInterval(checkAndVerify, 60000);
+               }
+           } else {
+               if (intervalId) clearInterval(intervalId);
            }
         });
 
-        return () => unsub();
+        return () => {
+            unsub();
+            if (intervalId) clearInterval(intervalId);
+        };
     }, [currentUser]);
 
     // 3. Aktive Sessions & Historie Heute laden
@@ -130,7 +164,6 @@ export default function useSessionProgress(currentUser, items) {
 
             snapshot.docs.forEach(doc => {
                 const data = doc.data();
-                // FIX: Korrekter Abruf über periodId
                 const isNight = data.periodId && data.periodId.toLowerCase().includes('night');
 
                 if (!isNight && data.endTime) {
@@ -178,8 +211,6 @@ export default function useSessionProgress(currentUser, items) {
         }
 
         // --- Normale Berechnung (vor 23:00 Uhr) ---
-        
-        // FIX: Korrekter Abruf über periodId
         const activeInstruction = activeSessions.find(s => 
             s.type === 'instruction' && 
             (!s.periodId || !s.periodId.includes('night'))

@@ -284,8 +284,9 @@ export const verifyNightCompliance = async (userId, referenceDate = new Date()) 
             new Date(year, month, day, 6, 0, 0)   // 06:00 Uhr
         ];
 
-        // Suchfenster für Sessions: Von Gestern 20:00 bis Heute 08:00
-        const searchStart = new Date(year, month, day - 1, 20, 0, 0);
+        // Suchfenster für Sessions: Von Gestern 16:00 Uhr bis Heute.
+        // Wurde von 20:00 Uhr auf 16:00 Uhr vorverlegt, um auch extrem früh gestartete Nachtsessions zuverlässig zu erfassen.
+        const searchStart = new Date(year, month, day - 1, 16, 0, 0);
 
         const q = query(
             collection(db, `users/${userId}/sessions`),
@@ -323,7 +324,10 @@ export const verifyNightCompliance = async (userId, referenceDate = new Date()) 
         });
 
         // Ergebnis persistieren (für ProgressBar & Tag-Validierung)
-        const dateKey = referenceDate.toISOString().split('T')[0]; // YYYY-MM-DD
+        // BUGFIX Zeitzone: Lokales Datum zwingend erzwingen, um Off-By-One-Day Fehler beim Schreiben zu verhindern.
+        const offset = referenceDate.getTimezoneOffset() * 60000;
+        const dateKey = new Date(referenceDate.getTime() - offset).toISOString().split('T')[0]; // YYYY-MM-DD
+        
         await setDoc(doc(db, `users/${userId}/status/nightCompliance`), {
             date: dateKey,
             success: allCheckpointsCovered,
