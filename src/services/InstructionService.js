@@ -5,7 +5,8 @@ import { DEFAULT_PROTOCOL_RULES } from '../config/defaultRules';
 // --- HELPER FUNKTIONEN ---
 
 /**
- * Berechnet die dynamische Tragedauer basierend auf Vorwoche und Suspensions.
+ * Zieht die festgelegte Tragedauer AUSSCHLIESSLICH aus dem fixen Wochenziel (Protocol).
+ * Keine doppelte Buchführung mehr.
  */
 const calculateTargetDuration = async (uid, prefs, periodId) => {
     // Bei Nacht-Anweisungen einen Standardwert oder 480 (8h) zurückgeben
@@ -13,74 +14,23 @@ const calculateTargetDuration = async (uid, prefs, periodId) => {
         return parseInt(prefs.nightDurationMinutes || 480, 10);
     }
 
-    // Basis-Wert aus Einstellungen für die Startwoche
-    const baseDuration = parseInt(prefs.baseDayDuration || prefs.defaultDurationMinutes || 120, 10);
-    let currentTarget = parseInt(prefs.currentTargetDuration || baseDuration, 10);
-
     try {
-        const now = new Date();
-        const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-
-        // 1. Hole alle Tages-Sessions der letzten 7 Tage
-        const qSessions = query(
-            collection(db, `users/${uid}/sessions`),
-            where('type', '==', 'instruction'),
-            where('startTime', '>=', oneWeekAgo)
-        );
-        const snapSessions = await getDocs(qSessions);
-
-        let totalDuration = 0;
-        snapSessions.forEach(doc => {
-            const data = doc.data();
-            const pId = data.periodId || '';
-            if (!pId.includes('night') && data.durationMinutes) {
-                totalDuration += data.durationMinutes;
-            }
-        });
-
-        // 2. Hole Suspensions, um Überschneidungen zu prüfen
-        const qSuspensions = collection(db, `users/${uid}/suspensions`);
-        const snapSuspensions = await getDocs(qSuspensions);
+        const protocolRef = doc(db, `users/${uid}/settings/protocol`);
+        const protocolSnap = await getDoc(protocolRef);
         
-        let suspensionDays = 0;
-        snapSuspensions.forEach(doc => {
-            const data = doc.data();
-            if (!data.startDate || !data.endDate) return;
-            
-            const start = data.startDate.toDate ? data.startDate.toDate() : new Date(data.startDate);
-            const end = data.endDate.toDate ? data.endDate.toDate() : new Date(data.endDate);
-            
-            // Berechne Überschneidung mit dem 7-Tage-Fenster
-            const overlapStart = start < oneWeekAgo ? oneWeekAgo : start;
-            const overlapEnd = end > now ? now : end;
-            
-            if (overlapStart < overlapEnd) {
-                const diffTime = Math.abs(overlapEnd - overlapStart);
-                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                suspensionDays += diffDays;
-            }
-        });
-
-        // Divisor berechnen (5 minus Suspension-Tage)
-        let divisor = 5 - suspensionDays;
-        if (divisor < 1) divisor = 1; // Sicherstellen, dass nicht durch 0 oder negativ geteilt wird
-
-        const calculatedAverage = Math.floor(totalDuration / divisor);
-
-        // 3. Vergleich: Nur Steigerungen übernehmen
-        if (calculatedAverage > currentTarget) {
-            currentTarget = calculatedAverage;
-            // Neuen Höchstwert in Preferences speichern
-            await setDoc(doc(db, `users/${uid}/settings/preferences`), {
-                currentTargetDuration: currentTarget
-            }, { merge: true });
+        let goalHours = 4;
+        if (protocolSnap.exists() && protocolSnap.data().currentDailyGoal !== undefined) {
+            goalHours = parseFloat(protocolSnap.data().currentDailyGoal);
+        } else if (prefs.dailyTargetHours) {
+            goalHours = parseFloat(prefs.dailyTargetHours);
         }
-
+        
+        // Umrechnung der fixierten Stunden in exakte Minuten
+        return Math.round(goalHours * 60);
     } catch (e) {
-        console.error("Fehler bei der Berechnung der dynamischen Tragedauer:", e);
+        console.error("Fehler bei der Ermittlung der Tragedauer:", e);
+        return 240; // Fallback 4 Stunden
     }
-
-    return currentTarget;
 };
 
 /**

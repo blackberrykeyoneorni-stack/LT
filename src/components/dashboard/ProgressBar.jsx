@@ -54,8 +54,9 @@ export default function ProgressBar({ currentMinutes, targetHours, isGoalMetToda
                     <Typography variant="h6" sx={{ fontWeight: 'bold', lineHeight: 1, color: isStrictlySuccessful ? '#fff' : 'text.primary' }}>
                         {formatTime(currentMinutes)}
                     </Typography>
+                    {/* FORMAT-FIX: targetHours wird nun in targetMinutes umgerechnet und ebenfalls formatiert */}
                     <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                        von {targetHours}h
+                        von {formatTime(targetMinutes)}
                     </Typography>
                 </Box>
             </Box>

@@ -8,10 +8,21 @@ import { getAllSuspensions } from './SuspensionService';
 // --- HELPER ---
 
 /**
- * Berechnet den Montag der aktuellen Woche (00:00 Uhr)
+ * Schiebt die Zeit intern um 1 Stunde nach vorne.
+ * Damit wird Sonntag 23:00 Uhr programmiertechnisch wie Montag 00:00 Uhr behandelt.
+ * Dadurch triggert das neue Wochenziel pünktlich am Sonntag ab 23:00 Uhr.
+ */
+const getReferenceDate = (date) => {
+    const d = new Date(date);
+    d.setTime(d.getTime() + 1 * 60 * 60 * 1000); 
+    return d;
+};
+
+/**
+ * Berechnet den Montag der aktuellen (angepassten) Woche (00:00 Uhr)
  */
 const getStartOfWeek = (date) => {
-    const d = new Date(date);
+    const d = getReferenceDate(date);
     const day = d.getDay();
     const diff = d.getDate() - day + (day === 0 ? -6 : 1); 
     d.setDate(diff);
@@ -214,19 +225,26 @@ export const checkAndRunWeeklyUpdate = async (userId) => {
             return;
         }
 
-        const lastWeekStart = new Date(currentWeekStart);
-        lastWeekStart.setDate(lastWeekStart.getDate() - 7);
+        // Wir berechnen den echten Zeitraum rückwärts (ohne den +1h Shift)
+        const endDateForStats = new Date(currentWeekStart);
+        endDateForStats.setTime(endDateForStats.getTime() - 1 * 60 * 60 * 1000); 
         
-        const stats = await calculateStatsForPeriod(userId, lastWeekStart, currentWeekStart, currentGoal);
+        const startDateForStats = new Date(endDateForStats);
+        startDateForStats.setDate(startDateForStats.getDate() - 7);
+        
+        const stats = await calculateStatsForPeriod(userId, startDateForStats, endDateForStats, currentGoal);
 
+        // Das neue Ziel sowie den Report in der Datenbank speichern
         await setDoc(settingsRef, {
             currentDailyGoal: stats.nextGoal,
             lastGoalUpdate: serverTimestamp(),
-            lastWeekStats: {
+            weeklyReport: {
                 average: stats.average,
                 previousGoal: currentGoal,
-                date: new Date(),
-                divisor: stats.effectiveDivisor
+                newGoal: stats.nextGoal,
+                date: new Date().toISOString(),
+                divisor: stats.effectiveDivisor,
+                acknowledged: false // Dashboard wartet auf Bestätigung
             }
         }, { merge: true });
 

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { 
   collection, doc, updateDoc, serverTimestamp, 
   addDoc, arrayUnion, writeBatch, getDoc, onSnapshot,
-  query, where, getDocs // NEU HINZUGEFÜGT FÜR FLUCHT-BUGFIX
+  query, where, getDocs 
 } from 'firebase/firestore'; 
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
@@ -58,6 +58,7 @@ import AnalyticsIcon from '@mui/icons-material/Analytics';
 import LockIcon from '@mui/icons-material/Lock'; 
 import ShieldIcon from '@mui/icons-material/Shield'; 
 import WaterDropIcon from '@mui/icons-material/WaterDrop';
+import TrendingUpIcon from '@mui/icons-material/TrendingUp'; // NEU IMPORTIERT FÜR WOCHEN-DIALOG
 
 const REFLECTION_TAGS = [
     "Sicher / Geborgen", "Erregt", "Gedemütigt", "Exponiert / Öffentlich", 
@@ -87,6 +88,13 @@ const checkIsHoliday = (date) => {
     if (m === 12 && d === 31) return true;
     if (m === 1 && d === 1) return true;
     return false;
+};
+
+// Hilfsfunktion zur Zeitformatierung für den Weekly Report
+const formatTime = (totalMins) => {
+    const h = Math.floor(totalMins / 60);
+    const m = Math.floor(totalMins % 60);
+    return `${h}h ${m}m`;
 };
 
 // --- SUB-KOMPONENTE ---
@@ -183,6 +191,9 @@ export default function Dashboard() {
   const [immunityActive, setImmunityActive] = useState(false);
   const [timeBankData, setTimeBankData] = useState({ nc: 0, lc: 0 });
 
+  // NEU: Weekly Report State
+  const [weeklyReport, setWeeklyReport] = useState(null);
+
   // Derived State
   const isNight = currentPeriod ? currentPeriod.includes('night') : false;
   const isInstructionActive = activeSessions.some(s => s.type === 'instruction');
@@ -195,7 +206,7 @@ export default function Dashboard() {
   const showToast = (message, severity = 'success') => setToast({ open: true, message, severity });
   const handleCloseToast = () => setToast({ ...toast, open: false });
 
-  // 1. Initial Load
+  // 1. Initial Load & Weekly Report Listener
   useEffect(() => {
     if (!currentUser) return;
     const initLoad = async () => {
@@ -223,6 +234,18 @@ export default function Dashboard() {
     };
     initLoad();
 
+    // WÖCHENTLICHES ZIEL UPDATE LISTENER
+    const unsubProtocol = onSnapshot(doc(db, `users/${currentUser.uid}/settings/protocol`), (docSnap) => {
+        if (docSnap.exists()) {
+            const data = docSnap.data();
+            if (data.weeklyReport && data.weeklyReport.acknowledged === false) {
+                setWeeklyReport(data.weeklyReport);
+            } else {
+                setWeeklyReport(null);
+            }
+        }
+    });
+
     // TIME BANK LISTENER
     const unsubscribeTB = onSnapshot(doc(db, `users/${currentUser.uid}/status/timeBank`), (docSnap) => {
         if (docSnap.exists()) {
@@ -236,6 +259,7 @@ export default function Dashboard() {
     return () => { 
         clearInterval(timer);
         unsubscribeTB(); 
+        unsubProtocol();
     };
   }, [currentUser]); 
 
@@ -765,6 +789,49 @@ export default function Dashboard() {
 
         </motion.div>
       </Container>
+
+      {/* NEU: WÖCHENTLICHER PROTOKOLL-REPORT (Erscheint Sonntags ab 23 Uhr) */}
+      <Dialog open={!!weeklyReport} disableEscapeKeyDown PaperProps={{ sx: { ...DESIGN_TOKENS.dialog.paper.sx, border: `1px solid ${PALETTE.accents.gold}`, boxShadow: `0 0 20px ${PALETTE.accents.gold}40` } }}>
+          <DialogTitle sx={{ ...DESIGN_TOKENS.dialog.title.sx, color: PALETTE.accents.gold, justifyContent: 'center' }}>
+              <TrendingUpIcon sx={{ mr: 1 }} /> WOCHEN-EVALUIERUNG
+          </DialogTitle>
+          <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
+              <Box sx={{ textAlign: 'center', py: 2 }}>
+                  <Typography variant="body2" sx={{ mb: 4, color: 'text.secondary' }}>
+                      Das System hat deine Leistung in der vergangenen Woche protokolliert und die geforderte Tagestragezeit neu festgelegt.
+                  </Typography>
+                  
+                  <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 3, mb: 2 }}>
+                      <Box>
+                          <Typography variant="caption" color="text.secondary" display="block">Bisheriges Ziel</Typography>
+                          <Typography variant="h6" sx={{ color: 'text.disabled', textDecoration: 'line-through' }}>
+                              {weeklyReport ? formatTime(weeklyReport.previousGoal * 60) : ''}
+                          </Typography>
+                      </Box>
+                      <TrendingUpIcon sx={{ color: PALETTE.accents.gold, fontSize: 30 }} />
+                      <Box>
+                          <Typography variant="caption" sx={{ color: PALETTE.accents.gold, fontWeight: 'bold' }} display="block">Neues Ziel</Typography>
+                          <Typography variant="h4" sx={{ color: '#fff', fontWeight: 'bold' }}>
+                              {weeklyReport ? formatTime(weeklyReport.newGoal * 60) : ''}
+                          </Typography>
+                      </Box>
+                  </Box>
+                  
+                  <Typography variant="caption" sx={{ color: PALETTE.accents.gold, display: 'block', mt: 4, fontWeight: 'bold' }}>
+                      RÜCKSTUFUNGEN SIND UNTERSAGT. DEINE ZEIT IST EIGENTUM DES PROTOKOLLS.
+                  </Typography>
+              </Box>
+          </DialogContent>
+          <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}>
+              <Button fullWidth variant="contained" onClick={async () => {
+                  await updateDoc(doc(db, `users/${currentUser.uid}/settings/protocol`), {
+                      "weeklyReport.acknowledged": true
+                  });
+              }} sx={{ bgcolor: PALETTE.accents.gold, color: '#000', fontWeight: 'bold', '&:hover': { bgcolor: '#fff' } }}>
+                  KENNTNISNAHME BESTÄTIGEN
+              </Button>
+          </DialogActions>
+      </Dialog>
 
       <InstructionDialog open={instructionOpen} onClose={() => setInstructionOpen(false)} instruction={currentInstruction} items={items} isHoldingOath={isHoldingOath} oathProgress={oathProgress} onStartOath={startOathPress} onCancelOath={cancelOathPress} onDeclineOath={handleDeclineOath} onStartRequest={handleStartRequest} onNavigateItem={(id) => { setInstructionOpen(false); navigate(`/item/${id}`); }} isFreeDay={isFreeDay} freeDayReason={freeDayReason} loadingStatus={instructionStatus === 'idle' ? 'loading' : instructionStatus} isNight={isNight} showToast={showToast} />
       <PunishmentDialog open={punishmentScanOpen} onClose={() => setPunishmentScanOpen(false)} mode={punishmentScanMode} punishmentItem={punishmentItem} isScanning={isNfcScanning} onScan={handlePunishmentScanTrigger} />
