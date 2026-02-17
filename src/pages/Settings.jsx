@@ -61,8 +61,6 @@ export default function Settings() {
 
   const [nylonRestingHours, setNylonRestingHours] = useState(24); 
   const [maxInstructionItems, setMaxInstructionItems] = useState(1); 
-  const [sissyProtocolEnabled, setSissyProtocolEnabled] = useState(false); 
-  const [nightReleaseProbability, setNightReleaseProbability] = useState(15);
   
   // NEU: State für Protocol Rules im Parent
   const [protocolRules, setProtocolRules] = useState(null);
@@ -117,8 +115,6 @@ export default function Settings() {
               const d = prefSnap.data();
               setNylonRestingHours(d.nylonRestingHours || 24);
               setMaxInstructionItems(d.maxInstructionItems || 1);
-              setSissyProtocolEnabled(d.sissyProtocolEnabled || false);
-              setNightReleaseProbability(d.nightReleaseProbability || 15);
               setCategoryWeights(d.categoryWeights || {});
           }
 
@@ -171,8 +167,7 @@ export default function Settings() {
           // 1. Preferences
           const prefRef = doc(db, `users/${uid}/settings/preferences`);
           batch.set(prefRef, {
-              nylonRestingHours, maxInstructionItems, sissyProtocolEnabled, 
-              nightReleaseProbability, categoryWeights
+              nylonRestingHours, maxInstructionItems, categoryWeights
           }, { merge: true });
 
           // 2. Protocol
@@ -422,19 +417,6 @@ export default function Settings() {
                 <Slider value={nylonRestingHours} min={0} max={72} step={4} onChange={(e, v) => setNylonRestingHours(v)} sx={{ color: PALETTE.secondary.main }} />
             </Box>
             
-            <Stack direction="row" justifyContent="space-between" alignItems="center">
-                <Box><Typography variant="body1">Hardcore Protokoll</Typography><Typography variant="caption" color="text.secondary">Erzwingt Ingestion & Challenges</Typography></Box>
-                <Switch checked={sissyProtocolEnabled} onChange={(e) => setSissyProtocolEnabled(e.target.checked)} color="error" />
-            </Stack>
-             {sissyProtocolEnabled && (
-                <Box sx={{ mt: 2, pl: 2, borderLeft: `2px solid ${PALETTE.accents.red}` }}>
-                     <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                        <Typography variant="caption" color="error">Chance Start-Challenge</Typography>
-                        <Typography variant="caption" color="error" fontWeight="bold">{nightReleaseProbability}%</Typography>
-                     </Box>
-                     <Slider value={nightReleaseProbability} min={0} max={100} step={5} onChange={(e, v) => setNightReleaseProbability(v)} sx={{ color: PALETTE.accents.red }} />
-                </Box>
-            )}
         </AccordionDetails>
       </Accordion>
 

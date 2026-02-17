@@ -4,6 +4,8 @@ import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import WaterDropIcon from '@mui/icons-material/WaterDrop';
 import LocalLaundryServiceIcon from '@mui/icons-material/LocalLaundryService';
 import DeleteIcon from '@mui/icons-material/Delete';
+import GavelIcon from '@mui/icons-material/Gavel'; 
+import InfoIcon from '@mui/icons-material/Info'; 
 import { formatDuration } from '../../utils/formatters';
 import { PALETTE } from '../../theme/obsidianDesign';
 
@@ -36,7 +38,7 @@ export default function ItemHistory({ historyEvents }) {
                         if (endTime && startTime) {
                             sub = `${startTime.toLocaleDateString()}, ${startTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} - ${endTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`;
                             
-                            // FIX: Dauer live berechnen (Ende - Start), statt gespeicherten Wert zu nutzen
+                            // Dauer live berechnen (Ende - Start), statt gespeicherten Wert zu nutzen
                             const diffMs = endTime.getTime() - startTime.getTime();
                             const diffMins = Math.floor(diffMs / 60000);
                             durationLabel = formatDuration(diffMins);
@@ -63,6 +65,23 @@ export default function ItemHistory({ historyEvents }) {
                         color = "error";
                         icon = <DeleteIcon style={{ fontSize: 16 }} />;
                         durationLabel = 'End of Life';
+                    } 
+                    // --- NEU: TZD EREIGNISSE ---
+                    else if (event.type && event.type.startsWith('tzd_')) {
+                        label = "Zeitloses Diktat";
+                        // Greift die formatierten Messages aus der TZDService.js ab
+                        sub = event.data?.message || `${event.date.toLocaleDateString()} • Systemeingriff`;
+                        color = event.data?.isPenalty ? "error" : "warning";
+                        icon = <GavelIcon style={{ fontSize: 16 }} />;
+                        durationLabel = 'TZD';
+                    } 
+                    // --- NEU: GENERISCHER FALLBACK ---
+                    else {
+                        label = event.type ? event.type.toUpperCase() : "Protokoll-Ereignis";
+                        sub = event.data?.message || `${event.date.toLocaleDateString()} • Status Update`;
+                        color = "default";
+                        icon = <InfoIcon style={{ fontSize: 16 }} />;
+                        durationLabel = 'Info';
                     }
 
                     return (

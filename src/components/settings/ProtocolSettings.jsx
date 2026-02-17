@@ -59,6 +59,25 @@ export default function ProtocolSettings({ rules, onChange }) {
         handleChange('instruction', 'forcedReleaseMethods', newMethods);
     };
 
+    // NEU: Handhabt die Generierung der echten Matrix für den Algorithmus
+    const handleTzdMaxChange = (newValue) => {
+        const newMatrix = [
+            { label: 'The Bait', min: newValue / 6, max: newValue / 3, weight: 0.20 },
+            { label: 'The Standard', min: newValue / 3, max: (newValue * 2) / 3, weight: 0.50 },
+            { label: 'The Wall', min: (newValue * 2) / 3, max: newValue, weight: 0.30 }
+        ];
+
+        const newRules = {
+            ...rules,
+            tzd: {
+                ...rules.tzd,
+                tzdMaxHours: newValue,
+                durationMatrix: newMatrix
+            }
+        };
+        onChange(newRules);
+    };
+
     // Aktueller TZD Max Wert (oder Default)
     const tzdMax = rules.tzd?.tzdMaxHours || DEFAULT_PROTOCOL_RULES.tzd.tzdMaxHours;
     const zones = calculateZones(tzdMax);
@@ -116,7 +135,7 @@ export default function ProtocolSettings({ rules, onChange }) {
                     <Slider 
                         value={tzdMax} 
                         min={6} max={72} step={6}
-                        onChange={(_, v) => handleChange('tzd', 'tzdMaxHours', v)}
+                        onChange={(_, v) => handleTzdMaxChange(v)}
                         marks={[
                             { value: 6, label: '6h' },
                             { value: 24, label: '24h' },
