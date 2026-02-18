@@ -53,7 +53,6 @@ export default function Settings() {
   const [archiveReasons, setArchiveReasons] = useState([]); const [newArchiveReason, setNewArchiveReason] = useState('');
   const [runLocations, setRunLocations] = useState([]); const [newRunLocation, setNewRunLocation] = useState('');
   const [runCauses, setRunCauses] = useState([]); const [newRunCause, setNewRunCause] = useState('');
-  const [vibeTags, setVibeTags] = useState([]); const [newVibeTag, setNewVibeTag] = useState('');
 
   const [categoryWeights, setCategoryWeights] = useState({}); 
   const [weightTarget, setWeightTarget] = useState(''); 
@@ -91,7 +90,7 @@ export default function Settings() {
   const loadAll = async () => {
       try {
           const userId = currentUser.uid;
-          const [bSnap, mSnap, catSnap, locSnap, locIdxSnap, prefSnap, arSnap, rlSnap, rcSnap, vtSnap, protSnap] = await Promise.all([
+          const [bSnap, mSnap, catSnap, locSnap, locIdxSnap, prefSnap, arSnap, rlSnap, rcSnap, protSnap] = await Promise.all([
               getDoc(doc(db, `users/${userId}/settings/brands`)),
               getDoc(doc(db, `users/${userId}/settings/materials`)),
               getDoc(doc(db, `users/${userId}/settings/categories`)),
@@ -101,7 +100,6 @@ export default function Settings() {
               getDoc(doc(db, `users/${userId}/settings/archiveReasons`)),
               getDoc(doc(db, `users/${userId}/settings/runLocations`)),
               getDoc(doc(db, `users/${userId}/settings/runCauses`)),
-              getDoc(doc(db, `users/${userId}/settings/vibeTags`)),
               getDoc(doc(db, `users/${userId}/settings/protocol`)) // Protocol hier laden
           ]);
 
@@ -140,7 +138,6 @@ export default function Settings() {
           setArchiveReasons(arSnap.exists() ? arSnap.data().list : ['Laufmasche', 'Verschlissen', 'Verloren', 'Spende']);
           setRunLocations(rlSnap.exists() ? rlSnap.data().list : ['Zehe', 'Ferse', 'Sohle', 'Oberschenkel', 'Zwickel']);
           setRunCauses(rcSnap.exists() ? rcSnap.data().list : ['Schuhe', 'Nägel', 'Schmuck', 'Möbel', 'Unbekannt']);
-          setVibeTags(vtSnap.exists() ? vtSnap.data().list : ['Business', 'Casual', 'Fetisch', 'Sport', 'Alltag']);
 
       } catch (e) { console.error(e); } finally { setLoading(false); }
   };
@@ -183,7 +180,6 @@ export default function Settings() {
           batch.set(doc(db, `users/${uid}/settings/archiveReasons`), { list: archiveReasons }, { merge: true });
           batch.set(doc(db, `users/${uid}/settings/runLocations`), { list: runLocations }, { merge: true });
           batch.set(doc(db, `users/${uid}/settings/runCauses`), { list: runCauses }, { merge: true });
-          batch.set(doc(db, `users/${uid}/settings/vibeTags`), { list: vibeTags }, { merge: true });
 
           // 4. Categories
           batch.set(doc(db, `users/${uid}/settings/categories`), { structure: catStructure }, { merge: true });
@@ -480,8 +476,6 @@ export default function Settings() {
              <ListManager title="Laufmaschen-Orte" items={runLocations} newItem={newRunLocation} setNewItem={setNewRunLocation} listName="runLocations" setList={setRunLocations} />
              <Divider sx={{ my: 1 }} />
              <ListManager title="Laufmaschen-Gründe" items={runCauses} newItem={newRunCause} setNewItem={setNewRunCause} listName="runCauses" setList={setRunCauses} />
-             <Divider sx={{ my: 1 }} />
-             <ListManager title="Vibe Tags" items={vibeTags} newItem={newVibeTag} setNewItem={setNewVibeTag} listName="vibeTags" setList={setVibeTags} />
          </AccordionDetails>
       </Accordion>
 

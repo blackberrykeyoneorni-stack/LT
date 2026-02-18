@@ -8,7 +8,7 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useNFCGlobal } from '../contexts/NFCContext'; 
-import { loadVibeTags, calculateItemRecoveryStatus } from '../services/ItemService'; // SSOT Import
+import { calculateItemRecoveryStatus } from '../services/ItemService'; // SSOT Import: loadVibeTags entfernt
 import { startSession as startSessionService } from '../services/SessionService'; 
 import { safeDate } from '../utils/dateUtils';
 import { DEFAULT_ARCHIVE_REASONS, DEFAULT_RUN_LOCATIONS, DEFAULT_RUN_CAUSES } from '../utils/constants';
@@ -29,7 +29,7 @@ export function useItemDetailLogic() {
     const [restingHoursSetting, setRestingHoursSetting] = useState(24);
     
     // IMAGE UPLOAD STATE
-    const [pendingFiles, setPendingFiles] = useState([]); 
+    const [pendingFiles, setPendingFiles] = useState([]);
 
     // Form Data
     const [formData, setFormData] = useState({});
@@ -40,7 +40,7 @@ export function useItemDetailLogic() {
         categoryStructure: {}, 
         materials: [],
         locations: [],
-        vibeTagsList: [],
+        // vibeTagsList entfernt
         archiveReasons: DEFAULT_ARCHIVE_REASONS,
         runLocations: DEFAULT_RUN_LOCATIONS,
         runCauses: DEFAULT_RUN_CAUSES
@@ -94,7 +94,7 @@ export function useItemDetailLogic() {
                     location: itemData.location || '',
                     suitablePeriod: itemData.suitablePeriod || 'Beide', 
                     purchaseDate: itemData.purchaseDate ? new Date(itemData.purchaseDate).toISOString().split('T')[0] : '', 
-                    vibeTags: itemData.vibeTags || [],
+                    // vibeTags entfernt
                     notes: itemData.notes || ''
                 });
 
@@ -112,7 +112,7 @@ export function useItemDetailLogic() {
                     categoryStructure: catSnap.exists() ? (catSnap.data().structure || {}) : {},
                     materials: matSnap.exists() ? (matSnap.data().list || []) : [],
                     locations: locSnap.exists() ? (locSnap.data().list || []) : [],
-                    vibeTagsList: await loadVibeTags(currentUser.uid),
+                    // vibeTagsList entfernt
                     archiveReasons: DEFAULT_ARCHIVE_REASONS,
                     runLocations: DEFAULT_RUN_LOCATIONS,
                     runCauses: DEFAULT_RUN_CAUSES
@@ -217,7 +217,6 @@ export function useItemDetailLogic() {
 
             const instrRef = doc(db, `users/${currentUser.uid}/status/dailyInstruction`);
             const instrSnap = await getDoc(instrRef);
-
             if (instrSnap.exists()) {
                 const instr = instrSnap.data();
                 if (instr.items && instr.items.some(i => i.id === id)) {
@@ -234,7 +233,6 @@ export function useItemDetailLogic() {
                 acceptedAt,
                 verifiedViaNfc: viaNFC
             });
-
             navigate('/');
         } catch (e) { console.error(e); alert("Fehler beim Starten."); }
     };
@@ -276,7 +274,6 @@ export function useItemDetailLogic() {
             };
 
             await updateDoc(doc(db, `users/${currentUser.uid}/items`, id), updatedData);
-            
             setItem({ ...item, ...updatedData });
             setPendingFiles([]); 
             setIsEditing(false);
@@ -292,14 +289,12 @@ export function useItemDetailLogic() {
                 cleanDate: null, 
                 historyLog: arrayUnion({ type: 'wash_pending', date: timestamp })
             });
-            
             setItem(prev => ({ 
                 ...prev, 
                 status: 'washing',
                 cleanDate: null, 
                 historyLog: [...(prev.historyLog || []), { type: 'wash_pending', date: timestamp }] 
             }));
-            
             navigate('/inventory');
 
         } catch (e) { console.error(e); }

@@ -58,7 +58,7 @@ const defaultNewItem = {
     name: '', brand: '', model: '', mainCategory: 'Nylons', subCategory: '',
     material: '', color: '', cost: '', condition: 5, suitablePeriod: 'Beide',
     purchaseDate: new Date().toISOString().split('T')[0],
-    notes: '', vibeTags: [], location: '', imageUrl: '', customId: ''
+    notes: '', location: '', imageUrl: '', customId: ''
 };
 
 export default function Inventory() {
@@ -72,8 +72,7 @@ export default function Inventory() {
 
   // Settings & Filter States
   const [dropdowns, setDropdowns] = useState({ 
-      brands: [], materials: [], locations: [], 
-      categoryStructure: {}, vibeTagsList: [] 
+      brands: [], materials: [], locations: [], categoryStructure: {} 
   });
   const [restingHours, setRestingHours] = useState(24);
    
@@ -104,21 +103,19 @@ export default function Inventory() {
     if (!currentUser) return;
     const loadSettings = async () => {
       try {
-        const [bSnap, mSnap, pSnap, lSnap, cSnap, vSnap] = await Promise.all([
+        const [bSnap, mSnap, pSnap, lSnap, cSnap] = await Promise.all([
             getDoc(doc(db, `users/${currentUser.uid}/settings/brands`)),
             getDoc(doc(db, `users/${currentUser.uid}/settings/materials`)),
             getDoc(doc(db, `users/${currentUser.uid}/settings/preferences`)),
             getDoc(doc(db, `users/${currentUser.uid}/settings/locations`)),
-            getDoc(doc(db, `users/${currentUser.uid}/settings/categories`)),
-            getDoc(doc(db, `users/${currentUser.uid}/settings/vibes`))
+            getDoc(doc(db, `users/${currentUser.uid}/settings/categories`))
         ]);
 
         setDropdowns({
             brands: bSnap.exists() ? bSnap.data().list : [],
             materials: mSnap.exists() ? mSnap.data().list : [],
             locations: lSnap.exists() ? lSnap.data().list : [],
-            categoryStructure: cSnap.exists() ? cSnap.data().structure : {},
-            vibeTagsList: vSnap.exists() ? vSnap.data().list : ['Business', 'Casual', 'Shiny', 'Matte', 'Reinforced']
+            categoryStructure: cSnap.exists() ? cSnap.data().structure : {}
         });
 
         if (pSnap.exists()) {

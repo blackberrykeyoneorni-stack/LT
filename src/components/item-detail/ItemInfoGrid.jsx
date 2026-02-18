@@ -39,7 +39,7 @@ const UnifiedField = ({ label, value, icon, isEditing, onChange, type = "text", 
 };
 
 export default function ItemInfoGrid({ isEditing, formData, item, setFormData, dropdowns }) {
-    const safeDropdowns = dropdowns || { brands: [], materials: [], locations: [], categories: [], vibeTagsList: [] };
+    const safeDropdowns = dropdowns || { brands: [], materials: [], locations: [], categories: [] };
     const availableSubCats = (safeDropdowns.categoryStructure && formData?.mainCategory) ? (safeDropdowns.categoryStructure[formData.mainCategory] || []) : (safeDropdowns.categories || []);
     const handleChange = (field, val) => { if (setFormData) setFormData(prev => ({ ...prev, [field]: val })); };
     const displayItem = isEditing ? formData : item;
@@ -74,11 +74,9 @@ export default function ItemInfoGrid({ isEditing, formData, item, setFormData, d
                 {isEditing ? (
                     <Box>
                         <UnifiedField label="Notizen" value={formData.notes} multiline rows={3} icon={<NotesIcon fontSize="inherit" />} isEditing={true} onChange={e => handleChange('notes', e.target.value)}/>
-                        <FormControl fullWidth sx={{ mt: 2 }}><InputLabel>Vibe Tags</InputLabel><Select multiple value={Array.isArray(formData.vibeTags) ? formData.vibeTags : []} onChange={(e) => handleChange('vibeTags', typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value)} input={<OutlinedInput label="Vibe Tags" />} renderValue={(selected) => (<Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>{selected.map((value) => <Chip key={value} label={value} size="small" />)}</Box>)}>{safeDropdowns.vibeTagsList && safeDropdowns.vibeTagsList.map((tag) => <MenuItem key={tag} value={tag}>{tag}</MenuItem>)}</Select></FormControl>
                     </Box>
                 ) : (
                     <>
-                    {displayItem.vibeTags && displayItem.vibeTags.length > 0 && (<Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2, justifyContent: 'center' }}>{displayItem.vibeTags.map(tag => <Chip key={tag} label={tag} size="small" sx={{ bgcolor: 'rgba(255,255,255,0.08)', border: 'none' }} />)}</Box>)}
                     {displayItem.notes && (<Box sx={{ p: 2, bgcolor: PALETTE.background.lightGlass, borderRadius: 2, display:'flex', gap:1 }}><NotesIcon color="action" fontSize="small" /><Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>"{displayItem.notes}"</Typography></Box>)}
                     </>
                 )}

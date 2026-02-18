@@ -9,45 +9,12 @@ import {
     orderBy, 
     onSnapshot, 
     serverTimestamp,
-    getDoc,
-    setDoc,
     increment,
     arrayUnion
 } from 'firebase/firestore';
 import { safeDate } from '../utils/dateUtils';
 
 const COLLECTION_NAME = 'items';
-const VIBE_TAGS_PATH = 'settings/vibeTags';
-
-// --- VIBE TAGS LOGIK ---
-
-const defaultVibeTagsList = [
-    "Glatt", "Samtig", "Kratzig", "Kühl", "Warm", 
-    "Eng anliegend", "Locker", "Sicher", "Verboten", 
-    "Verführerisch", "Diskret", "Kraftvoll", "Verspielt",
-    "Büro", "Draußen", "Sportlich"
-];
-
-export const loadVibeTags = async (userId) => {
-    try {
-        const tagRef = doc(db, `users/${userId}/${VIBE_TAGS_PATH}`);
-        const tagSnap = await getDoc(tagRef);
-        
-        if (tagSnap.exists()) {
-            const data = tagSnap.data();
-            if (Array.isArray(data.list)) {
-                return data.list;
-            }
-        }
-        
-        await setDoc(tagRef, { list: defaultVibeTagsList });
-        return defaultVibeTagsList;
-
-    } catch (error) {
-        console.error("Fehler beim Laden der Vibe Tags:", error);
-        return defaultVibeTagsList;
-    }
-};
 
 // --- RECOVERY LOGIK ---
 
@@ -84,7 +51,7 @@ export const calculateItemRecoveryStatus = (item, sessions, restingHoursSetting 
     return null;
 };
 
-// --- CRUD & STATS LOGIK (Das fehlte) ---
+// --- CRUD & STATS LOGIK ---
 
 /**
  * Abonniert alle Items eines Users (Realtime).
