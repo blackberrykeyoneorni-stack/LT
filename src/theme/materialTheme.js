@@ -37,6 +37,7 @@ const m3Tokens = {
   onBackground: '#EEDEEA',
   surface: '#0A050A',
   onSurface: '#EEDEEA',
+  onSurfaceVariant: '#D4C4CE',
   
   // SURFACE CONTAINER (Ersetzt die alte "Elevation" Logik)
   surfaceContainerLow: '#140A14',   // Hintergrund für Listen
@@ -53,6 +54,7 @@ export const materialTheme = createTheme({
     mode: 'dark',
     primary: { main: m3Tokens.primary, contrastText: m3Tokens.onPrimary },
     secondary: { main: m3Tokens.secondary, contrastText: m3Tokens.onSecondary },
+    tertiary: { main: m3Tokens.tertiary, contrastText: m3Tokens.onTertiary },
     error: { main: m3Tokens.error, contrastText: m3Tokens.onError },
     background: {
       default: m3Tokens.background,
