@@ -28,7 +28,7 @@ export default function ProgressBar({ currentMinutes, targetHours, isGoalMetToda
     // Nacht-Status Icon Farbe
     let nightColor = 'text.disabled'; // Default: Grau (Offen/Wartend)
     if (nightSuccess) nightColor = '#FFD700'; // Gold bei Erfolg
-    else if (nightFailed) nightColor = PALETTE.error.main; // Crimson Rot bei Versagen
+    else if (nightFailed) nightColor = PALETTE.accents.red; // Crimson Rot bei Versagen
 
     const formatTime = (totalMins) => {
         const h = Math.floor(totalMins / 60);
