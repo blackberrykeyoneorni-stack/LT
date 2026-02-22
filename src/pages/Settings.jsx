@@ -8,7 +8,7 @@ import { useSecurity } from '../contexts/SecurityContext';
 import { useNFCGlobal } from '../contexts/NFCContext';
 import { generateBackup, downloadBackupFile } from '../services/BackupService';
 import { enableBiometrics, disableBiometrics, isBiometricSupported } from '../services/BiometricService';
-import { addSuspension, getSuspensions, terminateSuspension } from '../services/SuspensionService';
+import { addSuspension, getSuspensions, terminateSuspension, deleteScheduledSuspension } from '../services/SuspensionService';
 import { DEFAULT_PROTOCOL_RULES } from '../config/defaultRules';
 
 import ProtocolSettings from '../components/settings/ProtocolSettings';
@@ -194,7 +194,18 @@ export default function Settings() {
   };
 
   const handleAddSuspension = async () => {
-      if(!newSuspension.startDate || !newSuspension.endDate || !newSuspension.reason) return;
+      let currentReason = newSuspension.reason;
+      
+      // Auto-Fill für Stealth-Travel, falls kein Grund angegeben wurde
+      if (newSuspension.type === 'stealth_travel' && !currentReason) {
+          currentReason = 'Operation: Infiltration';
+      }
+
+      // Stilles Scheitern verhindern -> Visuelles Feedback geben
+      if(!newSuspension.startDate || !newSuspension.endDate || !currentReason) {
+          showToast("Bitte fülle alle notwendigen Felder aus.", "error");
+          return;
+      }
       
       const start = new Date(newSuspension.startDate);
       const end = new Date(newSuspension.endDate);
@@ -205,12 +216,13 @@ export default function Settings() {
           // Switch to packing mode
           setRequiredPackAmounts({ days: diffDays, nights: diffDays });
           setStealthItems([]);
+          setNewSuspension(prev => ({...prev, reason: currentReason})); // Sicherstellen, dass Reason für Speicherung existiert
           setSuspensionDialogMode('pack');
           return;
       }
       
       try {
-          await addSuspension(currentUser.uid, newSuspension);
+          await addSuspension(currentUser.uid, { ...newSuspension, reason: currentReason });
           showToast("Auszeit beantragt & genehmigt.", "success");
           setSuspensionDialog(false);
           loadSuspensions();
@@ -239,6 +251,13 @@ export default function Settings() {
 
   const handleToggleStealthItem = (id) => {
       setStealthItems(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+  };
+
+  const handleDeleteSuspension = async (id) => {
+      if(!window.confirm("Bist du sicher, dass du diese geplante Auszeit löschen möchtest?")) return;
+      await deleteScheduledSuspension(currentUser.uid, id);
+      loadSuspensions();
+      showToast("Geplante Auszeit verworfen.", "info");
   };
 
   const handleTerminateSuspension = async (id) => {
@@ -389,11 +408,18 @@ export default function Settings() {
                         <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
                             {sus.startDate.toLocaleDateString()} - {sus.endDate.toLocaleDateString()}
                         </Typography>
-                        {sus.status === 'active' && (
-                            <Button size="small" color="inherit" onClick={() => handleTerminateSuspension(sus.id)} sx={{ mt: 1, fontSize:'0.7rem' }}>
-                                Vorzeitig beenden
-                            </Button>
-                        )}
+                        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                            {sus.status === 'active' && (
+                                <Button size="small" color="inherit" onClick={() => handleTerminateSuspension(sus.id)} sx={{ mt: 1, fontSize:'0.7rem' }}>
+                                    Vorzeitig beenden
+                                </Button>
+                            )}
+                            {sus.status === 'scheduled' && (
+                                <Button size="small" color="error" onClick={() => handleDeleteSuspension(sus.id)} sx={{ mt: 1, fontSize:'0.7rem' }}>
+                                    Planung verwerfen
+                                </Button>
+                            )}
+                        </Box>
                     </Paper>
                 ))}
             </Stack>

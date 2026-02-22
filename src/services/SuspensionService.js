@@ -1,5 +1,5 @@
 import { db } from '../firebase';
-import { collection, addDoc, query, where, getDocs, updateDoc, doc, Timestamp, orderBy } from 'firebase/firestore';
+import { collection, addDoc, query, where, getDocs, updateDoc, doc, Timestamp, orderBy, deleteDoc } from 'firebase/firestore';
 import { DEFAULT_PROTOCOL_RULES } from '../config/defaultRules';
 
 const COLLECTION = 'suspensions';
@@ -26,6 +26,13 @@ export const addSuspension = async (userId, data) => {
         createdAt: Timestamp.now(),
         status: 'scheduled'
     });
+};
+
+/**
+ * Löscht eine noch nicht gestartete (scheduled) Aussetzung vollständig.
+ */
+export const deleteScheduledSuspension = async (userId, suspensionId) => {
+    await deleteDoc(doc(db, `users/${userId}/${COLLECTION}`, suspensionId));
 };
 
 /**
