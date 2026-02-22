@@ -202,6 +202,7 @@ export default function Dashboard() {
   
   const hasVoluntarySession = activeSessions.some(s => s.type === 'voluntary' && !s.endTime);
   const budgetBalance = monthlyBudget - currentSpent;
+  const isStealthActive = activeSuspension?.type === 'stealth_travel';
 
   const showToast = (message, severity = 'success') => setToast({ open: true, message, severity });
   const handleCloseToast = () => setToast({ ...toast, open: false });
@@ -292,7 +293,7 @@ export default function Dashboard() {
                 }
                 
                 // --- GAMBLE CHECK ---
-                if (!hasGambledThisSession && items.length > 0) {
+                if (!hasGambledThisSession && items.length > 0 && !isStealthActive) {
                     const activePunishItem = punishmentStatus.active ? punishmentItem : null;
                     const gambleResult = await checkGambleTrigger(currentUser.uid, false, isInstructionActive, activePunishItem);
                     if (gambleResult.trigger) {
@@ -309,7 +310,7 @@ export default function Dashboard() {
                 }
 
                 // REGULÄRER TRIGGER (während einer Session)
-                if (isInstructionActive) { 
+                if (isInstructionActive && !isStealthActive) { 
                     const triggered = await checkForTZDTrigger(currentUser.uid, activeSessions, items); 
                     if (triggered) {
                         setTzdActive(true);
@@ -329,7 +330,7 @@ export default function Dashboard() {
         interval = setInterval(checkTZD, 300000); 
     }
     return () => clearInterval(interval);
-  }, [currentUser, items, activeSessions, itemsLoading, tzdActive, isInstructionActive, hasGambledThisSession, punishmentStatus, punishmentItem]);
+  }, [currentUser, items, activeSessions, itemsLoading, tzdActive, isInstructionActive, hasGambledThisSession, punishmentStatus, punishmentItem, isStealthActive]);
 
   // 4. Instruction / Period
   useEffect(() => {
@@ -371,7 +372,7 @@ export default function Dashboard() {
                         }
                         if (instr) setCurrentInstruction(instr);
 
-                    } else if (!isFreeDay || currentPeriod.includes('night')) {
+                    } else if (!isFreeDay || currentPeriod.includes('night') || isStealthActive) {
                         const newInstr = await generateAndSaveInstruction(currentUser.uid, items, activeSessions, currentPeriod);
                         setCurrentInstruction(newInstr);
                     } else {
@@ -383,7 +384,7 @@ export default function Dashboard() {
             check();
         }
     }
-  }, [items.length, sessionsLoading, currentPeriod, currentInstruction, instructionStatus, isFreeDay, activeSessions]);
+  }, [items.length, sessionsLoading, currentPeriod, currentInstruction, instructionStatus, isFreeDay, activeSessions, isStealthActive]);
 
   useEffect(() => {
       if (!currentInstruction || !currentInstruction.isAccepted || currentInstruction.evasionPenaltyTriggered) return;
@@ -614,7 +615,7 @@ export default function Dashboard() {
       );
   }
 
-  if (activeSuspension) {
+  if (activeSuspension && !isStealthActive) {
       return (
         <Box sx={DESIGN_TOKENS.bottomNavSpacer}>
             <Container maxWidth="sm" sx={{ pt: 10, textAlign: 'center' }}>
@@ -669,6 +670,18 @@ export default function Dashboard() {
                     />
                 )}
             </Box>
+
+            {/* NEU: STEALTH BANNER */}
+            {isStealthActive && (
+                <Paper sx={{ p: 2, mb: 3, bgcolor: PALETTE.accents.purple, border: `1px solid ${PALETTE.accents.purple}` }}>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 'bold', color: '#fff', textTransform: 'uppercase', textAlign: 'center' }}>
+                        OPERATION: INFILTRATION AKTIV
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.7)', display: 'block', textAlign: 'center' }}>
+                        Inventar limitiert. Time-Bank-Steuer: 90%. Gambles deaktiviert.
+                    </Typography>
+                </Paper>
+            )}
 
             <ProgressBar 
                 currentMinutes={progress.currentContinuousMinutes} 

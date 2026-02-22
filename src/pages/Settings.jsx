@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { 
-    doc, getDoc, setDoc, writeBatch, serverTimestamp 
+    doc, getDoc, setDoc, writeBatch, serverTimestamp, collection, getDocs, query, where 
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
@@ -9,9 +9,8 @@ import { useNFCGlobal } from '../contexts/NFCContext';
 import { generateBackup, downloadBackupFile } from '../services/BackupService';
 import { enableBiometrics, disableBiometrics, isBiometricSupported } from '../services/BiometricService';
 import { addSuspension, getSuspensions, terminateSuspension } from '../services/SuspensionService';
-import { DEFAULT_PROTOCOL_RULES } from '../config/defaultRules'; // Import Defaults
+import { DEFAULT_PROTOCOL_RULES } from '../config/defaultRules';
 
-// Import der ProtocolSettings Komponente
 import ProtocolSettings from '../components/settings/ProtocolSettings';
 
 import {
@@ -20,23 +19,21 @@ import {
   Chip, Stack, Switch, Slider, Snackbar, Alert, IconButton,
   Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions,
   CircularProgress, List, ListItem, ListItemText, FormControl, InputLabel, Select, MenuItem,
-  Divider, Avatar, FormControlLabel
+  Divider, Avatar, FormControlLabel, Checkbox, FormGroup
 } from '@mui/material';
 
-// --- ZENTRALES DESIGN ---
 import { DESIGN_TOKENS, PALETTE } from '../theme/obsidianDesign';
 import { Icons } from '../theme/appIcons';
 import MedicalServicesIcon from '@mui/icons-material/MedicalServices';
 import ScienceIcon from '@mui/icons-material/Science';
 import TuneIcon from '@mui/icons-material/Tune'; 
-import SaveIcon from '@mui/icons-material/Save'; // Import für den großen Button
+import SaveIcon from '@mui/icons-material/Save'; 
+import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 
 export default function Settings() {
   const { currentUser, logout } = useAuth();
   const { isBiometricActive, updateStatus } = useSecurity();
   const { startBindingScan, isScanning } = useNFCGlobal();
-  
-  // --- STATE DEFINITIONS ---
   
   const [brands, setBrands] = useState([]); const [newBrand, setNewBrand] = useState('');
   const [materials, setMaterials] = useState([]); const [newMaterial, setNewMaterial] = useState('');
@@ -61,24 +58,26 @@ export default function Settings() {
   const [nylonRestingHours, setNylonRestingHours] = useState(24); 
   const [maxInstructionItems, setMaxInstructionItems] = useState(1); 
   
-  // NEU: State für Protocol Rules im Parent
   const [protocolRules, setProtocolRules] = useState(null);
-
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   
+  // Suspension & Stealth State
   const [suspensions, setSuspensions] = useState([]);
   const [suspensionDialog, setSuspensionDialog] = useState(false);
+  const [suspensionDialogMode, setSuspensionDialogMode] = useState('plan'); // 'plan' or 'pack'
   const [newSuspension, setNewSuspension] = useState({ type: 'medical', reason: '', startDate: '', endDate: '' });
+  const [allItems, setAllItems] = useState([]);
+  const [stealthItems, setStealthItems] = useState([]); 
+  const [requiredPackAmounts, setRequiredPackAmounts] = useState({ days: 0, nights: 0 });
 
   const [loading, setLoading] = useState(true); 
   const [backupLoading, setBackupLoading] = useState(false); 
-  const [isSavingAll, setIsSavingAll] = useState(false); // Neuer State für Save Button
+  const [isSavingAll, setIsSavingAll] = useState(false); 
   const [toast, setToast] = useState({ open: false, message: '', severity: 'success' });
   
   const showToast = (message, severity = 'success') => setToast({ open: true, message, severity });
   const handleCloseToast = () => setToast({ ...toast, open: false });
 
-  // --- LOAD DATA ---
   useEffect(() => { 
     if (currentUser) { 
         loadAll(); 
@@ -90,7 +89,7 @@ export default function Settings() {
   const loadAll = async () => {
       try {
           const userId = currentUser.uid;
-          const [bSnap, mSnap, catSnap, locSnap, locIdxSnap, prefSnap, arSnap, rlSnap, rcSnap, protSnap] = await Promise.all([
+          const [bSnap, mSnap, catSnap, locSnap, locIdxSnap, prefSnap, arSnap, rlSnap, rcSnap, protSnap, itemsSnap] = await Promise.all([
               getDoc(doc(db, `users/${userId}/settings/brands`)),
               getDoc(doc(db, `users/${userId}/settings/materials`)),
               getDoc(doc(db, `users/${userId}/settings/categories`)),
@@ -100,7 +99,8 @@ export default function Settings() {
               getDoc(doc(db, `users/${userId}/settings/archiveReasons`)),
               getDoc(doc(db, `users/${userId}/settings/runLocations`)),
               getDoc(doc(db, `users/${userId}/settings/runCauses`)),
-              getDoc(doc(db, `users/${userId}/settings/protocol`)) // Protocol hier laden
+              getDoc(doc(db, `users/${userId}/settings/protocol`)),
+              getDocs(query(collection(db, `users/${userId}/items`), where('status', '==', 'active')))
           ]);
 
           if (bSnap.exists()) setBrands(bSnap.data().list || []);
@@ -116,7 +116,6 @@ export default function Settings() {
               setCategoryWeights(d.categoryWeights || {});
           }
 
-          // Protocol Merging Logic (wie vorher in ProtocolSettings)
           let mergedRules = JSON.parse(JSON.stringify(DEFAULT_PROTOCOL_RULES));
           mergedRules.currentDailyGoal = 4;
           if (protSnap.exists()) {
@@ -138,6 +137,9 @@ export default function Settings() {
           setArchiveReasons(arSnap.exists() ? arSnap.data().list : ['Laufmasche', 'Verschlissen', 'Verloren', 'Spende']);
           setRunLocations(rlSnap.exists() ? rlSnap.data().list : ['Zehe', 'Ferse', 'Sohle', 'Oberschenkel', 'Zwickel']);
           setRunCauses(rcSnap.exists() ? rcSnap.data().list : ['Schuhe', 'Nägel', 'Schmuck', 'Möbel', 'Unbekannt']);
+          
+          const itemsData = itemsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+          setAllItems(itemsData);
 
       } catch (e) { console.error(e); } finally { setLoading(false); }
   };
@@ -154,26 +156,22 @@ export default function Settings() {
       setBiometricAvailable(avail);
   };
 
-  // --- ACTIONS: SAVE ALL ---
   const handleSaveAll = async () => {
       setIsSavingAll(true);
       try {
           const batch = writeBatch(db);
           const uid = currentUser.uid;
 
-          // 1. Preferences
           const prefRef = doc(db, `users/${uid}/settings/preferences`);
           batch.set(prefRef, {
               nylonRestingHours, maxInstructionItems, categoryWeights
           }, { merge: true });
 
-          // 2. Protocol
           if (protocolRules) {
               const protRef = doc(db, `users/${uid}/settings/protocol`);
               batch.set(protRef, { ...protocolRules, lastGoalUpdate: serverTimestamp() }, { merge: true });
           }
 
-          // 3. Lists
           batch.set(doc(db, `users/${uid}/settings/brands`), { list: brands }, { merge: true });
           batch.set(doc(db, `users/${uid}/settings/materials`), { list: materials }, { merge: true });
           batch.set(doc(db, `users/${uid}/settings/locations`), { list: locations }, { merge: true });
@@ -181,10 +179,7 @@ export default function Settings() {
           batch.set(doc(db, `users/${uid}/settings/runLocations`), { list: runLocations }, { merge: true });
           batch.set(doc(db, `users/${uid}/settings/runCauses`), { list: runCauses }, { merge: true });
 
-          // 4. Categories
           batch.set(doc(db, `users/${uid}/settings/categories`), { structure: catStructure }, { merge: true });
-
-          // 5. NFC Index (Zur Sicherheit mit speichern, falls offline Änderungen waren)
           batch.set(doc(db, `users/${uid}/settings/locationIndex`), { mapping: locationIndex }, { merge: true });
 
           await batch.commit();
@@ -198,9 +193,22 @@ export default function Settings() {
       }
   };
 
-  // --- ACTIONS: SUSPENSION ---
   const handleAddSuspension = async () => {
       if(!newSuspension.startDate || !newSuspension.endDate || !newSuspension.reason) return;
+      
+      const start = new Date(newSuspension.startDate);
+      const end = new Date(newSuspension.endDate);
+      const diffTime = Math.abs(end - start);
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; 
+      
+      if (newSuspension.type === 'stealth_travel') {
+          // Switch to packing mode
+          setRequiredPackAmounts({ days: diffDays, nights: diffDays });
+          setStealthItems([]);
+          setSuspensionDialogMode('pack');
+          return;
+      }
+      
       try {
           await addSuspension(currentUser.uid, newSuspension);
           showToast("Auszeit beantragt & genehmigt.", "success");
@@ -212,6 +220,27 @@ export default function Settings() {
       }
   };
 
+  const handleConfirmPack = async () => {
+      try {
+          const payload = {
+              ...newSuspension,
+              packedItemIds: stealthItems
+          };
+          await addSuspension(currentUser.uid, payload);
+          showToast("Operation: Infiltration registriert. Loadout gespeichert.", "success");
+          setSuspensionDialog(false);
+          setSuspensionDialogMode('plan');
+          loadSuspensions();
+          setNewSuspension({ type: 'medical', reason: '', startDate: '', endDate: '' });
+      } catch (e) {
+          showToast(e.message, "error");
+      }
+  };
+
+  const handleToggleStealthItem = (id) => {
+      setStealthItems(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+  };
+
   const handleTerminateSuspension = async (id) => {
       if(!window.confirm("Bist du sicher, dass du den Dienst vorzeitig wieder aufnehmen willst?")) return;
       await terminateSuspension(currentUser.uid, id);
@@ -219,7 +248,6 @@ export default function Settings() {
       showToast("Willkommen zurück.", "success");
   };
 
-  // --- ACTIONS: BIOMETRICS ---
   const handleToggleBiometrics = async (e) => {
       const shouldEnable = e.target.checked;
       if (shouldEnable) {
@@ -233,13 +261,11 @@ export default function Settings() {
       }
   };
 
-  // --- ACTIONS: NFC LOCATIONS ---
   const handleStartPairing = (loc) => {
       setPairingLocation(loc);
       startBindingScan(async (tagId) => {
           try {
               const newMapping = { ...locationIndex, [tagId]: loc };
-              // NFC Pairing speichern wir sofort, da es eine Interaktion ist
               await setDoc(doc(db, `users/${currentUser.uid}/settings/locationIndex`), { mapping: newMapping }, { merge: true });
               setLocationIndex(newMapping);
               showToast(`Ort ${loc} verknüpft!`, "success");
@@ -247,7 +273,6 @@ export default function Settings() {
       });
   };
 
-  // --- ACTIONS: CATEGORIES (lokal) ---
   const updateCategories = (newStruct) => setCatStructure(newStruct);
   
   const addMainCategory = () => {
@@ -270,8 +295,6 @@ export default function Settings() {
     updateCategories({ ...catStructure, [main]: [...current, newSubCat.trim()] }); setNewSubCat('');
   };
 
-  // --- ACTIONS: LISTS HELPER (lokal) ---
-  // HINWEIS: Hier speichern wir nicht mehr in die DB, sondern nur in den State!
   const addItemToList = (listName, newItem, setList, currentList) => { 
       if (!newItem.trim()) return; 
       const l = [...currentList, newItem.trim()]; 
@@ -335,11 +358,15 @@ export default function Settings() {
       if(catStructure[main]) catStructure[main].forEach(sub => allCategoryOptions.push({ label: `• ${sub}`, value: sub }));
   });
 
+  // Derived Stealth Stats
+  const packedSocksCount = allItems.filter(i => stealthItems.includes(i.id) && i.subCategory === 'Kniestrümpfe').length;
+  const packedTightsCount = allItems.filter(i => stealthItems.includes(i.id) && i.subCategory === 'Strumpfhose').length;
+  const isPackValid = packedSocksCount >= requiredPackAmounts.days && packedTightsCount >= requiredPackAmounts.nights;
+
   return (
     <Container maxWidth="md" disableGutters sx={{ pt: 1, pb: 15, px: 0.5 }}>
       <Typography variant="h4" gutterBottom sx={{ ...DESIGN_TOKENS.textGradient, ml: 1 }}>Einstellungen</Typography>
 
-      {/* 1. PROTOKOLL-VERWALTUNG */}
       <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.accents.gold}` }}>
         <AccordionSummary expandIcon={<Icons.Expand />}>
             <SectionHeader icon={MedicalServicesIcon} title="Protokoll-Verwaltung" color={PALETTE.accents.gold} />
@@ -347,14 +374,14 @@ export default function Settings() {
         <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                 <Typography variant="body2" color="text.secondary">Geplante Ausfallzeiten</Typography>
-                <Button variant="contained" size="small" sx={{ bgcolor: PALETTE.accents.gold, color:'#000' }} onClick={() => setSuspensionDialog(true)} startIcon={<Icons.Add />}>
+                <Button variant="contained" size="small" sx={{ bgcolor: PALETTE.accents.gold, color:'#000' }} onClick={() => { setSuspensionDialogMode('plan'); setSuspensionDialog(true); }} startIcon={<Icons.Add />}>
                     Beantragen
                 </Button>
             </Box>
             <Stack spacing={1}>
                 {suspensions.length === 0 && <Typography variant="caption" sx={{ fontStyle:'italic', color: PALETTE.text.muted }}>Keine geplanten Auszeiten.</Typography>}
                 {suspensions.map(sus => (
-                    <Paper key={sus.id} sx={{ p: 2, bgcolor: 'rgba(255,255,255,0.05)', borderLeft: `2px solid ${PALETTE.accents.gold}` }}>
+                    <Paper key={sus.id} sx={{ p: 2, bgcolor: 'rgba(255,255,255,0.05)', borderLeft: `2px solid ${sus.type === 'stealth_travel' ? PALETTE.accents.purple : PALETTE.accents.gold}` }}>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                             <Typography variant="subtitle2" fontWeight="bold">{sus.type.toUpperCase()}: {sus.reason}</Typography>
                             {sus.status === 'active' && <Chip label="AKTIV" color="warning" size="small" />}
@@ -373,7 +400,6 @@ export default function Settings() {
         </AccordionDetails>
       </Accordion>
 
-      {/* 2. PROTOKOLL KONFIGURATION */}
       <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.accents.purple}` }}>
         <AccordionSummary expandIcon={<Icons.Expand />}>
             <SectionHeader icon={TuneIcon} title="Protokoll Konfiguration (Core)" color={PALETTE.accents.purple} />
@@ -383,7 +409,6 @@ export default function Settings() {
         </AccordionDetails>
       </Accordion>
 
-      {/* 3. PRÄFERENZEN & LIMITS */}
       <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.primary.main}` }}>
         <AccordionSummary expandIcon={<Icons.Expand />}>
             <SectionHeader icon={Icons.Track} title="Präferenzen & Limits" color={PALETTE.primary.main} />
@@ -416,7 +441,6 @@ export default function Settings() {
         </AccordionDetails>
       </Accordion>
 
-      {/* 4. KATEGORIEN */}
       <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.accents.green}` }}>
         <AccordionSummary expandIcon={<Icons.Expand />}>
             <SectionHeader icon={Icons.Category} title="Kategorie Struktur" color={PALETTE.accents.green} />
@@ -441,7 +465,6 @@ export default function Settings() {
         </AccordionDetails>
       </Accordion>
 
-      {/* 5. ALGORITHMUS */}
       <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.accents.purple}` }}>
          <AccordionSummary expandIcon={<Icons.Expand />}><SectionHeader icon={Icons.Brain} title="Algorithmus" color={PALETTE.accents.purple} /></AccordionSummary>
          <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
@@ -467,7 +490,6 @@ export default function Settings() {
          </AccordionDetails>
       </Accordion>
 
-      {/* 6. FORENSIK */}
       <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.accents.red}` }}>
          <AccordionSummary expandIcon={<Icons.Expand />}><SectionHeader icon={ScienceIcon} title="Forensik & Attribute" color={PALETTE.accents.red} /></AccordionSummary>
          <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
@@ -479,7 +501,6 @@ export default function Settings() {
          </AccordionDetails>
       </Accordion>
 
-      {/* 7. LISTEN & ORTE */}
       <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.accents.blue}` }}>
          <AccordionSummary expandIcon={<Icons.Expand />}><SectionHeader icon={Icons.Inventory} title="Listen & Orte" color={PALETTE.accents.blue} /></AccordionSummary>
          <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
@@ -493,7 +514,6 @@ export default function Settings() {
          </AccordionDetails>
       </Accordion>
 
-      {/* 8. SYSTEM */}
       <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 10, borderLeft: '4px solid #fff' }}>
         <AccordionSummary expandIcon={<Icons.Expand />}><SectionHeader icon={Icons.Settings} title="System & Backup" color="#fff" /></AccordionSummary>
         <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
@@ -504,7 +524,6 @@ export default function Settings() {
         </AccordionDetails>
       </Accordion>
 
-      {/* CENTRAL SAVE BUTTON */}
       <Paper sx={{ 
           position: 'fixed', bottom: 80, left: 0, right: 0, 
           zIndex: 1000, 
@@ -526,20 +545,79 @@ export default function Settings() {
           </Button>
       </Paper>
 
-      {/* DIALOGS */}
       <Dialog open={suspensionDialog} onClose={() => setSuspensionDialog(false)} PaperProps={DESIGN_TOKENS.dialog.paper}>
-        <DialogTitle sx={DESIGN_TOKENS.dialog.title.sx}>Auszeit planen</DialogTitle>
-        <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
-            <DialogContentText sx={{ mb: 2 }}>Die Auszeit beginnt am gewählten Starttag um 07:30 Uhr und endet am Endtag um 23:00 Uhr.</DialogContentText>
-            <TextField select fullWidth label="Grund" value={newSuspension.type} onChange={e => setNewSuspension({...newSuspension, type: e.target.value})} margin="dense"><MenuItem value="medical">Medizinisch</MenuItem><MenuItem value="vacation">Urlaub/Reise</MenuItem><MenuItem value="social">Sozial/Besuch</MenuItem><MenuItem value="other">Sonstiges</MenuItem></TextField>
-            <TextField fullWidth label="Beschreibung" value={newSuspension.reason} onChange={e => setNewSuspension({...newSuspension, reason: e.target.value})} margin="dense" placeholder="z.B. Grippe" />
-            <TextField fullWidth type="date" label="Startdatum" InputLabelProps={{ shrink: true }} value={newSuspension.startDate} onChange={e => setNewSuspension({...newSuspension, startDate: e.target.value})} margin="dense" />
-            <TextField fullWidth type="date" label="Enddatum" InputLabelProps={{ shrink: true }} value={newSuspension.endDate} onChange={e => setNewSuspension({...newSuspension, endDate: e.target.value})} margin="dense" />
-        </DialogContent>
-        <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}><Button onClick={() => setSuspensionDialog(false)} color="inherit">Abbrechen</Button><Button onClick={handleAddSuspension} variant="contained" sx={DESIGN_TOKENS.buttonGradient}>Bestätigen</Button></DialogActions>
+        {suspensionDialogMode === 'plan' ? (
+            <>
+                <DialogTitle sx={DESIGN_TOKENS.dialog.title.sx}>Auszeit planen</DialogTitle>
+                <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
+                    <DialogContentText sx={{ mb: 2 }}>Die Auszeit beginnt am gewählten Starttag um 07:30 Uhr und endet am Endtag um 23:00 Uhr.</DialogContentText>
+                    <TextField select fullWidth label="Grund" value={newSuspension.type} onChange={e => setNewSuspension({...newSuspension, type: e.target.value})} margin="dense">
+                        <MenuItem value="medical">Medizinisch (Total)</MenuItem>
+                        <MenuItem value="social">Sozial/Besuch (Total)</MenuItem>
+                        <MenuItem value="stealth_travel" sx={{ color: PALETTE.accents.purple, fontWeight: 'bold' }}>Operation: Infiltration (Reise)</MenuItem>
+                        <MenuItem value="other">Sonstiges</MenuItem>
+                    </TextField>
+                    <TextField fullWidth label="Beschreibung" value={newSuspension.reason} onChange={e => setNewSuspension({...newSuspension, reason: e.target.value})} margin="dense" placeholder="z.B. Grippe" />
+                    <TextField fullWidth type="date" label="Startdatum" InputLabelProps={{ shrink: true }} value={newSuspension.startDate} onChange={e => setNewSuspension({...newSuspension, startDate: e.target.value})} margin="dense" />
+                    <TextField fullWidth type="date" label="Enddatum" InputLabelProps={{ shrink: true }} value={newSuspension.endDate} onChange={e => setNewSuspension({...newSuspension, endDate: e.target.value})} margin="dense" />
+                </DialogContent>
+                <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}><Button onClick={() => setSuspensionDialog(false)} color="inherit">Abbrechen</Button><Button onClick={handleAddSuspension} variant="contained" sx={DESIGN_TOKENS.buttonGradient}>Weiter</Button></DialogActions>
+            </>
+        ) : (
+            <>
+                <DialogTitle sx={{ ...DESIGN_TOKENS.dialog.title.sx, color: PALETTE.accents.purple, justifyContent: 'center' }}>
+                    <TravelExploreIcon sx={{ mr: 1 }} /> DIGITALER KOFFER
+                </DialogTitle>
+                <DialogContent sx={{ ...DESIGN_TOKENS.dialog.content.sx, maxHeight: '60vh', overflowY: 'auto' }}>
+                    <Alert severity="warning" sx={{ mb: 2, bgcolor: 'rgba(255,255,255,0.05)', color: '#fff' }}>
+                        Wähle exakt aus, welche Items physisch im Koffer sind.
+                        Das Protokoll greift nur auf dieses Loadout zu. 
+                    </Alert>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-around', mb: 3, p: 2, bgcolor: 'rgba(0,0,0,0.5)', borderRadius: 2 }}>
+                        <Box sx={{ textAlign: 'center' }}>
+                            <Typography variant="h6" sx={{ color: packedSocksCount >= requiredPackAmounts.days ? PALETTE.accents.green : PALETTE.accents.red }}>
+                                {packedSocksCount} / {requiredPackAmounts.days}
+                            </Typography>
+                            <Typography variant="caption">Kniestrümpfe</Typography>
+                        </Box>
+                        <Box sx={{ textAlign: 'center' }}>
+                            <Typography variant="h6" sx={{ color: packedTightsCount >= requiredPackAmounts.nights ? PALETTE.accents.green : PALETTE.accents.red }}>
+                                {packedTightsCount} / {requiredPackAmounts.nights}
+                            </Typography>
+                            <Typography variant="caption">Strumpfhosen</Typography>
+                        </Box>
+                    </Box>
+
+                    <Typography variant="subtitle2" sx={{ color: PALETTE.primary.main, mb: 1 }}>Verfügbare Kniestrümpfe</Typography>
+                    <FormGroup sx={{ mb: 3 }}>
+                        {allItems.filter(i => i.subCategory === 'Kniestrümpfe').map(i => (
+                            <FormControlLabel 
+                                key={i.id} 
+                                control={<Checkbox checked={stealthItems.includes(i.id)} onChange={() => handleToggleStealthItem(i.id)} />} 
+                                label={i.name || 'Unbenannt'} 
+                            />
+                        ))}
+                    </FormGroup>
+
+                    <Typography variant="subtitle2" sx={{ color: PALETTE.primary.main, mb: 1 }}>Verfügbare Strumpfhosen</Typography>
+                    <FormGroup>
+                        {allItems.filter(i => i.subCategory === 'Strumpfhose').map(i => (
+                            <FormControlLabel 
+                                key={i.id} 
+                                control={<Checkbox checked={stealthItems.includes(i.id)} onChange={() => handleToggleStealthItem(i.id)} />} 
+                                label={i.name || 'Unbenannt'} 
+                            />
+                        ))}
+                    </FormGroup>
+                </DialogContent>
+                <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}>
+                    <Button onClick={() => setSuspensionDialogMode('plan')} color="inherit">Zurück</Button>
+                    <Button onClick={handleConfirmPack} disabled={!isPackValid} variant="contained" sx={{ bgcolor: PALETTE.accents.purple }}>Bestätigen</Button>
+                </DialogActions>
+            </>
+        )}
       </Dialog>
       
-      {/* GLOBAL TOAST */}
       <Snackbar open={toast.open} autoHideDuration={4000} onClose={handleCloseToast} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}><Alert onClose={handleCloseToast} severity={toast.severity} variant="filled" sx={{ width: '100%' }}>{toast.message}</Alert></Snackbar>
     </Container>
   );

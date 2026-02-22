@@ -22,6 +22,7 @@ export const addSuspension = async (userId, data) => {
         reason: data.reason,
         startDate: Timestamp.fromDate(new Date(data.startDate)),
         endDate: Timestamp.fromDate(new Date(data.endDate)),
+        packedItemIds: data.packedItemIds || [], // NEU: Koffer-Array speichern
         createdAt: Timestamp.now(),
         status: 'scheduled'
     });
@@ -108,7 +109,8 @@ export const checkActiveSuspension = async (userId) => {
             // Suspension Flag im Daily Doc entfernen, damit Protokoll wieder greifen kann
             await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), { 
                 activeSuspension: false,
-                suspensionReason: null
+                suspensionReason: null,
+                stealthModeActive: false // NEU: Stealth abschalten
             });
             
             return null;
@@ -146,13 +148,22 @@ export const checkActiveSuspension = async (userId) => {
                 endTime: Timestamp.now()
             });
 
-            // B) Daily Instruction säubern (Die Strafe wird deaktiviert)
-            await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), {
-                evasionPenaltyTriggered: false, // WICHTIG: Stoppt die 150% Logik
-                tzdDurationMinutes: 0,
-                activeSuspension: true, // Markiert User als 'entschuldigt'
-                suspensionReason: data.reason
-            });
+            // WEICHE: Stealth vs. Normale Aussetzung
+            if (data.type === 'stealth_travel') {
+                await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), {
+                    evasionPenaltyTriggered: false, // WICHTIG: Stoppt die 150% Logik
+                    tzdDurationMinutes: 0,
+                    stealthModeActive: true // NEU: Aktiviert den Stealth-Instruction-Service
+                });
+            } else {
+                // B) Daily Instruction säubern (Die Strafe wird deaktiviert)
+                await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), {
+                    evasionPenaltyTriggered: false, // WICHTIG: Stoppt die 150% Logik
+                    tzdDurationMinutes: 0,
+                    activeSuspension: true, // Markiert User als 'entschuldigt'
+                    suspensionReason: data.reason
+                });
+            }
             
             console.log(`Suspension activated. TZD terminated. Reason: ${data.reason}`);
             // ----------------------------------------------
@@ -176,6 +187,7 @@ export const terminateSuspension = async (userId, suspensionId) => {
     // Auch das Daily Flag resetten, damit man sofort wieder teilnehmen kann
     await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), { 
         activeSuspension: false,
-        suspensionReason: null
+        suspensionReason: null,
+        stealthModeActive: false // NEU: Stealth beim Abbruch resetten
     });
 };

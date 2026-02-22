@@ -1,5 +1,5 @@
 import { db } from '../firebase';
-import { doc, getDoc, updateDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, setDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
 import { PUNISHMENT_CONFIG } from '../utils/constants';
 
 // Prüft, ob wir uns im erlaubten nächtlichen Zeitfenster für den Vollzug befinden
@@ -48,8 +48,9 @@ export const getPunishmentStatus = getActivePunishment;
 
 /**
  * Registriert eine Strafe mit definierter Dauer.
+ * NEU: Schiebt Strafen während einer Stealth-Reise in eine Warteschlange, anstatt sie sofort aktiv zu schalten.
  */
-export const registerPunishment = async (userId, reason, durationMinutes = 30) => {
+export const registerPunishment = async (userId, reason, durationMinutes = 30, bypassStealth = false) => {
     const statusRef = doc(db, `users/${userId}/status/punishment`);
     
     // Limits anwenden (aus Config)
@@ -57,6 +58,31 @@ export const registerPunishment = async (userId, reason, durationMinutes = 30) =
         Math.max(durationMinutes, PUNISHMENT_CONFIG.MIN_DURATION), 
         PUNISHMENT_CONFIG.MAX_DURATION
     );
+
+    // --- NEU: STEALTH WARTESCHLANGEN LOGIK ---
+    if (!bypassStealth) {
+        const suspQ = query(collection(db, `users/${userId}/suspensions`), where('status', '==', 'active'), where('type', '==', 'stealth_travel'));
+        const suspSnap = await getDocs(suspQ);
+        
+        if (!suspSnap.empty) {
+            // Stealth Mode aktiv! Strafe wandert ins Schuldenbuch (Queue).
+            const queueRef = doc(db, `users/${userId}/status/punishmentQueue`);
+            const qSnap = await getDoc(queueRef);
+            const queue = qSnap.exists() ? (qSnap.data().items || []) : [];
+            
+            queue.push({
+                id: Date.now().toString(),
+                reason: reason,
+                originalMinutes: finalDuration,
+                currentMinutes: finalDuration,
+                createdAt: new Date().toISOString()
+            });
+            
+            await setDoc(queueRef, { items: queue, lastAudited: serverTimestamp() }, { merge: true });
+            console.log("Stealth Mode: Strafe wurde in die Queue verschoben.");
+            return false; // Strafe ist (noch) nicht aktiv
+        }
+    }
     
     const active = isPunishmentWindowOpen();
     
@@ -69,6 +95,65 @@ export const registerPunishment = async (userId, reason, durationMinutes = 30) =
     }, { merge: true });
     
     return active;
+};
+
+/**
+ * NEU: Zinsberechnung für die Straf-Warteschlange.
+ * Berechnet einmal täglich 3% einfachen Zins vom Original-Strafwert.
+ */
+export const auditPunishmentQueue = async (userId) => {
+    try {
+        const queueRef = doc(db, `users/${userId}/status/punishmentQueue`);
+        const qSnap = await getDoc(queueRef);
+        if (!qSnap.exists()) return;
+        
+        const data = qSnap.data();
+        const items = data.items || [];
+        if (items.length === 0) return;
+
+        const now = new Date();
+        now.setHours(0,0,0,0);
+        
+        const lastAudited = data.lastAudited ? data.lastAudited.toDate() : new Date();
+        lastAudited.setHours(0,0,0,0);
+        
+        const diffDays = Math.floor((now - lastAudited) / (1000 * 60 * 60 * 24));
+        if (diffDays < 1) return;
+
+        // Einfacher Zins: 3% vom Ursprungswert pro vergangenen Tag
+        const updatedItems = items.map(item => {
+            const addedInterest = item.originalMinutes * 0.03 * diffDays;
+            return {
+                ...item,
+                currentMinutes: Math.round(item.currentMinutes + addedInterest)
+            };
+        });
+
+        await updateDoc(queueRef, { items: updatedItems, lastAudited: serverTimestamp() });
+        console.log(`Punishment Queue: ${diffDays} Tag(e) Zinsen (3%) auf ${items.length} Altlast(en) angewendet.`);
+    } catch (e) {
+        console.error("Fehler beim Auditing der Punishment Queue:", e);
+    }
+};
+
+/**
+ * NEU: Schiebt die älteste Strafe aus der Queue in die scharfe Bestrafung.
+ */
+export const activateQueuedPunishment = async (userId, queueItemId) => {
+    const queueRef = doc(db, `users/${userId}/status/punishmentQueue`);
+    const qSnap = await getDoc(queueRef);
+    if (!qSnap.exists()) return;
+    
+    const items = qSnap.data().items || [];
+    const itemToActivate = items.find(i => i.id === queueItemId);
+    if (!itemToActivate) return;
+
+    // Item aus der Queue entfernen
+    const newItems = items.filter(i => i.id !== queueItemId);
+    await updateDoc(queueRef, { items: newItems });
+
+    // Strafe scharf schalten (bypassStealth = true)
+    await registerPunishment(userId, `Altlast (Stealth): ${itemToActivate.reason}`, itemToActivate.currentMinutes, true);
 };
 
 // Sucht das spezifische Straf-Item in der Item-Liste

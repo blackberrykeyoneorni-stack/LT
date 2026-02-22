@@ -114,6 +114,9 @@ const calculateStatsForPeriod = async (userId, startDate, endDate, currentGoal) 
             // Wir prüfen nur Mo(1) bis Fr(5)
             if (dayOfWeek >= 1 && dayOfWeek <= 5) {
                 const isSuspended = allSuspensions.some(sus => {
+                    // WICHTIG: Stealth-Reisen zählen voll als reguläre Tragetage
+                    if (sus.type === 'stealth_travel') return false;
+
                     const sStart = sus.startDate instanceof Date ? sus.startDate : sus.startDate.toDate();
                     const sEnd = sus.endDate instanceof Date ? sus.endDate : sus.endDate.toDate();
                     

@@ -321,6 +321,17 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
         // Wir schauen so weit zurück wie die Resting-Time ist (plus Puffer)
         const recentSessionsMap = await getRecentSessionsMap(uid, restingHours + 5);
 
+        // --- NEU: STEALTH MODUS KOFFER PRÜFUNG ---
+        let isStealth = false;
+        let packedItemIds = [];
+        const suspQ = query(collection(db, `users/${uid}/suspensions`), where('status', '==', 'active'), where('type', '==', 'stealth_travel'));
+        const suspSnap = await getDocs(suspQ);
+        if (!suspSnap.empty) {
+            isStealth = true;
+            packedItemIds = suspSnap.docs[0].data().packedItemIds || [];
+            console.log("InstructionService: Stealth-Modus erkannt. Limitiere Inventar auf Koffer.");
+        }
+
         // 2. CHECK: GIBT ES EINEN PLAN FÜR HEUTE?
         const plannedItems = await checkTodayPlan(uid, items);
 
@@ -336,6 +347,7 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                 isPlanned: true,
                 itemName: titleNames,
                 durationMinutes, // NEU HINZUGEFÜGT
+                stealthModeActive: isStealth, // NEU FLAG ERHALTEN
                 forcedRelease: { required: false, executed: false, method: null },
                 items: plannedItems.map(i => ({
                     id: i.id,
@@ -366,6 +378,19 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
         const availableItems = items.filter(i => {
             // Nur aktive Items
             if (i.status !== 'active') return false;
+
+            // --- NEU: HARTE WEICHE FÜR STEALTH (REISE) ---
+            if (isStealth) {
+                // Nur Items, die im Koffer sind
+                if (!packedItemIds.includes(i.id)) return false;
+                
+                // Tagsüber = Kniestrümpfe, Nachts = Strumpfhose
+                if (isNightInstruction) {
+                    if (i.subCategory !== 'Strumpfhose') return false;
+                } else {
+                    if (i.subCategory !== 'Kniestrümpfe') return false;
+                }
+            }
 
             // Nicht, wenn bereits getragen
             if (allActiveIds.has(i.id)) return false;
@@ -538,6 +563,7 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
             isAccepted: false,
             itemName: titleNames,
             durationMinutes, // NEU HINZUGEFÜGT
+            stealthModeActive: isStealth, // NEU: Damit TimeBank & Co Bescheid wissen
             forcedRelease,
             items: selectedItems.map(i => ({
                 id: i.id,

@@ -2,7 +2,7 @@ import { db } from '../firebase';
 import { 
     collection, doc, writeBatch, serverTimestamp, getDoc, addDoc, updateDoc, increment 
 } from 'firebase/firestore';
-import { addCredits, getTimeBankBalance } from './TimeBankService';
+import { addCredits, getTimeBankBalance, calculateEarnedCredits } from './TimeBankService';
 
 /**
  * Zentraler Service zum Starten von Sessions.
@@ -17,7 +17,7 @@ export const startSession = async (userId, params) => {
         acceptedAt, 
         note = '', 
         verifiedViaNfc = false,
-        instructionDurationMinutes = null 
+        instructionDurationMinutes 
     } = params;
 
     if (!userId) throw new Error("User ID fehlt.");
@@ -59,7 +59,7 @@ export const startSession = async (userId, params) => {
         const isNylonItem = sub.includes('strumpfhose') || sub.includes('tights') || 
                             sub.includes('halterlose') || sub.includes('stockings') || 
                             cat.includes('nylons');
-        
+
         if (debtType === 'nylon' && !isNylonItem) {
             throw new Error("BLOCKIERT: Nylon-Schulden müssen mit Nylons getilgt werden.");
         }
@@ -138,6 +138,7 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
     const sessionData = sessionSnap.data();
     const batch = writeBatch(db);
     const endTime = new Date();
+
     const startTime = sessionData.startTime?.toDate ? sessionData.startTime.toDate() : new Date(); 
     const durationMinutes = Math.round((endTime - startTime) / 60000);
 
@@ -147,9 +148,11 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
     const isNight = sessionData.periodId && sessionData.periodId.toLowerCase().includes('night');
 
     if (isInstruction && !isNight) {
-        nightSuccess = false; 
+        nightSuccess = false;
+
         const offset = endTime.getTimezoneOffset() * 60000;
         const dateKey = new Date(endTime.getTime() - offset).toISOString().split('T')[0];
+
         try {
             const complianceRef = doc(db, `users/${userId}/status/nightCompliance`);
             const complianceSnap = await getDoc(complianceRef);
@@ -170,6 +173,7 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
         feelings: feedback.feelings || [],
         finalNote: feedback.note || ''
     };
+
     if (nightSuccess !== null) {
         updateData.nightSuccess = nightSuccess;
     }
@@ -197,33 +201,32 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
 
     // 3. TIME BANK: Earning & Tilgung
     let creditCalculated = false;
-    if (sessionData.type !== 'punishment' && !sessionData.tzdExecuted) {
-        let eligibleMinutes = 0;
+    
+    // Erstelle ein Objekt für den Service
+    const sessionForCredit = {
+        ...sessionData,
+        startTime,
+        endTime
+    };
+    
+    const earnedResult = await calculateEarnedCredits(userId, sessionForCredit);
 
-        if (sessionData.isDebtSession) {
-            eligibleMinutes = durationMinutes;
-        } else if (sessionData.type === 'voluntary') {
-            eligibleMinutes = durationMinutes;
-        } else if (sessionData.type === 'instruction') {
-            const target = Number(sessionData.targetDurationMinutes) || 0;
-            if (target > 0 && durationMinutes > target) {
-                eligibleMinutes = durationMinutes - target;
-            }
-        }
+    // Auswertung (Stealth-Objekt oder regulärer Integer)
+    const isEligible = (typeof earnedResult === 'object' && earnedResult !== null && earnedResult.exactCredits > 0) || 
+                       (typeof earnedResult === 'number' && earnedResult > 0);
 
-        if (eligibleMinutes > 0) {
-            const hasNylon = itemDetails.some(item => {
-                const sub = (item.subCategory || '').toLowerCase();
-                const cat = (item.mainCategory || '').toLowerCase();
-                return sub.includes('strumpfhose') || sub.includes('tights') || 
-                       sub.includes('halterlose') || sub.includes('stockings') || 
-                       cat.includes('nylons');
-            });
+    if (isEligible) {
+        const hasNylon = itemDetails.some(item => {
+            const sub = (item.subCategory || '').toLowerCase();
+            const cat = (item.mainCategory || '').toLowerCase();
+            return sub.includes('strumpfhose') || sub.includes('tights') || 
+                   sub.includes('halterlose') || sub.includes('stockings') || 
+                   cat.includes('nylons');
+        });
 
-            const creditType = hasNylon ? 'nylon' : 'lingerie';
-            await addCredits(userId, eligibleMinutes, creditType);
-            creditCalculated = true;
-        }
+        const creditType = hasNylon ? 'nylon' : 'lingerie';
+        await addCredits(userId, earnedResult, creditType);
+        creditCalculated = true;
     }
 
     await batch.commit(); 

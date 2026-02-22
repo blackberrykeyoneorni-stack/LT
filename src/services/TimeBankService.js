@@ -1,5 +1,5 @@
 import { db } from '../firebase';
-import { doc, getDoc, updateDoc, setDoc, increment, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, setDoc, increment, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
 
 // KONFIGURATION DER SCHULDENFALLE
 const DEBT_CONFIG = {
@@ -124,9 +124,10 @@ export const spendCredits = async (userId, amountMinutes, requestedType) => {
 /**
  * Berechnet Credits basierend auf Dauer und Typ.
  * STRAFEN (Punishment, TZD Evasion) geben 0 Credits.
- * DIES IST DIE NEUE SICHERHEITSFUNKTION.
+ * NEU: Bezieht Stealth-Reisen mit ein (massive Reduzierung & Nullrunden) 
+ * UND regelt die reguläre Overtime-Vergütung (migriert aus SessionService).
  */
-export const calculateEarnedCredits = (session) => {
+export const calculateEarnedCredits = async (userId, session) => {
     if (!session || !session.startTime || !session.endTime) return 0;
 
     // 1. HARTE SPERRE: Prüfen auf Straf-Indikatoren
@@ -134,26 +135,71 @@ export const calculateEarnedCredits = (session) => {
         session.type === 'punishment' ||       
         session.isPunitive === true ||         
         session.evasionPenaltyTriggered === true || 
-        session.source === 'gamble_loss'       
+        session.source === 'gamble_loss' ||
+        session.tzdExecuted === true // NEU: TZD darf ebenfalls keine Credits generieren
     ) {
         console.log("TimeBank: PUNITIVE SESSION DETECTED. 0 Credits awarded.");
         return 0;
     }
 
-    // 2. Berechnung der Dauer in Minuten
     const start = session.startTime.toDate ? session.startTime.toDate() : new Date(session.startTime);
     const end = session.endTime.toDate ? session.endTime.toDate() : new Date(session.endTime);
     const durationMinutes = (end - start) / 60000;
 
     if (durationMinutes < 10) return 0; // Zu kurz zählt nicht
 
-    return Math.floor(durationMinutes);
+    // --- STEALTH LOGIK ---
+    const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
+    const instrSnap = await getDoc(instrRef);
+    const isStealth = instrSnap.exists() && instrSnap.data().stealthModeActive === true;
+
+    if (isStealth) {
+        const isNight = session.periodId && session.periodId.includes('night');
+        
+        if (isNight) {
+            console.log("TimeBank: Stealth Night Session. 0 Credits.");
+            return { isStealth: true, exactCredits: 0, rawMinutes: Math.floor(durationMinutes) };
+        } else {
+            const pSnap = await getDoc(doc(db, `users/${userId}/settings/preferences`));
+            const targetHours = pSnap.exists() ? (pSnap.data().dailyTargetHours || 4) : 4;
+            const targetMinutes = targetHours * 60;
+
+            const overtime = durationMinutes - targetMinutes;
+            if (overtime <= 0) {
+                console.log("TimeBank: Stealth Day Session unter Target. 0 Credits.");
+                return { isStealth: true, exactCredits: 0, rawMinutes: Math.floor(durationMinutes) };
+            }
+            
+            // Alles über dem Target wird durch 10 geteilt (10% Tribut-Auszahlung)
+            const stealthCredits = Math.floor(overtime / 10);
+            console.log(`TimeBank: Stealth Day Session Overtime ${overtime}m. Tribut berechnet: ${stealthCredits} Credits.`);
+            
+            return { isStealth: true, exactCredits: stealthCredits, rawMinutes: Math.floor(durationMinutes) };
+        }
+    }
+
+    // --- REGULÄRE LOGIK (Restauriert aus SessionService) ---
+    let eligibleMinutes = 0;
+    if (session.isDebtSession) {
+        eligibleMinutes = durationMinutes; // Komplette Zeit zur Schuldentilgung
+    } else if (session.type === 'voluntary') {
+        eligibleMinutes = durationMinutes; // Komplette Zeit als Bonus
+    } else if (session.type === 'instruction') {
+        // Nur Overtime (Übererfüllung) bringt Credits!
+        const target = Number(session.targetDurationMinutes) || 0;
+        if (target > 0 && durationMinutes > target) {
+            eligibleMinutes = durationMinutes - target;
+        }
+    }
+
+    return Math.floor(eligibleMinutes);
 };
 
 /**
  * Fügt Credits hinzu (Earning / Tilgung).
+ * Akzeptiert Integer oder das Stealth-Objekt aus calculateEarnedCredits.
  */
-export const addCredits = async (userId, rawMinutes, type) => {
+export const addCredits = async (userId, rawMinutesOrObject, type) => {
     const field = type === 'nylon' ? 'nc' : 'lc';
     const docRef = doc(db, `users/${userId}/status/timeBank`);
     const docSnap = await getDoc(docRef);
@@ -163,13 +209,21 @@ export const addCredits = async (userId, rawMinutes, type) => {
     const currentBalance = docSnap.data()[field];
     let earnedCredits = 0;
 
-    if (currentBalance < 0) {
-        // TILGUNG: 1:1 (Jede Minute zählt, um aus dem Loch zu kommen)
-        earnedCredits = rawMinutes;
+    // Typ-Weiche für Stealth-Integration
+    if (typeof rawMinutesOrObject === 'object' && rawMinutesOrObject !== null) {
+        if (rawMinutesOrObject.exactCredits <= 0) return; // Nichts zu verbuchen
+        earnedCredits = rawMinutesOrObject.exactCredits; 
+        // WICHTIG: Keine weitere Division durch 3, da Stealth bereits versteuert hat.
     } else {
-        // VERDIENST: 1:3 (Luxus ist teuer)
-        if (rawMinutes < 3) return;
-        earnedCredits = Math.floor(rawMinutes / 3);
+        const rawMinutes = rawMinutesOrObject;
+        if (currentBalance < 0) {
+            // TILGUNG: 1:1 (Jede Minute zählt, um aus dem Loch zu kommen)
+            earnedCredits = rawMinutes;
+        } else {
+            // VERDIENST: 1:3 (Luxus ist teuer)
+            if (rawMinutes < 3) return;
+            earnedCredits = Math.floor(rawMinutes / 3);
+        }
     }
 
     if (earnedCredits <= 0) return;
