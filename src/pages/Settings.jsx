@@ -615,26 +615,72 @@ export default function Settings() {
                     </Box>
 
                     <Typography variant="subtitle2" sx={{ color: PALETTE.primary.main, mb: 1 }}>Verfügbare Kniestrümpfe</Typography>
-                    <FormGroup sx={{ mb: 3 }}>
-                        {allItems.filter(i => i.subCategory === 'Kniestrümpfe').map(i => (
-                            <FormControlLabel 
-                                key={i.id} 
-                                control={<Checkbox checked={stealthItems.includes(i.id)} onChange={() => handleToggleStealthItem(i.id)} />} 
-                                label={i.name || 'Unbenannt'} 
-                            />
-                        ))}
-                    </FormGroup>
+                    <Stack spacing={1} sx={{ mb: 3 }}>
+                        {allItems.filter(i => i.subCategory === 'Kniestrümpfe').map(i => {
+                            const isChecked = stealthItems.includes(i.id);
+                            const imgSrc = i.imageUrl || (i.images && i.images.length > 0 ? i.images[0] : null);
+                            return (
+                                <Paper 
+                                    key={i.id} 
+                                    onClick={() => handleToggleStealthItem(i.id)}
+                                    elevation={0}
+                                    sx={{ 
+                                        display: 'flex', alignItems: 'center', p: 1, cursor: 'pointer',
+                                        bgcolor: isChecked ? 'rgba(255, 174, 227, 0.08)' : 'rgba(255,255,255,0.03)',
+                                        border: `1px solid ${isChecked ? PALETTE.primary.main : 'transparent'}`,
+                                        borderRadius: 2, transition: 'all 0.2s ease-in-out'
+                                    }}
+                                >
+                                    <Checkbox checked={isChecked} onChange={() => handleToggleStealthItem(i.id)} onClick={(e) => e.stopPropagation()} />
+                                    <Avatar src={imgSrc} variant="rounded" sx={{ width: 48, height: 48, mx: 1, bgcolor: 'rgba(255,255,255,0.1)' }}>
+                                        {!imgSrc && (i.name ? i.name.charAt(0).toUpperCase() : '?')}
+                                    </Avatar>
+                                    <Box sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1, overflow: 'hidden' }}>
+                                        <Typography variant="subtitle2" noWrap sx={{ fontWeight: isChecked ? 'bold' : 'normal', color: isChecked ? PALETTE.primary.main : 'text.primary' }}>
+                                            {i.brand ? `${i.brand} - ` : ''}{i.name || 'Unbenannt'}
+                                        </Typography>
+                                        <Typography variant="caption" color="text.secondary" noWrap>
+                                            ID: {i.customId || i.id}
+                                        </Typography>
+                                    </Box>
+                                </Paper>
+                            );
+                        })}
+                    </Stack>
 
                     <Typography variant="subtitle2" sx={{ color: PALETTE.primary.main, mb: 1 }}>Verfügbare Strumpfhosen</Typography>
-                    <FormGroup>
-                        {allItems.filter(i => i.subCategory === 'Strumpfhose').map(i => (
-                            <FormControlLabel 
-                                key={i.id} 
-                                control={<Checkbox checked={stealthItems.includes(i.id)} onChange={() => handleToggleStealthItem(i.id)} />} 
-                                label={i.name || 'Unbenannt'} 
-                            />
-                        ))}
-                    </FormGroup>
+                    <Stack spacing={1}>
+                        {allItems.filter(i => i.subCategory === 'Strumpfhose').map(i => {
+                            const isChecked = stealthItems.includes(i.id);
+                            const imgSrc = i.imageUrl || (i.images && i.images.length > 0 ? i.images[0] : null);
+                            return (
+                                <Paper 
+                                    key={i.id} 
+                                    onClick={() => handleToggleStealthItem(i.id)}
+                                    elevation={0}
+                                    sx={{ 
+                                        display: 'flex', alignItems: 'center', p: 1, cursor: 'pointer',
+                                        bgcolor: isChecked ? 'rgba(255, 174, 227, 0.08)' : 'rgba(255,255,255,0.03)',
+                                        border: `1px solid ${isChecked ? PALETTE.primary.main : 'transparent'}`,
+                                        borderRadius: 2, transition: 'all 0.2s ease-in-out'
+                                    }}
+                                >
+                                    <Checkbox checked={isChecked} onChange={() => handleToggleStealthItem(i.id)} onClick={(e) => e.stopPropagation()} />
+                                    <Avatar src={imgSrc} variant="rounded" sx={{ width: 48, height: 48, mx: 1, bgcolor: 'rgba(255,255,255,0.1)' }}>
+                                        {!imgSrc && (i.name ? i.name.charAt(0).toUpperCase() : '?')}
+                                    </Avatar>
+                                    <Box sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1, overflow: 'hidden' }}>
+                                        <Typography variant="subtitle2" noWrap sx={{ fontWeight: isChecked ? 'bold' : 'normal', color: isChecked ? PALETTE.primary.main : 'text.primary' }}>
+                                            {i.brand ? `${i.brand} - ` : ''}{i.name || 'Unbenannt'}
+                                        </Typography>
+                                        <Typography variant="caption" color="text.secondary" noWrap>
+                                            ID: {i.customId || i.id}
+                                        </Typography>
+                                    </Box>
+                                </Paper>
+                            );
+                        })}
+                    </Stack>
                 </DialogContent>
                 <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}>
                     <Button onClick={() => setSuspensionDialogMode('plan')} color="inherit">Zurück</Button>
