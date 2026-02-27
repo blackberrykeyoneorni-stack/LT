@@ -216,17 +216,37 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
                        (typeof earnedResult === 'number' && earnedResult > 0);
 
     if (isEligible) {
+        
+        // 1. Prüfung auf Nylon-Beteiligung
         const hasNylon = itemDetails.some(item => {
             const sub = (item.subCategory || '').toLowerCase();
             const cat = (item.mainCategory || '').toLowerCase();
+            const name = (item.name || '').toLowerCase();
             return sub.includes('strumpfhose') || sub.includes('tights') || 
-                   sub.includes('halterlose') || sub.includes('stockings') || 
-                   cat.includes('nylons');
+                   sub.includes('halterlose') || sub.includes('stockings') || sub.includes('strumpf') ||
+                   cat.includes('nylons') || cat.includes('nylon') || name.includes('strumpf');
         });
 
-        const creditType = hasNylon ? 'nylon' : 'lingerie';
-        await addCredits(userId, earnedResult, creditType);
-        creditCalculated = true;
+        // 2. Prüfung auf Lingerie-Beteiligung
+        const hasLingerie = itemDetails.some(item => {
+            const sub = (item.subCategory || '').toLowerCase();
+            const cat = (item.mainCategory || '').toLowerCase();
+            const name = (item.name || '').toLowerCase();
+            return sub.includes('höschen') ||
+                   cat.includes('dessous') || cat.includes('lingerie') || cat.includes('wäsche') ||
+                   name.includes('höschen');
+        });
+
+        // Unabhängige Gutschrift für beide Systeme
+        if (hasNylon) {
+            await addCredits(userId, earnedResult, 'nylon');
+            creditCalculated = true;
+        }
+
+        if (hasLingerie) {
+            await addCredits(userId, earnedResult, 'lingerie');
+            creditCalculated = true;
+        }
     }
 
     await batch.commit(); 
