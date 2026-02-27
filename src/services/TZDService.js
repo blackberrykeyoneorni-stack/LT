@@ -212,12 +212,18 @@ export const checkForTZDTrigger = async (userId, activeSessions, items) => {
         if (s.itemIds) s.itemIds.forEach(id => activeItemIds.add(id));
     });
 
-    const relevantItems = items.filter(i => activeItemIds.has(i.id) && isItemEligibleForTZD(i));
+    // 1. Hole ALLE aktiven Items der Session für den Outfit-Lock
+    const activeItems = items.filter(i => activeItemIds.has(i.id));
     
-    if (relevantItems.length === 0) return false;
+    // 2. Prüfe, ob mindestens ein Item TZD-tauglich ist (Auslöser)
+    const hasEligibleItem = activeItems.some(i => isItemEligibleForTZD(i));
+    if (!hasEligibleItem) return false;
 
     let currentChance = FALLBACK_TRIGGER_CHANCE;
-    let currentMatrix = FALLBACK_MATRIX;
+    
+    // Standardwerte falls Datenbank-Abfrage scheitert
+    let maxHours = 36;
+    let weights = [0.20, 0.50, 0.30];
 
     try {
         const settingsSnap = await getDoc(doc(db, `users/${userId}/settings/protocol`));
@@ -227,8 +233,11 @@ export const checkForTZDTrigger = async (userId, activeSessions, items) => {
                 if (typeof data.tzd.triggerChance === 'number') {
                     currentChance = data.tzd.triggerChance;
                 }
-                if (data.tzd.durationMatrix && Array.isArray(data.tzd.durationMatrix)) {
-                    currentMatrix = data.tzd.durationMatrix;
+                if (typeof data.tzd.tzdMaxHours === 'number') {
+                    maxHours = data.tzd.tzdMaxHours;
+                }
+                if (data.tzd.zoneWeights && Array.isArray(data.tzd.zoneWeights)) {
+                    weights = data.tzd.zoneWeights;
                 }
             }
         }
@@ -236,9 +245,17 @@ export const checkForTZDTrigger = async (userId, activeSessions, items) => {
         console.error("Fehler beim Laden der TZD Settings, nutze Fallback", e);
     }
 
+    // Dynamische Matrix-Berechnung anhand der ausgelesenen maxHours ("Vorschlag 2")
+    const dynamicMatrix = [
+        { label: 'The Bait', minHours: maxHours / 6, maxHours: maxHours / 3, weight: weights[0] || 0.20 },
+        { label: 'The Standard', minHours: maxHours / 3, maxHours: (maxHours * 2) / 3, weight: weights[1] || 0.50 },
+        { label: 'The Wall', minHours: (maxHours * 2) / 3, maxHours: maxHours, weight: weights[2] || 0.30 }
+    ];
+
     const roll = Math.random();
     if (roll < currentChance) {
-        await startTZD(userId, relevantItems, currentMatrix);
+        // Übergib das gesamte Outfit (activeItems) und die berechnete dynamicMatrix
+        await startTZD(userId, activeItems, dynamicMatrix);
         return true;
     }
     return false;

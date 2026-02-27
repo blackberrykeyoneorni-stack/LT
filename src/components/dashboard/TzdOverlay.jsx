@@ -354,8 +354,15 @@ export default function TzdOverlay({ active, allItems }) {
                                         <Typography variant="h5" sx={{ fontWeight: 'bold', color: PALETTE.accents.red, letterSpacing: 2 }}>
                                             TZD PROTOKOLL
                                         </Typography>
-                                        <Typography variant="caption" color="text.secondary">
-                                            ZEITLOSES DIKTAT • STRAF-MODUS
+                                        <Typography 
+                                            variant="caption" 
+                                            sx={{ 
+                                                color: status?.isPenalty ? PALETTE.accents.red : 'text.secondary',
+                                                fontWeight: status?.isPenalty ? 'bold' : 'normal',
+                                                letterSpacing: 1
+                                            }}
+                                        >
+                                            {status?.isPenalty ? "ZEITLOSES DIKTAT • STRAF-MODUS" : "ZUFALLS-DIKTAT • REGULÄRES PROTOKOLL"}
                                         </Typography>
                                     </Box>
 
