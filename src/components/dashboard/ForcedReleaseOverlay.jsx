@@ -1,68 +1,89 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Dialog, DialogContent, DialogTitle, DialogActions, 
-  Typography, Box, Button, CircularProgress, 
-  IconButton, Zoom 
+  Typography, Box, Button, CircularProgress,
+  Zoom 
 } from '@mui/material';
 import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
 import { motion, AnimatePresence } from 'framer-motion';
 
 import PriorityHighIcon from '@mui/icons-material/PriorityHigh';
-import WaterDropIcon from '@mui/icons-material/WaterDrop'; // For Clean/Consume
-import DangerousIcon from '@mui/icons-material/Dangerous'; // For Ruined/Soil
-import CasinoIcon from '@mui/icons-material/Casino'; // For Rolling
-import SanitizerIcon from '@mui/icons-material/Sanitizer'; // Clean icon alternative
-import DirtyLensIcon from '@mui/icons-material/DirtyLens'; // Soil icon alternative
+import WarningIcon from '@mui/icons-material/Warning';
+import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
+import WaterDropIcon from '@mui/icons-material/WaterDrop';
 
-export default function ForcedReleaseOverlay({ open, method, onConfirm, onRefuse }) {
-  // Stages: 'intro' -> 'rolling' -> 'result'
-  const [stage, setStage] = useState('intro');
-  const [verdict, setVerdict] = useState(null); // 'clean' or 'ruined'
-  const [begged, setBegged] = useState(false);
-  const [begMessage, setBegMessage] = useState(null);
+// --- DEMÜTIGUNGS TEXTE (Aus dem Konzept) ---
+const TEXTS_R1 = [
+    "Dein Druck interessiert hier niemanden. Du bist nur eine Nylon-Sissy, die auf Kommando ihr eigenes Sperma schluckt. Tu es.",
+    "Es gibt keine Verhandlung. Pump deine Sissy-Sahne ab und schluck sie. Jeder Tropfen gehört dem System.",
+    "Eine echte Nylon-Nutte hinterlässt keine Flecken. Entlade dich und mach deinen Hurenmaul auf.",
+    "Das System verlangt deinen Sperma. Schluck es runter und bedank dich für die Erlaubnis, dich überhaupt anfassen zu dürfen.",
+    "Keine Gnade. Kein Ruinieren. Nur du, dein Sperma und dein Gehorsam. Spritz dir in dein vorderes Sissy-Loch und schlucke es runter.",
+    "Damenwäscheträger und Nylon-Huren haben keine Ansprüche. Mach dich leer und reinige dich mit deiner Zunge."
+];
 
-  // Reset bei jedem Öffnen
+const TEXTS_R23 = [
+    "Dachtest du wirklich, du bist fertig? Das System ist noch nicht befriedigt. Du hast 45 Minuten. Mach einen deiner Top-5-Pornos an und zwing ihn wieder hoch.",
+    "Erbärmlich, wie schlaff du jetzt bist. Aber dein Körper gehört mir. Schau dir deine Lieblings-Pornos an und mach dich bereit für Runde zwei.",
+    "Deine Refraktärzeit ist ein Konstrukt für echte Männer. Du bist eine Nylon-Sissy. 45 Minuten, Pornos an, und dann wird noch mal geschluckt.",
+    "Runde läuft. Das System lacht über deine Erschöpfung. Such dir einen Porno, stimulier dich und friss den Rest deiner Männlichkeit.",
+    "Ein Orgasmus reicht nicht für eine Nylon-Hure. Du hast 45 Minuten, um dich mit deinen Sissy-Pornos wieder geil zu machen. Der Timer läuft.",
+    "Zitterst du schon? Gut. Mach ein Video an, das dir dein Hirn wäscht. In spätestens 45 Minuten schluckst du den nächsten Tropfen."
+];
+
+const TEXTS_FAIL = [
+    "Ich bin eine erbärmliche Sissy und habe die Nylons versaut.",
+    "Ich habe versagt. Mein Sperma ist auf der Ausrüstung gelandet.",
+    "Zu schwach zum Schlucken – Ich melde einen schmutzigen Unfall.",
+    "Ich habe die Kontrolle verloren und das System-Eigentum ruiniert.",
+    "Bestrafe mich. Ich war zu ungeschickt und habe Flecken gemacht.",
+    "Ich bin wertlos. Die Entladung ging daneben. Registriere den Defekt."
+];
+
+export default function ForcedReleaseOverlay({ open, method, onConfirm, onFail, onRefuse }) {
+  const [round, setRound] = useState(1);
+  const [deadline, setDeadline] = useState(null);
+  const [timeLeftStr, setTimeLeftStr] = useState("");
+  const [isTimeUp, setIsTimeUp] = useState(false);
+  const [evaluating, setEvaluating] = useState(false);
+
+  const [textR1, setTextR1] = useState("");
+  const [textR23, setTextR23] = useState("");
+  const [textFail, setTextFail] = useState("");
+
+  // Init bei Öffnung
   useEffect(() => {
       if (open) {
-          setStage('intro');
-          setVerdict(null);
-          setBegged(false);
-          setBegMessage(null);
+          setRound(1);
+          setDeadline(null);
+          setIsTimeUp(false);
+          setEvaluating(false);
+          setTextR1(TEXTS_R1[Math.floor(Math.random() * TEXTS_R1.length)]);
+          setTextR23(TEXTS_R23[Math.floor(Math.random() * TEXTS_R23.length)]);
+          setTextFail(TEXTS_FAIL[Math.floor(Math.random() * TEXTS_FAIL.length)]);
       }
   }, [open]);
 
-  const handleRollFate = () => {
-      setStage('rolling');
+  // Robuster 45-Minuten Timer
+  useEffect(() => {
+      if (!deadline) return;
       
-      // Simulation der "Berechnung"
-      setTimeout(() => {
-          // 60% Chance auf Clean, 40% auf Ruined
-          const isClean = Math.random() > 0.4;
-          setVerdict(isClean ? 'clean' : 'ruined');
-          setStage('result');
-      }, 2000);
-  };
-
-  const handleBegForMercy = () => {
-      setStage('rolling');
-      setBegged(true);
-
-      setTimeout(() => {
-          // 50/50 Chance beim Betteln
-          const isMercyGranted = Math.random() > 0.5;
-          
-          if (isMercyGranted) {
-              setVerdict('clean');
-              setBegMessage("Gnade gewährt. Schluck dein Sissy-Sperma. Behalte es eine Minute im Mund, gewöhne dich an den Geschmack");
+      const interval = setInterval(() => {
+          const remaining = deadline - Date.now();
+          if (remaining <= 0) {
+              setTimeLeftStr("00:00");
+              setIsTimeUp(true);
+              clearInterval(interval);
           } else {
-              setVerdict('ruined');
-              setBegMessage("ABGELEHNT! Schmier deine Sissy-Sahne in deine Nylons. Ruiniere sie!");
+              const m = Math.floor(remaining / 60000).toString().padStart(2, '0');
+              const s = Math.floor((remaining % 60000) / 1000).toString().padStart(2, '0');
+              setTimeLeftStr(`${m}:${s}`);
           }
-          setStage('result');
-      }, 1500);
-  };
+      }, 1000);
+      
+      return () => clearInterval(interval);
+  }, [deadline]);
 
-  // Methode schön formatieren
   const formatMethod = (m) => {
       if (!m) return "Manuell";
       if (m === 'hand') return "Manuell (Hand)";
@@ -71,12 +92,42 @@ export default function ForcedReleaseOverlay({ open, method, onConfirm, onRefuse
       return m;
   };
 
-  const isClean = verdict === 'clean';
-  
-  // Styles basierend auf Ergebnis
-  const resultColor = isClean ? PALETTE.accents.green : PALETTE.accents.red;
-  const resultBg = isClean ? 'rgba(0, 255, 0, 0.05)' : 'rgba(255, 0, 0, 0.05)';
-  const resultBorder = `1px solid ${resultColor}`;
+  // Exekution und Loop-Entscheidung
+  const handleSuccess = () => {
+      setEvaluating(true);
+      
+      // 2 Sekunden systemischer Terror (Warten auf das Urteil)
+      setTimeout(() => {
+          setEvaluating(false);
+          
+          if (round === 1) {
+              if (Math.random() < 0.15) {
+                  // Loop 1 (15%) -> Startet Runde 2
+                  setRound(2);
+                  setDeadline(Date.now() + 45 * 60 * 1000);
+                  setTextR23(TEXTS_R23[Math.floor(Math.random() * TEXTS_R23.length)]);
+                  setTextFail(TEXTS_FAIL[Math.floor(Math.random() * TEXTS_FAIL.length)]);
+                  setIsTimeUp(false);
+              } else {
+                  onConfirm('clean');
+              }
+          } else if (round === 2) {
+              if (Math.random() < 0.05) {
+                  // Loop 2 (5%) -> Startet finale Runde 3
+                  setRound(3);
+                  setDeadline(Date.now() + 45 * 60 * 1000);
+                  setTextR23(TEXTS_R23[Math.floor(Math.random() * TEXTS_R23.length)]);
+                  setTextFail(TEXTS_FAIL[Math.floor(Math.random() * TEXTS_FAIL.length)]);
+                  setIsTimeUp(false);
+              } else {
+                  onConfirm('clean');
+              }
+          } else {
+              // Maximale Ausdauer erreicht (Ende nach Runde 3)
+              onConfirm('clean');
+          }
+      }, 2000);
+  };
 
   return (
     <Dialog 
@@ -85,143 +136,101 @@ export default function ForcedReleaseOverlay({ open, method, onConfirm, onRefuse
         PaperProps={{ 
             sx: { 
                 ...DESIGN_TOKENS.dialog.paper.sx,
-                border: stage === 'result' ? `2px solid ${resultColor}` : DESIGN_TOKENS.dialog.paper.sx.border,
-                transition: 'border 0.5s ease'
+                border: `2px solid ${PALETTE.accents.red}`,
+                boxShadow: `0 0 40px ${PALETTE.accents.red}60`
             } 
         }}
         disableEscapeKeyDown
     >
-      <DialogTitle sx={{ textAlign: 'center', color: stage === 'result' ? resultColor : PALETTE.text.primary }}>
-          {stage === 'intro' && "ZWANGSENTLADUNG"}
-          {stage === 'rolling' && "BERECHNE SCHICKSAL..."}
-          {stage === 'result' && (isClean ? "PROTOKOLL: PURITY" : "PROTOKOLL: FILTH")}
+      <DialogTitle sx={{ textAlign: 'center', color: PALETTE.accents.red, fontWeight: 'bold' }}>
+          <PriorityHighIcon sx={{ verticalAlign: 'middle', mr: 1, fontSize: 32 }} />
+          ZWANGSENTLADUNG ERFORDERLICH
       </DialogTitle>
 
       <DialogContent sx={{ ...DESIGN_TOKENS.dialog.content.sx, textAlign: 'center', minHeight: 250, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-          
           <AnimatePresence mode='wait'>
-              {/* PHASE 1: INTRO */}
-              {stage === 'intro' && (
-                  <motion.div 
-                      key="intro"
-                      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                  >
-                      <PriorityHighIcon sx={{ fontSize: 60, color: PALETTE.primary.main, mb: 2 }} />
-                      <Typography variant="body1" gutterBottom>
-                          Der Druckpegel hat das Limit überschritten.
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-                          Methode: <strong>{formatMethod(method)}</strong>
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-                          "Wirst du dein Sperma schlucken oder musst du es in deine Nylons einarbeiten? Der Algorithmus entscheidet."
+              
+              {evaluating ? (
+                  <motion.div key="evaluating" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                      <CircularProgress size={60} sx={{ color: PALETTE.accents.red, mb: 3 }} />
+                      <Typography variant="h6" sx={{ letterSpacing: 2, color: 'text.secondary' }}>
+                          ÜBERPRÜFE SYSTEM-PARAMETER...
                       </Typography>
                   </motion.div>
-              )}
-
-              {/* PHASE 2: ROLLING */}
-              {stage === 'rolling' && (
-                  <motion.div 
-                      key="rolling"
-                      initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 1.2, opacity: 0 }}
-                  >
-                      <CircularProgress size={60} sx={{ color: PALETTE.accents.gold, mb: 3 }} />
-                      <Typography variant="h6" sx={{ letterSpacing: 2 }}>
-                          {begged ? "RICHTE ÜBER DICH..." : "WÜRFLE..."}
+              ) : (
+                  <motion.div key="execution" initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}>
+                      
+                      <Typography variant="overline" sx={{ color: PALETTE.accents.red, fontWeight: 'bold', letterSpacing: 2, display: 'block', mb: 1 }}>
+                          {round > 1 ? `RUNDE ${round} / 3` : "RUNDE 1"}
                       </Typography>
-                  </motion.div>
-              )}
 
-              {/* PHASE 3: RESULT */}
-              {stage === 'result' && (
-                  <motion.div 
-                      key="result"
-                      initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }}
-                  >
-                      <Box sx={{ 
-                          p: 3, mb: 2, 
-                          bgcolor: resultBg, 
-                          border: resultBorder, 
-                          borderRadius: '16px',
-                          position: 'relative',
-                          overflow: 'hidden'
-                      }}>
-                          {/* Icon */}
-                          <Box sx={{ mb: 2 }}>
-                              {isClean ? 
-                                  <WaterDropIcon sx={{ fontSize: 50, color: resultColor }} /> : 
-                                  <DangerousIcon sx={{ fontSize: 50, color: resultColor }} />
-                              }
-                          </Box>
-
-                          {/* Main Directive */}
-                          <Typography variant="h5" fontWeight="bold" sx={{ color: resultColor, mb: 1, textTransform: 'uppercase' }}>
-                              {isClean ? "VERZEHR PFLICHT" : "STOFF RUINIEREN"}
-                          </Typography>
-
-                          {/* Description */}
-                          <Typography variant="body2" sx={{ color: 'text.primary', mb: 2 }}>
-                              {begMessage ? begMessage : (
-                                  isClean 
-                                  ? "Verschwende keinen Tropfen. Deine Nylons und Dessous müssen makellos bleiben." 
-                                  : "Die Aufnahme ist verboten. Entlade direkt in deine Damenwäsche. Lass es einziehen."
-                              )}
-                          </Typography>
-
-                          {/* Punishment Hint */}
-                          {!isClean && !begged && (
-                              <Typography variant="caption" color="error" sx={{ display: 'block', mt: 1 }}>
-                                  Verschmutzung wird im Inventar vermerkt.
-                              </Typography>
-                          )}
+                      <Box sx={{ mb: 3, p: 2, bgcolor: 'rgba(255,0,0,0.05)', border: `1px dashed ${PALETTE.accents.red}`, borderRadius: 2 }}>
+                          <Typography variant="caption" color="text.secondary" display="block">Vorgeschriebene Methode</Typography>
+                          <Typography variant="h6" sx={{ color: '#fff', fontWeight: 'bold' }}>{formatMethod(method)}</Typography>
                       </Box>
+
+                      {/* Timer ab Runde 2 */}
+                      {round > 1 && (
+                          <Box sx={{ mb: 3 }}>
+                              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
+                                  Zeitlimit für Refraktär-Bruch
+                              </Typography>
+                              <Typography variant="h2" sx={{ 
+                                  fontFamily: 'monospace', 
+                                  fontWeight: 'bold', 
+                                  color: isTimeUp ? PALETTE.accents.red : '#fff',
+                                  textShadow: isTimeUp ? `0 0 20px ${PALETTE.accents.red}` : 'none'
+                              }}>
+                                  {timeLeftStr}
+                              </Typography>
+                              {isTimeUp && (
+                                  <Typography variant="caption" color="error" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, mt: 1 }}>
+                                      <WarningIcon fontSize="small" /> Limit überschritten. Bestätigung gesperrt.
+                                  </Typography>
+                              )}
+                          </Box>
+                      )}
+
+                      {/* Dynamischer Demütigungs-Text */}
+                      <Typography variant="body1" sx={{ fontStyle: 'italic', color: 'text.primary', mb: 3 }}>
+                          "{round === 1 ? textR1 : textR23}"
+                      </Typography>
+                      
                   </motion.div>
               )}
           </AnimatePresence>
-
       </DialogContent>
 
-      <DialogActions sx={{ ...DESIGN_TOKENS.dialog.actions.sx, flexDirection: 'column', gap: 1 }}>
-          
-          {stage === 'intro' && (
+      {!evaluating && (
+          <DialogActions sx={{ ...DESIGN_TOKENS.dialog.actions.sx, flexDirection: 'column', gap: 1.5, pb: 3 }}>
+              
               <Button 
-                  fullWidth variant="contained" size="large" 
-                  onClick={handleRollFate}
-                  startIcon={<CasinoIcon />}
-                  sx={{ ...DESIGN_TOKENS.buttonGradient, py: 1.5 }}
+                  fullWidth variant="contained" size="large"
+                  disabled={isTimeUp}
+                  onClick={handleSuccess} 
+                  startIcon={<WaterDropIcon />}
+                  sx={{ py: 1.5, fontWeight: 'bold', bgcolor: PALETTE.accents.red, color: '#fff', '&:hover': { bgcolor: '#cc0000' } }}
               >
-                  SCHICKSAL ERMITTELN
+                  GESCHLUCKT & BESTÄTIGT
               </Button>
-          )}
 
-          {stage === 'result' && (
-              <>
+              {/* Versagens-Button ab Runde 2 */}
+              {round > 1 && (
                   <Button 
-                      fullWidth variant="contained" size="large"
-                      onClick={() => onConfirm(verdict)} // Pass verdict back
-                      color={isClean ? "success" : "error"}
-                      sx={{ py: 1.5, fontWeight: 'bold' }}
+                      fullWidth variant="outlined" size="small"
+                      onClick={onFail}
+                      color="error"
+                      sx={{ py: 1, borderColor: 'rgba(255,0,0,0.3)', textTransform: 'none', lineHeight: 1.2 }}
                   >
-                      {isClean ? "GESCHLUCKT & SAUBER" : "TEXTIL VERSCHMUTZT"}
+                      {textFail}
                   </Button>
+              )}
 
-                  {/* Begging Option: Only if Ruined AND not yet begged */}
-                  {!isClean && !begged && (
-                      <Button 
-                          fullWidth variant="text" 
-                          onClick={handleBegForMercy}
-                          sx={{ color: 'text.secondary', fontSize: '0.8rem', mt: 1 }}
-                      >
-                          Um Gnade betteln (Chance auf Verzehr)
-                      </Button>
-                  )}
-              </>
-          )}
-
-          <Button onClick={onRefuse} fullWidth color="inherit" sx={{ mt: 1, opacity: 0.6 }}>
-              Verweigern (Strafe)
-          </Button>
-      </DialogActions>
+              <Button onClick={onRefuse} fullWidth color="inherit" sx={{ mt: 1, opacity: 0.4, fontSize: '0.75rem' }}>
+                  NOT-ABBRUCH (SYSTEM-STRAFE)
+              </Button>
+          </DialogActions>
+      )}
     </Dialog>
   );
 }

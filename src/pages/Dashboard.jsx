@@ -21,7 +21,7 @@ import { checkForTZDTrigger, getTZDStatus, triggerEvasionPenalty } from '../serv
 import { registerRelease as apiRegisterRelease } from '../services/ReleaseService'; 
 import { startSession as startSessionService, stopSession as stopSessionService } from '../services/SessionService';
 import { checkGambleTrigger, determineGambleStake, rollTheDice, isImmunityActive, recordGambleAction } from '../services/OfferService';
-import { runTimeBankAuditor } from '../services/TimeBankService'; // NEU IMPORTIERT: Der Auditor
+import { runTimeBankAuditor } from '../services/TimeBankService'; 
 
 // Hooks
 import useSessionProgress from '../hooks/dashboard/useSessionProgress';
@@ -91,7 +91,6 @@ const checkIsHoliday = (date) => {
     return false;
 };
 
-// Hilfsfunktion zur Zeitformatierung für den Weekly Report
 const formatTime = (totalMins) => {
     const h = Math.floor(totalMins / 60);
     const m = Math.floor(totalMins % 60);
@@ -212,7 +211,6 @@ export default function Dashboard() {
     if (!currentUser) return;
     const initLoad = async () => {
         try {
-            // FRONTEND AUDITOR TRIGGER
             await runTimeBankAuditor(currentUser.uid);
 
             const pSnap = await getDoc(doc(db, `users/${currentUser.uid}/settings/preferences`));
@@ -238,7 +236,6 @@ export default function Dashboard() {
     };
     initLoad();
 
-    // WÖCHENTLICHES ZIEL UPDATE LISTENER
     const unsubProtocol = onSnapshot(doc(db, `users/${currentUser.uid}/settings/protocol`), (docSnap) => {
         if (docSnap.exists()) {
             const data = docSnap.data();
@@ -250,7 +247,6 @@ export default function Dashboard() {
         }
     });
 
-    // TIME BANK LISTENER
     const unsubscribeTB = onSnapshot(doc(db, `users/${currentUser.uid}/status/timeBank`), (docSnap) => {
         if (docSnap.exists()) {
             setTimeBankData(docSnap.data());
@@ -292,7 +288,6 @@ export default function Dashboard() {
                     setTzdStartTime(null);
                 }
                 
-                // --- GAMBLE CHECK ---
                 if (!hasGambledThisSession && items.length > 0 && !isStealthActive) {
                     const activePunishItem = punishmentStatus.active ? punishmentItem : null;
                     const gambleResult = await checkGambleTrigger(currentUser.uid, false, isInstructionActive, activePunishItem);
@@ -309,7 +304,6 @@ export default function Dashboard() {
                     }
                 }
 
-                // REGULÄRER TRIGGER (während einer Session)
                 if (isInstructionActive && !isStealthActive) { 
                     const triggered = await checkForTZDTrigger(currentUser.uid, activeSessions, items); 
                     if (triggered) {
@@ -424,13 +418,19 @@ export default function Dashboard() {
       return () => clearInterval(timer);
   }, [currentInstruction, currentUser, isInstructionActive]);
 
+  // --- NEU: FORCED RELEASE VERZÖGERUNGS-TRIGGER (5 Sekunden) ---
   useEffect(() => {
       if (isInstructionActive && currentInstruction) {
           const fr = currentInstruction.forcedRelease;
+          // Nur auslösen, wenn erforderlich und noch nicht abgearbeitet/offen
           if (fr && fr.required === true && fr.executed === false) {
               if (!forcedReleaseOpen) {
-                  setForcedReleaseMethod(fr.method);
-                  setForcedReleaseOpen(true);
+                  // Der verzögerte Schock
+                  const timerId = setTimeout(() => {
+                      setForcedReleaseMethod(fr.method);
+                      setForcedReleaseOpen(true);
+                  }, 5000);
+                  return () => clearTimeout(timerId);
               }
           }
       }
@@ -457,7 +457,6 @@ export default function Dashboard() {
           showToast("GEWINN! 24h Immunität aktiviert.", "success");
           setImmunityActive(true);
       } else {
-          // --- SYSTEM OVERRIDE PROTOCOL ---
           const voluntarySessions = activeSessions.filter(s => s.type === 'voluntary' && !s.endTime);
           
           if (voluntarySessions.length > 0) {
@@ -499,11 +498,7 @@ export default function Dashboard() {
           
           setInstructionOpen(false); 
           showToast(`${targetItems.length} Sessions gestartet.`, "success");
-          
-          if (currentInstruction?.forcedRelease?.required && !currentInstruction.forcedRelease.executed) {
-              setForcedReleaseMethod(currentInstruction.forcedRelease.method);
-              setForcedReleaseOpen(true);
-          }
+          // Trigger für Forced Release entfernt, da dies nun vom useEffect-Timer übernommen wird
       }
   };
 
@@ -567,31 +562,56 @@ export default function Dashboard() {
   const handleSkipTimer = () => { if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current); setReleaseStep('decision'); };
   const handleReleaseDecision = async (outcome) => { try { await hookRegisterRelease(outcome, releaseIntensity); if (outcome === 'maintained') showToast("Disziplin bewiesen.", "success"); else showToast("Sessions beendet.", "warning"); } catch (e) { showToast("Fehler beim Release", "error"); } finally { setReleaseDialogOpen(false); if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current); } };
 
+  // --- NEU: FORCED RELEASE ERFOLG (Geschluckt) ---
   const handleConfirmForcedRelease = async (outcome) => {
-      const safeOutcome = outcome || 'clean';
       try {
-          await apiRegisterRelease(currentUser.uid, 'maintained', 5, safeOutcome);
+          await apiRegisterRelease(currentUser.uid, 'maintained', 5, 'clean');
           await updateDoc(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), { "forcedRelease.executed": true });
           setCurrentInstruction(prev => ({ ...prev, forcedRelease: { ...prev.forcedRelease, executed: true } }));
           setForcedReleaseOpen(false);
-          if (safeOutcome === 'clean') showToast("Brav. Sauber und gehorsam.", "success");
-          else showToast("Schmutzig... aber gehorsam. Status gespeichert.", "warning");
+          showToast("Protokoll erfüllt. Sauber und gehorsam.", "success");
       } catch (e) {
           console.error("Error confirming forced release:", e);
           showToast("Fehler beim Speichern.", "error");
       }
   };
 
+  // --- NEU: FORCED RELEASE VERSAGEN (Ruiniert / Zu Schwach) ---
+  const handleFailForcedRelease = async () => {
+      try {
+          await registerPunishment(currentUser.uid, "Schwäche: Zwangsentladung fehlgeschlagen (Item ruiniert)", 60);
+          const newStatus = await getActivePunishment(currentUser.uid);
+          setPunishmentStatus(newStatus || { active: false });
+          
+          const batch = writeBatch(db);
+          // Versetze alle getragenen Items der Instruktion in den Status 'washing' (ruiniert)
+          if (currentInstruction && currentInstruction.items) {
+              currentInstruction.items.forEach(item => {
+                  batch.update(doc(db, `users/${currentUser.uid}/items`, item.id), { status: 'washing' });
+              });
+          }
+          
+          batch.update(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), { "forcedRelease.executed": true });
+          await batch.commit();
+
+          setCurrentInstruction(prev => ({ ...prev, forcedRelease: { ...prev.forcedRelease, executed: true } }));
+          setForcedReleaseOpen(false);
+          showToast("Schwäche protokolliert. Ausrüstung ruiniert. Strafe aktiv.", "error");
+      } catch (e) {
+          console.error("Error failing forced release:", e);
+      }
+  };
+
   const handleRefuseForcedRelease = async () => {
       try {
-          await registerPunishment(currentUser.uid, "Forced Release Protocol verweigert", 60);
+          await registerPunishment(currentUser.uid, "Not-Abbruch Zwangsentladung verweigert", 120);
           const newStatus = await getActivePunishment(currentUser.uid);
           setPunishmentStatus(newStatus || { active: false });
           
           await updateDoc(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), { "forcedRelease.executed": true });
           setCurrentInstruction(prev => ({ ...prev, forcedRelease: { ...prev.forcedRelease, executed: true } }));
           setForcedReleaseOpen(false);
-          showToast("Strafe registriert. Schlaf jetzt... wenn du kannst.", "warning");
+          showToast("Verweigerung registriert. Massive Strafe aktiv.", "warning");
       } catch (e) {
           console.error("Error refusing forced release:", e);
       }
@@ -644,6 +664,7 @@ export default function Dashboard() {
           open={forcedReleaseOpen}
           method={forcedReleaseMethod}
           onConfirm={handleConfirmForcedRelease}
+          onFail={handleFailForcedRelease}
           onRefuse={handleRefuseForcedRelease}
       />
       
@@ -671,7 +692,6 @@ export default function Dashboard() {
                 )}
             </Box>
 
-            {/* NEU: STEALTH BANNER */}
             {isStealthActive && (
                 <Paper sx={{ p: 2, mb: 3, bgcolor: PALETTE.accents.purple, border: `1px solid ${PALETTE.accents.purple}` }}>
                     <Typography variant="subtitle2" sx={{ fontWeight: 'bold', color: '#fff', textTransform: 'uppercase', textAlign: 'center' }}>
@@ -803,7 +823,6 @@ export default function Dashboard() {
         </motion.div>
       </Container>
 
-      {/* NEU: WÖCHENTLICHER PROTOKOLL-REPORT (Erscheint Sonntags ab 23 Uhr) */}
       <Dialog open={!!weeklyReport} disableEscapeKeyDown PaperProps={{ sx: { ...DESIGN_TOKENS.dialog.paper.sx, border: `1px solid ${PALETTE.accents.gold}`, boxShadow: `0 0 20px ${PALETTE.accents.gold}40` } }}>
           <DialogTitle sx={{ ...DESIGN_TOKENS.dialog.title.sx, color: PALETTE.accents.gold, justifyContent: 'center' }}>
               <TrendingUpIcon sx={{ mr: 1 }} /> WOCHEN-EVALUIERUNG
