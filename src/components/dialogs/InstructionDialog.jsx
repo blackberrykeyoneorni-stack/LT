@@ -58,13 +58,13 @@ export default function InstructionDialog({
   const [credits, setCredits] = useState({ nc: 0, lc: 0 });
   const [creditReduction, setCreditReduction] = useState(0); 
   const [maxReduction, setMaxReduction] = useState(0); 
-  const [creditType, setCreditType] = useState('lingerie'); 
+  const [creditType, setCreditType] = useState('lingerie');
   const [insolvencyData, setInsolvencyData] = useState({ isBlocked: false, currentDebt: 0, remainingCredit: 0 });
 
   // Calculation State für UI
   const [projectedCost, setProjectedCost] = useState(0);
   const [isOverdraft, setIsOverdraft] = useState(false);
-  
+
   // Countdown State
   const [timeLeftStr, setTimeLeftStr] = useState('');
 
@@ -116,24 +116,53 @@ export default function InstructionDialog({
       if (viewState !== 'preparation') return;
 
       if (!instruction || !instruction.items) return;
-
       const scannedItem = items.find(i => 
           (i.nfcTagId && i.nfcTagId === scannedId) || 
           (i.customId && i.customId === scannedId) ||
           (i.id === scannedId)
       );
-
       if (!scannedItem) {
           if (showToast) showToast("Unbekanntes Item gescannt.", "warning");
           return;
       }
 
-      const isPartOfInstruction = instruction.items.some(instrItem => instrItem.id === scannedItem.id);
+      let isValid = false;
 
-      if (isPartOfInstruction) {
+      // --- NEU: TRANSIT PROTOCOL LOGIK ---
+      if (instruction.transitProtocol && instruction.transitProtocol.active) {
+          const transit = instruction.transitProtocol;
+          let isLate = false;
+          
+          if (transit.nightSessionEndTime) {
+              const end = new Date(transit.nightSessionEndTime);
+              if ((new Date() - end) / 60000 > 30) isLate = true;
+          }
+
+          const expectedItemId = isLate ? transit.backupItem.id : transit.primaryItemId;
+
+          if (scannedItem.id === expectedItemId) {
+              isValid = true;
+          } else if (instruction.items.some(i => i.id === scannedItem.id && i.id !== transit.primaryItemId)) {
+              isValid = true; 
+          }
+
+          if (!isValid) {
+              if (isLate && scannedItem.id === transit.primaryItemId) {
+                   if (showToast) showToast("Transit verpasst (30 Min)! Das Nacht-Item ist unrein. Scanne Ersatz.", "error");
+                   return;
+              } else if (!isLate && scannedItem.id === transit.backupItem.id) {
+                   if (showToast) showToast("Transit-Fenster offen. Scanne dein Nacht-Item.", "error");
+                   return;
+              }
+          }
+      } else {
+          isValid = instruction.items.some(instrItem => instrItem.id === scannedItem.id);
+      }
+
+      if (isValid) {
           if (showToast) showToast(`Item "${scannedItem.name}" verifiziert. Starte Session...`, "success");
           // PHASE 2 ABSCHLUSS: Scan startet die Session
-          await handleSessionStart(true); 
+          await handleSessionStart(true);
       } else {
           if (showToast) showToast(`Falsches Item! "${scannedItem.name}" gehört nicht zur Anweisung.`, "error");
           if (navigator.vibrate) navigator.vibrate([100, 50, 100]); 
@@ -166,7 +195,7 @@ export default function InstructionDialog({
                   creditsUsed: creditReduction,
                   wasOverdraft: isOverdraft 
               });
-
+              
               if (showToast) showToast("Akzeptiert. Bereite dich vor.", "success");
               setViewState('preparation');
               onCancelOath(); // Reset Hold Progress Visuals
@@ -182,7 +211,7 @@ export default function InstructionDialog({
   const handleSessionStart = async (viaNfc = false) => {
       // Items laden
       const itemsToStart = instruction.items.map(instrItem => items.find(i => i.id === instrItem.id)).filter(Boolean);
-
+      
       if (itemsToStart.length > 0) {
           try {
               // Hier wird die eigentliche Session gestartet
@@ -203,7 +232,6 @@ export default function InstructionDialog({
           }
       }
   };
-
 
   useEffect(() => {
     const loadData = async () => {
@@ -242,7 +270,7 @@ export default function InstructionDialog({
                 if (hasNylon) type = 'nylon';
             }
             setCreditType(type);
-
+            
             // Insolvenz-Check
             const insCheck = await checkInsolvency(currentUser.uid, type);
             setInsolvencyData(insCheck);
@@ -260,7 +288,7 @@ export default function InstructionDialog({
       instruction && 
       !instruction.isAccepted && 
       showVault && 
-      !insolvencyData.isBlocked; 
+      !insolvencyData.isBlocked;
 
   useEffect(() => {
       if (canSpendCredits && instruction.durationMinutes) {
@@ -296,7 +324,6 @@ export default function InstructionDialog({
   const projectedBalance = (creditType === 'nylon' ? credits.nc : credits.lc) - projectedCost;
   const isInsolvencyRisk = projectedBalance < -2880;
 
-
   const triggerHardcoreCheck = (actionToExecute) => {
       if (!isNight || !hcPrefs.enabled) { actionToExecute(); return; }
       
@@ -321,7 +348,8 @@ export default function InstructionDialog({
       try {
           await registerPunishment(currentUser.uid, "Hardcore-Start verweigert (Entladung)", 30);
           if (showToast) showToast("Verweigerung registriert. Strafe aktiv.", "warning");
-      } catch (e) { console.error(e); } finally {
+      } catch (e) { console.error(e);
+      } finally {
           setHardcoreDialogOpen(false);
           if (pendingAction) pendingAction();
           setPendingAction(null);
@@ -340,7 +368,6 @@ export default function InstructionDialog({
           i.status === 'active' && 
           (i.subCategory || '').toLowerCase().includes('strumpfhose')
       );
-
       if (candidates.length === 0) {
           if (showToast) showToast("Keine passenden Items gefunden.", "warning");
           return;
@@ -374,7 +401,6 @@ export default function InstructionDialog({
           handleCommitment(); 
       }
   }, [oathProgress, viewState]);
-
 
   const totalItems = instruction?.items?.length || 0;
   const verifiedCount = verifiedItems.length;
@@ -450,7 +476,6 @@ export default function InstructionDialog({
                         borderRadius: 2, 
                         bgcolor: isOverdraft ? 'rgba(255, 0, 0, 0.05)' : 'rgba(255, 215, 0, 0.05)' 
                     }}>
-                        {/* ... Slider Content unchanged ... */}
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                 {isOverdraft ? <TrendingDownIcon sx={{ color: PALETTE.accents.red }} /> : <SavingsIcon sx={{ color: PALETTE.accents.gold }} />}
@@ -540,6 +565,8 @@ export default function InstructionDialog({
           items.find(i => i.id === instrItem.id) || instrItem
       );
 
+      const primaryTransitItem = instruction?.transitProtocol?.active ? items.find(i => i.id === instruction.transitProtocol.primaryItemId) : null;
+
       return (
         <Box sx={{ textAlign: 'center' }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
@@ -547,17 +574,58 @@ export default function InstructionDialog({
                  <Chip icon={<TimerIcon />} label={timeLeftStr} color="warning" variant="outlined" size="small" />
             </Box>
 
+            {/* NEU: TRANSIT PROTOCOL UI (GNADENFRIST) */}
+            {instruction?.transitProtocol?.active && (
+                <Box sx={{ mb: 3, p: 2, border: `1px solid ${PALETTE.accents.red}`, borderRadius: 2, bgcolor: 'rgba(255,0,0,0.05)', textAlign: 'left' }}>
+                    <Typography variant="caption" color="error" sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+                        <TimerIcon fontSize="small"/> TRANSIT PROTOKOLL (30 MIN)
+                    </Typography>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
+                        <Box>
+                            <Typography variant="caption" color="text.secondary" display="block">Innerhalb der Frist:</Typography>
+                            <Typography variant="body2" sx={{ color: PALETTE.accents.green, fontWeight: 'bold' }}>{primaryTransitItem?.name || instruction.transitProtocol.primaryItem?.name || "Nacht-Höschen"}</Typography>
+                        </Box>
+                    </Box>
+                    <Divider sx={{ my: 1.5, borderColor: 'rgba(255,0,0,0.2)' }} />
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Box>
+                            <Typography variant="caption" color="error" display="block" sx={{ fontWeight: 'bold' }}>Nach Ablauf (Strafe):</Typography>
+                            <Typography variant="body2" sx={{ color: PALETTE.accents.red, fontWeight: 'bold' }}>{instruction.transitProtocol.backupItem?.name}</Typography>
+                            <Typography variant="caption" sx={{ color: '#fff', bgcolor: PALETTE.accents.red, px: 0.5, py: 0.2, borderRadius: 1, fontWeight: 'bold', display: 'inline-block', mt: 0.5 }}>ZWANGSENTLADUNG</Typography>
+                        </Box>
+                        {instruction.transitProtocol.backupItem?.img && <Avatar src={instruction.transitProtocol.backupItem.img} sx={{ width: 40, height: 40, border: `1px solid ${PALETTE.accents.red}` }} />}
+                    </Box>
+                </Box>
+            )}
+
+            {/* NEU: FORCED RELEASE WARNUNG */}
+            {instruction?.forcedRelease?.required && !instruction.forcedRelease.executed && !instruction.transitProtocol?.active && (
+                <Alert severity="error" icon={<ReportProblemIcon />} sx={{ mb: 3, bgcolor: 'rgba(255,0,0,0.1)', color: '#ffaaaa', textAlign: 'left' }}>
+                    <Typography variant="caption" sx={{ fontWeight: 'bold', display: 'block' }}>FORCED RELEASE PROTOCOL AKTIV</Typography>
+                    Eine sofortige physische Zwangsentladung ist am Ende dieses Vorgangs erforderlich.
+                </Alert>
+            )}
+
             <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 2, my: 3 }}>
-                {displayItems.map((displayItem, idx) => (
-                    <Box key={idx} sx={{ textAlign: 'center', flex: '1 1 140px', maxWidth: 160 }}>
+                {displayItems.map((displayItem, idx) => {
+                    const isTransitBackup = instruction.transitProtocol?.active && instruction.transitProtocol?.backupItem?.id === displayItem.id;
+                    
+                    return (
+                    <Box key={idx} sx={{ 
+                        textAlign: 'center', flex: '1 1 140px', maxWidth: 160,
+                        border: isTransitBackup ? `1px dashed ${PALETTE.accents.red}` : 'none',
+                        borderRadius: 2,
+                        p: isTransitBackup ? 1 : 0,
+                        opacity: isTransitBackup ? 0.7 : 1
+                    }}>
                         {displayItem.img || displayItem.imageUrl ? (
-                            <Avatar src={displayItem.img || displayItem.imageUrl} sx={{ width: 100, height: 100, border: `2px solid ${PALETTE.primary.main}`, mx: 'auto', mb: 1, boxShadow: '0 0 15px rgba(0,0,0,0.5)' }} />
+                            <Avatar src={displayItem.img || displayItem.imageUrl} sx={{ width: 100, height: 100, border: `2px solid ${isTransitBackup ? PALETTE.accents.red : PALETTE.primary.main}`, mx: 'auto', mb: 1, boxShadow: '0 0 15px rgba(0,0,0,0.5)' }} />
                         ) : (
-                            <Box sx={{ width: 100, height: 100, borderRadius: '50%', border: `2px solid ${PALETTE.primary.main}`, display: 'flex', alignItems: 'center', justifyContent: 'center', mx: 'auto', mb: 1, bgcolor: 'rgba(0,0,0,0.3)' }}>
-                                <AccessibilityNewIcon sx={{ fontSize: 40 }} />
+                            <Box sx={{ width: 100, height: 100, borderRadius: '50%', border: `2px solid ${isTransitBackup ? PALETTE.accents.red : PALETTE.primary.main}`, display: 'flex', alignItems: 'center', justifyContent: 'center', mx: 'auto', mb: 1, bgcolor: 'rgba(0,0,0,0.3)' }}>
+                                <AccessibilityNewIcon sx={{ fontSize: 40, color: isTransitBackup ? PALETTE.accents.red : 'inherit' }} />
                             </Box>
                         )}
-                        <Typography variant="subtitle1" sx={{ fontWeight: 'bold', lineHeight: 1.2 }}>{displayItem.name || displayItem.brand}</Typography>
+                        <Typography variant="subtitle1" sx={{ fontWeight: 'bold', lineHeight: 1.2, color: isTransitBackup ? PALETTE.accents.red : 'inherit' }}>{displayItem.name || displayItem.brand}</Typography>
                         <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>{displayItem.subCategory} {displayItem.color ? `• ${displayItem.color}` : ''}</Typography>
                         
                         <Chip 
@@ -569,10 +637,14 @@ export default function InstructionDialog({
                         />
                         
                          {displayItem.location && (
-                            <Chip label={`${displayItem.location}`} size="small" sx={{ display: 'flex', mx: 'auto', maxWidth: 'fit-content', bgcolor: 'rgba(255,255,255,0.1)', fontSize: '0.65rem', height: 20 }} />
+                             <Chip label={`${displayItem.location}`} size="small" sx={{ display: 'flex', mx: 'auto', maxWidth: 'fit-content', bgcolor: 'rgba(255,255,255,0.1)', fontSize: '0.65rem', height: 20 }} />
+                         )}
+
+                         {isTransitBackup && (
+                             <Typography variant="caption" sx={{ color: PALETTE.accents.red, display: 'block', mt: 0.5, fontWeight: 'bold', fontSize: '0.6rem' }}>ERSATZ (STRAFE)</Typography>
                          )}
                     </Box>
-                ))}
+                )})}
             </Box>
 
             <Alert severity="info" sx={{ mb: 3, textAlign: 'left', bgcolor: 'rgba(2, 136, 209, 0.1)' }}>

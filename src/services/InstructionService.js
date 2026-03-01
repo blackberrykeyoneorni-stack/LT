@@ -1,5 +1,5 @@
 import { db } from '../firebase';
-import { collection, serverTimestamp, query, where, getDocs, doc, setDoc, getDoc, orderBy } from 'firebase/firestore';
+import { collection, serverTimestamp, query, where, getDocs, doc, setDoc, getDoc, orderBy, limit } from 'firebase/firestore';
 import { DEFAULT_PROTOCOL_RULES } from '../config/defaultRules';
 
 // --- HELPER FUNKTIONEN ---
@@ -321,7 +321,7 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
         // Wir schauen so weit zurück wie die Resting-Time ist (plus Puffer)
         const recentSessionsMap = await getRecentSessionsMap(uid, restingHours + 5);
 
-        // --- NEU: STEALTH MODUS KOFFER PRÜFUNG ---
+        // --- STEALTH MODUS KOFFER PRÜFUNG ---
         let isStealth = false;
         let packedItemIds = [];
         const suspQ = query(collection(db, `users/${uid}/suspensions`), where('status', '==', 'active'), where('type', '==', 'stealth_travel'));
@@ -346,8 +346,8 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                 isAccepted: false,
                 isPlanned: true,
                 itemName: titleNames,
-                durationMinutes, // NEU HINZUGEFÜGT
-                stealthModeActive: isStealth, // NEU FLAG ERHALTEN
+                durationMinutes, 
+                stealthModeActive: isStealth, 
                 forcedRelease: { required: false, executed: false, method: null },
                 items: plannedItems.map(i => ({
                     id: i.id,
@@ -379,7 +379,7 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
             // Nur aktive Items
             if (i.status !== 'active') return false;
 
-            // --- NEU: HARTE WEICHE FÜR STEALTH (REISE) ---
+            // --- HARTE WEICHE FÜR STEALTH (REISE) ---
             if (isStealth) {
                 // Nur Items, die im Koffer sind
                 if (!packedItemIds.includes(i.id)) return false;
@@ -405,7 +405,6 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                 // Wenn Session neuer ist als Item-Eintrag, nutzen wir das Session-Datum
                 if (!itemDate || sessionDate > itemDate) {
                     effectiveItem = { ...i, lastWorn: sessionDate }; // Temporäres Override
-                    // console.log(`Recovery-Override für ${i.name}: ${sessionDate}`);
                 }
             }
 
@@ -432,7 +431,6 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
         if (availableItems.length === 0) return null;
 
         // 4. SMART HYBRID SELECTOR
-        // Schritt A: Gruppieren nach Subkategorie (oder Mainkategorie als Fallback)
         const groups = {};
         availableItems.forEach(item => {
             const key = item.subCategory || item.mainCategory || 'Sonstiges';
@@ -442,9 +440,6 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
 
         let availableGroupKeys = Object.keys(groups);
         const selectedItems = [];
-
-        // --- NEU: Wahrscheinlichkeits-Logik für Item-Anzahl ---
-        // Berechnet tatsächliche Anzahl basierend auf maxItems & Zufall
 
         let targetItemCount = 1;
         const rndCount = Math.random();
@@ -458,13 +453,11 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
             } else {
                 targetItemCount = 1;
             }
-        } else if (maxItems >= 3) { // Auch für > 3 gilt die Logik von 3
-            // 55% Chance für 3 Items
-            // 40% Chance für 2 Items (Summe 95%)
-            // 5% Chance für 1 Item
+        } else if (maxItems >= 3) { 
+            // 55% Chance für 3 Items, 40% Chance für 2 Items, 5% Chance für 1 Item
             if (rndCount < 0.55) {
                 targetItemCount = 3;
-            } else if (rndCount < 0.95) { // 0.55 + 0.40
+            } else if (rndCount < 0.95) { 
                 targetItemCount = 2;
             } else {
                 targetItemCount = 1;
@@ -521,28 +514,74 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
 
         if (selectedItems.length === 0) return null;
 
+        // --- NEU: SEAMLESS TRANSIT PROTOCOL (30 MIN GRACE) ---
+        let transitProtocol = { active: false };
+        if (!isNightInstruction && !isStealth) {
+            const selectedLingerieIdx = selectedItems.findIndex(i =>
+                (i.subCategory || '').toLowerCase().includes('höschen') ||
+                (i.mainCategory || '').toLowerCase().includes('lingerie') ||
+                (i.mainCategory || '').toLowerCase().includes('dessous')
+            );
+
+            if (selectedLingerieIdx !== -1) {
+                const qNight = query(collection(db, `users/${uid}/sessions`), where('type', '==', 'instruction'));
+                const snapNight = await getDocs(qNight);
+                const nightSessions = [];
+                snapNight.forEach(d => {
+                    const data = d.data();
+                    if (data.periodId && data.periodId.includes('night')) {
+                        nightSessions.push({ id: d.id, ...data, startTime: data.startTime?.toDate() || new Date(0), endTime: data.endTime?.toDate() || null });
+                    }
+                });
+                nightSessions.sort((a, b) => b.startTime - a.startTime);
+                const lastNightSession = nightSessions.length > 0 ? nightSessions[0] : null;
+
+                if (lastNightSession && (new Date() - lastNightSession.startTime) < 24 * 60 * 60 * 1000) {
+                    const nightIds = lastNightSession.itemIds || (lastNightSession.itemId ? [lastNightSession.itemId] : []);
+                    const nightLingerie = items.find(i => nightIds.includes(i.id) && (
+                        (i.subCategory || '').toLowerCase().includes('höschen') ||
+                        (i.mainCategory || '').toLowerCase().includes('lingerie') ||
+                        (i.mainCategory || '').toLowerCase().includes('dessous')
+                    ));
+
+                    if (nightLingerie) {
+                        const penaltyItem = selectedItems[selectedLingerieIdx];
+                        if (nightLingerie.id !== penaltyItem.id) {
+                            selectedItems[selectedLingerieIdx] = nightLingerie;
+                            transitProtocol = {
+                                active: true,
+                                primaryItemId: nightLingerie.id,
+                                nightSessionId: lastNightSession.id,
+                                nightSessionEndTime: lastNightSession.endTime ? lastNightSession.endTime.toISOString() : null,
+                                backupItem: {
+                                    id: penaltyItem.id,
+                                    name: penaltyItem.name || penaltyItem.subCategory || 'Ersatz-Item',
+                                    img: penaltyItem.imageUrl || (penaltyItem.images && penaltyItem.images[0]) || null,
+                                    subCategory: penaltyItem.subCategory || ''
+                                }
+                            };
+                            console.log("InstructionService: Transit Protocol aktiviert. Doppel-Direktive generiert.");
+                        }
+                    }
+                }
+            }
+        }
+
         // --- FORCED RELEASE LOGIK (DYNAMISCH) ---
-        // Verwendet jetzt die Werte aus ProtocolSettings
         let forcedRelease = { required: false, executed: false, method: null };
 
         if (isNightInstruction) {
-            // Chance aus den Settings (Fallback 0.15)
             const triggerChance = protocolSettings.instruction?.forcedReleaseTriggerChance ?? 0.15;
-
             if (Math.random() < triggerChance) {
                 forcedRelease.required = true;
-
-                // Methoden-Wahrscheinlichkeiten aus Settings
                 const methods = protocolSettings.instruction?.forcedReleaseMethods ?? {
                     hand: 0.34, toy_vaginal: 0.33, toy_anal: 0.33
                 };
 
-                // Gewichtete Zufallsauswahl
                 const rnd = Math.random();
                 const handProb = methods.hand || 0;
                 const vagProb = methods.toy_vaginal || 0;
 
-                // Hier wird die "Rest-Logik" der Slider angewendet
                 if (rnd < handProb) {
                     forcedRelease.method = 'hand';
                 } else if (rnd < (handProb + vagProb)) {
@@ -550,7 +589,6 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                 } else {
                     forcedRelease.method = 'toy_anal';
                 }
-
                 console.log("InstructionService: Forced Release Triggered via Settings!", forcedRelease.method);
             }
         }
@@ -562,9 +600,10 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
             generatedAt: serverTimestamp(),
             isAccepted: false,
             itemName: titleNames,
-            durationMinutes, // NEU HINZUGEFÜGT
-            stealthModeActive: isStealth, // NEU: Damit TimeBank & Co Bescheid wissen
+            durationMinutes, 
+            stealthModeActive: isStealth, 
             forcedRelease,
+            transitProtocol, 
             items: selectedItems.map(i => ({
                 id: i.id,
                 name: i.subCategory || i.name || 'Unbenanntes Item',
