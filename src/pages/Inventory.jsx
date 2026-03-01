@@ -148,7 +148,8 @@ export default function Inventory() {
   // Kombiniert gespeicherte Locations aus Settings mit tatsächlich genutzten Locations aus Items
   const availableLocations = useMemo(() => {
       const fromSettings = dropdowns.locations || [];
-      const fromItems = items.map(i => i.storageLocation).filter(l => l && l.trim() !== '');
+      // KORREKTUR: Liest nun primär `location` und fällt auf `storageLocation` zurück
+      const fromItems = items.map(i => i.location || i.storageLocation).filter(l => l && l.trim() !== '');
       return [...new Set([...fromSettings, ...fromItems])].sort();
   }, [dropdowns.locations, items]);
 
@@ -247,7 +248,11 @@ export default function Inventory() {
     
     // Prio 1: NFC Scan Location
     if (scannedLocation) {
-        res = res.filter(i => i.storageLocation && i.storageLocation.trim() === scannedLocation.trim());
+        // KORREKTUR: Berücksichtigt location und storageLocation
+        res = res.filter(i => {
+            const loc = i.location || i.storageLocation;
+            return loc && loc.trim() === scannedLocation.trim();
+        });
     } else {
         // Prio 2: Manuelle Filter
         if (filterStatus === 'active') {
@@ -262,7 +267,8 @@ export default function Inventory() {
         
         // NEU: Lagerort Filter
         if (filterLocation !== 'All') {
-            res = res.filter(i => i.storageLocation === filterLocation);
+            // KORREKTUR: Berücksichtigt location und storageLocation
+            res = res.filter(i => (i.location || i.storageLocation) === filterLocation);
         }
 
         if (parseInt(filterMinRating) > 0) res = res.filter(i => i.condition >= parseInt(filterMinRating));
