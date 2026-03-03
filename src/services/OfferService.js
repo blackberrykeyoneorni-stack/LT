@@ -1,5 +1,5 @@
 import { db } from '../firebase';
-import { doc, getDoc, setDoc, updateDoc, serverTimestamp, Timestamp, increment } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, serverTimestamp, Timestamp, increment, writeBatch, query, collection, where, getDocs } from 'firebase/firestore';
 import { startTZD } from './TZDService';
 
 // --- KONFIGURATION ---
@@ -53,7 +53,8 @@ export const isImmunityActive = async (userId) => {
  */
 export const checkGambleTrigger = async (userId, isTzdActive, isInstructionActive, activePunishmentItem) => {
     // 1. SCHUTZRAUM: Keine Gambles bei Pflichtaufgaben
-    if (isTzdActive || isInstructionActive) return { trigger: false };
+    // GEÄNDERT: isInstructionActive entfernt, damit hybride Eskalation bei laufenden Sessions greifen kann
+    if (isTzdActive) return { trigger: false };
 
     // 2. AUSNAHME: Buttplug-Strafen erlauben Gambles
     if (activePunishmentItem) {
@@ -154,6 +155,127 @@ export const recordGambleAction = async (userId, action) => {
 };
 
 /**
+ * NEU: Autoritäre TZD-Eskalation. Sammelt aktuell getragene Items und füllt 
+ * auf exakt 3 Items auf (strikt begrenzt auf Nylons und Dessous mit Gewichtung).
+ */
+const buildAuthoritarianTZDItems = async (userId) => {
+    const TARGET_ITEM_COUNT = 3; 
+    
+    // 1. Hole aktive Sessions
+    const sessionsSnap = await getDocs(query(collection(db, `users/${userId}/sessions`), where('endTime', '==', null)));
+    const activeSessions = [];
+    const inheritedItemIds = new Set();
+    
+    sessionsSnap.forEach(docSnap => {
+        const data = docSnap.data();
+        activeSessions.push({ id: docSnap.id, ...data });
+        if (data.itemId) inheritedItemIds.add(data.itemId);
+        if (data.itemIds && Array.isArray(data.itemIds)) {
+            data.itemIds.forEach(id => inheritedItemIds.add(id));
+        }
+    });
+
+    // 2. Hole alle Items
+    const itemsSnap = await getDocs(collection(db, `users/${userId}/items`));
+    const allItems = [];
+    itemsSnap.forEach(docSnap => allItems.push({ id: docSnap.id, ...docSnap.data() }));
+
+    // 3. Hole Preferences für Gewichte
+    let userWeights = {};
+    const prefSnap = await getDoc(doc(db, `users/${userId}/settings/preferences`));
+    if (prefSnap.exists() && prefSnap.data().categoryWeights) {
+        userWeights = prefSnap.data().categoryWeights;
+    }
+
+    // 4. Vererbung (Lock-In der aktuell getragenen Items)
+    const lockedItems = allItems.filter(i => inheritedItemIds.has(i.id));
+    const itemsNeeded = Math.max(0, TARGET_ITEM_COUNT - lockedItems.length);
+
+    const finalItems = [...lockedItems];
+
+    // 5. Fehlende Items auffüllen (Autoritärer Filter: nur Nylons & Dessous)
+    if (itemsNeeded > 0) {
+        let availableItems = allItems.filter(i => {
+            if (i.status !== 'active') return false;
+            if (inheritedItemIds.has(i.id)) return false; // Bereits vererbt
+            
+            const cat = (i.mainCategory || '').toLowerCase();
+            if (cat.includes('nylon') || cat.includes('lingerie') || cat.includes('dessous')) {
+                return true;
+            }
+            return false;
+        });
+
+        const groups = {};
+        availableItems.forEach(item => {
+            const key = item.subCategory || item.mainCategory || 'Sonstiges';
+            if (!groups[key]) groups[key] = [];
+            groups[key].push(item);
+        });
+
+        let availableGroupKeys = Object.keys(groups);
+
+        for (let k = 0; k < itemsNeeded; k++) {
+            if (availableGroupKeys.length === 0) break;
+
+            let totalWeight = 0;
+            const weightedGroups = availableGroupKeys.map(key => {
+                const count = groups[key].length;
+                const rootScore = Math.sqrt(count);
+                const manualWeight = parseInt(userWeights[key] || 1);
+                const finalScore = rootScore * manualWeight;
+                totalWeight += finalScore;
+                return { key, score: finalScore };
+            });
+
+            let randomValue = Math.random() * totalWeight;
+            let chosenCategoryKey = null;
+
+            for (const group of weightedGroups) {
+                randomValue -= group.score;
+                if (randomValue <= 0) {
+                    chosenCategoryKey = group.key;
+                    break;
+                }
+            }
+            if (!chosenCategoryKey && weightedGroups.length > 0) {
+                chosenCategoryKey = weightedGroups[weightedGroups.length - 1].key;
+            }
+
+            const itemsInGroup = groups[chosenCategoryKey];
+            const randomItemIndex = Math.floor(Math.random() * itemsInGroup.length);
+            const selected = itemsInGroup[randomItemIndex];
+            
+            finalItems.push(selected);
+
+            // Update Arrays um Dopplungen der gleichen Subkategorie zu vermeiden
+            availableGroupKeys = availableGroupKeys.filter(key => key !== chosenCategoryKey);
+        }
+    }
+
+    // 6. Laufende Sessions hart beenden (Vom TZD überschrieben)
+    if (activeSessions.length > 0) {
+        const batch = writeBatch(db);
+        activeSessions.forEach(session => {
+            const sessionRef = doc(db, `users/${userId}/sessions`, session.id);
+            batch.update(sessionRef, {
+                endTime: serverTimestamp(),
+                tzdExecuted: true,
+                finalNote: 'Hart beendet: Vom Spiel-TZD überschrieben (Autoritäre Eskalation).'
+            });
+        });
+        await batch.commit();
+    }
+
+    return {
+        finalItems,
+        inheritedItemIds: Array.from(inheritedItemIds),
+        isColdStart: lockedItems.length === 0,
+        addedItemsCount: finalItems.length - lockedItems.length
+    };
+};
+
+/**
  * Führt den Münzwurf aus.
  * FIX: Gibt immer penaltyDuration (number oder null) zurück.
  */
@@ -170,9 +292,15 @@ export const rollTheDice = async (userId, stakeItems) => {
             penaltyDuration: null 
         };
     } else {
-        // VERLUST
+        // VERLUST - Autoritäre TZD-Eskalation
+        const escalationResult = await buildAuthoritarianTZDItems(userId);
+        
         const duration = 1440; // Exakt 24 Stunden
-        await startTZD(userId, stakeItems, null, duration, 'spiel_tzd'); 
+        
+        // Nutze finalItems anstatt der Wetteinsätze. Fallback falls das Inventar komplett leer ist.
+        const penaltyItems = escalationResult.finalItems.length > 0 ? escalationResult.finalItems : stakeItems;
+        
+        await startTZD(userId, penaltyItems, null, duration, 'spiel_tzd', escalationResult); 
         return { 
             win: false, 
             type: 'tzd_lock',

@@ -46,7 +46,7 @@ const determineSecretDuration = (matrix) => {
 /**
  * Startet das Protokoll. 
  */
-export const startTZD = async (userId, targetItems, durationMatrix, overrideDurationMinutes = null, customType = null) => {
+export const startTZD = async (userId, targetItems, durationMatrix, overrideDurationMinutes = null, customType = null, escalationData = null) => {
     let targetDuration;
 
     if (overrideDurationMinutes) {
@@ -78,7 +78,8 @@ export const startTZD = async (userId, targetItems, durationMatrix, overrideDura
         stage: 'briefing',
         isFailed: false,
         isPenalty: !!overrideDurationMinutes || customType === 'spiel_tzd',
-        protocolType: customType || (overrideDurationMinutes ? 'evasion_penalty' : 'regular')
+        protocolType: customType || (overrideDurationMinutes ? 'evasion_penalty' : 'regular'),
+        escalationData: escalationData || null
     };
 
     await setDoc(doc(db, `users/${userId}/status/tzd`), tzdData);
