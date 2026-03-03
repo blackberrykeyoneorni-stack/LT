@@ -320,7 +320,16 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
                 let totalLagMinutes = 0;
                 let lagCount = 0;
 
-                historySessions.forEach(s => {
+                // NEU: Nur die letzten 40 Tage für Voluntarism, Compliance und Resistance
+                const fortyDaysAgo = new Date();
+                fortyDaysAgo.setDate(now.getDate() - 40);
+
+                const recent40DaysSessions = historySessions.filter(s => {
+                    const d = s.startTime.toDate ? s.startTime.toDate() : new Date(s.startTime);
+                    return d >= fortyDaysAgo;
+                });
+
+                recent40DaysSessions.forEach(s => {
                     const start = s.startTime.toDate ? s.startTime.toDate() : new Date(s.startTime);
                     const end = s.endTime ? (s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime)) : new Date();
                     const duration = Math.max(0, end.getTime() - start.getTime());
@@ -339,7 +348,7 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
                 });
                 
                 const voluntarismVal = totalDurationMs > 0 ? (voluntaryDurationMs / totalDurationMs) * 100 : 0;
-                const resistanceVal = historySessions.length > 0 ? (historySessions.filter(s => s.type === 'punishment').length / historySessions.length) * 100 : 0;
+                const resistanceVal = recent40DaysSessions.length > 0 ? (recent40DaysSessions.filter(s => s.type === 'punishment').length / recent40DaysSessions.length) * 100 : 0;
                 
                 // Durchschnitt berechnen (sicher vor Division durch 0)
                 const avgLagVal = lagCount > 0 ? (totalLagMinutes / lagCount) : 0;
@@ -398,7 +407,7 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
                 // Score Compliance: 0min lag = 100 Pkt. Pro Minute Abzug.
                 // Wir nutzen hier avgLagVal, das nun garantiert eine Zahl ist (oder 0).
                 const scoreCompliance = Math.max(0, 100 - (avgLagVal * 1.6));
-                const scorePsyche = Math.max(0, ((voluntarismVal * 0.6) + (scoreCompliance * 0.4)) - (resistanceVal * 2));
+                const scorePsyche = Math.max(0, ((voluntarismVal * 0.35) + (scoreCompliance * 0.65)) - (resistanceVal * 2));
 
                 // 3. INFILTRATION (40%) - Alltags-Übernahme
                 const scoreInfiltration = (nocturnalVal * 0.5) + (coverageVal * 0.5);
