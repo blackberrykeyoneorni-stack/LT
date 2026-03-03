@@ -321,7 +321,7 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
         // Wir schauen so weit zurück wie die Resting-Time ist (plus Puffer)
         const recentSessionsMap = await getRecentSessionsMap(uid, restingHours + 5);
 
-        // --- STEALTH MODUS KOFFER PRÜFUNG ---
+        // --- NEU: STEALTH MODUS KOFFER PRÜFUNG ---
         let isStealth = false;
         let packedItemIds = [];
         const suspQ = query(collection(db, `users/${uid}/suspensions`), where('status', '==', 'active'), where('type', '==', 'stealth_travel'));
@@ -346,8 +346,8 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                 isAccepted: false,
                 isPlanned: true,
                 itemName: titleNames,
-                durationMinutes, 
-                stealthModeActive: isStealth, 
+                durationMinutes, // NEU HINZUGEFÜGT
+                stealthModeActive: isStealth, // NEU FLAG ERHALTEN
                 forcedRelease: { required: false, executed: false, method: null },
                 items: plannedItems.map(i => ({
                     id: i.id,
@@ -379,7 +379,7 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
             // Nur aktive Items
             if (i.status !== 'active') return false;
 
-            // --- HARTE WEICHE FÜR STEALTH (REISE) ---
+            // --- NEU: HARTE WEICHE FÜR STEALTH (REISE) ---
             if (isStealth) {
                 // Nur Items, die im Koffer sind
                 if (!packedItemIds.includes(i.id)) return false;
@@ -431,6 +431,7 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
         if (availableItems.length === 0) return null;
 
         // 4. SMART HYBRID SELECTOR
+        // Schritt A: Gruppieren nach Subkategorie (oder Mainkategorie als Fallback)
         const groups = {};
         availableItems.forEach(item => {
             const key = item.subCategory || item.mainCategory || 'Sonstiges';
@@ -441,20 +442,19 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
         let availableGroupKeys = Object.keys(groups);
         const selectedItems = [];
 
+        // --- NEU: Wahrscheinlichkeits-Logik für Item-Anzahl ---
         let targetItemCount = 1;
         const rndCount = Math.random();
 
         if (maxItems === 1) {
             targetItemCount = 1;
         } else if (maxItems === 2) {
-            // 75% Chance für 2 Items, sonst 1
             if (rndCount < 0.75) {
                 targetItemCount = 2;
             } else {
                 targetItemCount = 1;
             }
         } else if (maxItems >= 3) { 
-            // 55% Chance für 3 Items, 40% Chance für 2 Items, 5% Chance für 1 Item
             if (rndCount < 0.55) {
                 targetItemCount = 3;
             } else if (rndCount < 0.95) { 
@@ -470,13 +470,10 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
         for (let k = 0; k < targetItemCount; k++) {
             if (availableGroupKeys.length === 0) break;
 
-            // Schritt B: Gewichtung berechnen (Wurzel-Dämpfung + User Settings)
             let totalWeight = 0;
             const weightedGroups = availableGroupKeys.map(key => {
                 const count = groups[key].length;
-                // Wurzel-Dämpfung: Große Sammlungen zählen mehr, aber nicht linear
                 const rootScore = Math.sqrt(count);
-                // Manuelle Gewichtung aus Einstellungen (Multiplikator)
                 const manualWeight = parseInt(userWeights[key] || 1);
 
                 const finalScore = rootScore * manualWeight;
@@ -485,7 +482,6 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                 return { key, score: finalScore };
             });
 
-            // Schritt C: Roulette-Wheel Selection der Kategorie
             let randomValue = Math.random() * totalWeight;
             let chosenCategoryKey = null;
 
@@ -496,19 +492,15 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                     break;
                 }
             }
-            // Fallback bei Rundungsfehlern
             if (!chosenCategoryKey && weightedGroups.length > 0) {
                 chosenCategoryKey = weightedGroups[weightedGroups.length - 1].key;
             }
 
-            // Schritt D: Zufälliges Item aus der gewählten Kategorie
             const itemsInGroup = groups[chosenCategoryKey];
             const randomItemIndex = Math.floor(Math.random() * itemsInGroup.length);
             const selectedItem = itemsInGroup[randomItemIndex];
 
             selectedItems.push(selectedItem);
-
-            // Kategorie entfernen, um Vielfalt zu erzwingen (wie bisherige Logik)
             availableGroupKeys = availableGroupKeys.filter(key => key !== chosenCategoryKey);
         }
 
@@ -517,13 +509,14 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
         // --- NEU: SEAMLESS TRANSIT PROTOCOL (30 MIN GRACE) ---
         let transitProtocol = { active: false };
         if (!isNightInstruction && !isStealth) {
-            const selectedLingerieIdx = selectedItems.findIndex(i =>
+            // GROBER VORFILTER: Nur Datenbank abfragen, wenn überhaupt irgendein Lingerie-Teil gezogen wurde
+            const hasAnyLingerie = selectedItems.some(i =>
                 (i.subCategory || '').toLowerCase().includes('höschen') ||
                 (i.mainCategory || '').toLowerCase().includes('lingerie') ||
                 (i.mainCategory || '').toLowerCase().includes('dessous')
             );
 
-            if (selectedLingerieIdx !== -1) {
+            if (hasAnyLingerie) {
                 const qNight = query(collection(db, `users/${uid}/sessions`), where('type', '==', 'instruction'));
                 const snapNight = await getDocs(qNight);
                 const nightSessions = [];
@@ -538,6 +531,8 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
 
                 if (lastNightSession && (new Date() - lastNightSession.startTime) < 24 * 60 * 60 * 1000) {
                     const nightIds = lastNightSession.itemIds || (lastNightSession.itemId ? [lastNightSession.itemId] : []);
+                    
+                    // Finde das spezifische Nacht-Lingerie Item
                     const nightLingerie = items.find(i => nightIds.includes(i.id) && (
                         (i.subCategory || '').toLowerCase().includes('höschen') ||
                         (i.mainCategory || '').toLowerCase().includes('lingerie') ||
@@ -545,22 +540,32 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                     ));
 
                     if (nightLingerie) {
-                        const penaltyItem = selectedItems[selectedLingerieIdx];
-                        if (nightLingerie.id !== penaltyItem.id) {
-                            selectedItems[selectedLingerieIdx] = nightLingerie;
-                            transitProtocol = {
-                                active: true,
-                                primaryItemId: nightLingerie.id,
-                                nightSessionId: lastNightSession.id,
-                                nightSessionEndTime: lastNightSession.endTime ? lastNightSession.endTime.toISOString() : null,
-                                backupItem: {
-                                    id: penaltyItem.id,
-                                    name: penaltyItem.name || penaltyItem.subCategory || 'Ersatz-Item',
-                                    img: penaltyItem.imageUrl || (penaltyItem.images && penaltyItem.images[0]) || null,
-                                    subCategory: penaltyItem.subCategory || ''
-                                }
-                            };
-                            console.log("InstructionService: Transit Protocol aktiviert. Doppel-Direktive generiert.");
+                        // ZIELGENAUER AUSTAUSCH (Targeted Overwrite)
+                        // Wir suchen in der gezogenen Liste exakt nach der Subkategorie des Nacht-Items
+                        const targetSubCategory = (nightLingerie.subCategory || '').toLowerCase();
+                        
+                        const selectedLingerieIdx = selectedItems.findIndex(i =>
+                            (i.subCategory || '').toLowerCase() === targetSubCategory
+                        );
+
+                        if (selectedLingerieIdx !== -1) {
+                            const penaltyItem = selectedItems[selectedLingerieIdx];
+                            if (nightLingerie.id !== penaltyItem.id) {
+                                selectedItems[selectedLingerieIdx] = nightLingerie;
+                                transitProtocol = {
+                                    active: true,
+                                    primaryItemId: nightLingerie.id,
+                                    nightSessionId: lastNightSession.id,
+                                    nightSessionEndTime: lastNightSession.endTime ? lastNightSession.endTime.toISOString() : null,
+                                    backupItem: {
+                                        id: penaltyItem.id,
+                                        name: penaltyItem.name || penaltyItem.subCategory || 'Ersatz-Item',
+                                        img: penaltyItem.imageUrl || (penaltyItem.images && penaltyItem.images[0]) || null,
+                                        subCategory: penaltyItem.subCategory || ''
+                                    }
+                                };
+                                console.log("InstructionService: Transit Protocol aktiviert. Doppel-Direktive generiert für Subkategorie:", targetSubCategory);
+                            }
                         }
                     }
                 }
@@ -603,7 +608,7 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
             durationMinutes, 
             stealthModeActive: isStealth, 
             forcedRelease,
-            transitProtocol, 
+            transitProtocol,
             items: selectedItems.map(i => ({
                 id: i.id,
                 name: i.subCategory || i.name || 'Unbenanntes Item',

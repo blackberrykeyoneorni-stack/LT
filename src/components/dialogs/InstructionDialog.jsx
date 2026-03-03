@@ -598,13 +598,7 @@ export default function InstructionDialog({
                 </Box>
             )}
 
-            {/* NEU: FORCED RELEASE WARNUNG */}
-            {instruction?.forcedRelease?.required && !instruction.forcedRelease.executed && !instruction.transitProtocol?.active && (
-                <Alert severity="error" icon={<ReportProblemIcon />} sx={{ mb: 3, bgcolor: 'rgba(255,0,0,0.1)', color: '#ffaaaa', textAlign: 'left' }}>
-                    <Typography variant="caption" sx={{ fontWeight: 'bold', display: 'block' }}>FORCED RELEASE PROTOCOL AKTIV</Typography>
-                    Eine sofortige physische Zwangsentladung ist am Ende dieses Vorgangs erforderlich.
-                </Alert>
-            )}
+            {/* Der Forced Release Alert-Block wurde hier entfernt */}
 
             <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 2, my: 3 }}>
                 {displayItems.map((displayItem, idx) => {
