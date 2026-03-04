@@ -4,6 +4,7 @@ import { safeDate } from '../utils/dateUtils';
 import { registerPunishment } from './PunishmentService';
 import { setImmunity, isImmunityActive } from './OfferService'; 
 import { addItemHistoryEntry } from './ItemService';
+import { stopSession, startSession } from './SessionService';
 
 // --- KONFIGURATION (NEU) ---
 const TZD_CONFIG = {
@@ -83,6 +84,31 @@ export const startTZD = async (userId, targetItems, durationMatrix, overrideDura
     };
 
     await setDoc(doc(db, `users/${userId}/status/tzd`), tzdData);
+
+    // --- NEU: Session-Schnitt zur Eliminierung des Double-Countings ---
+    try {
+        const activeSessionsQuery = query(collection(db, `users/${userId}/sessions`), where('isActive', '==', true), where('type', '==', 'instruction'));
+        const activeSessionsSnap = await getDocs(activeSessionsQuery);
+        let periodIdToCarryOver = 'day';
+        
+        for (const sessionDoc of activeSessionsSnap.docs) {
+            const sData = sessionDoc.data();
+            periodIdToCarryOver = sData.periodId || periodIdToCarryOver;
+            // Laufende Session beenden (Zeiten werden sauber verbucht)
+            await stopSession(userId, sessionDoc.id, { note: 'Beendet für TZD-Start (Schnitt)' });
+        }
+
+        // TZD als neue Session starten
+        await startSession(userId, {
+            items: itemsArray,
+            type: 'instruction',
+            periodId: periodIdToCarryOver,
+            note: customType === 'spiel_tzd' ? 'TZD-Session (Gamble)' : 'TZD-Session',
+            instructionDurationMinutes: targetDuration
+        });
+    } catch (e) {
+        console.error("Fehler beim Session-Schnitt für TZD:", e);
+    }
 
     // Historie für alle betroffenen Items vermerken
     for (const item of itemsArray) {
@@ -213,16 +239,13 @@ export const checkForTZDTrigger = async (userId, activeSessions, items) => {
         if (s.itemIds) s.itemIds.forEach(id => activeItemIds.add(id));
     });
 
-    // 1. Hole ALLE aktiven Items der Session für den Outfit-Lock
     const activeItems = items.filter(i => activeItemIds.has(i.id));
     
-    // 2. Prüfe, ob mindestens ein Item TZD-tauglich ist (Auslöser)
     const hasEligibleItem = activeItems.some(i => isItemEligibleForTZD(i));
     if (!hasEligibleItem) return false;
 
     let currentChance = FALLBACK_TRIGGER_CHANCE;
     
-    // Standardwerte falls Datenbank-Abfrage scheitert
     let maxHours = 36;
     let weights = [0.20, 0.50, 0.30];
 
@@ -246,7 +269,6 @@ export const checkForTZDTrigger = async (userId, activeSessions, items) => {
         console.error("Fehler beim Laden der TZD Settings, nutze Fallback", e);
     }
 
-    // Dynamische Matrix-Berechnung anhand der ausgelesenen maxHours ("Vorschlag 2")
     const dynamicMatrix = [
         { label: 'The Bait', minHours: maxHours / 6, maxHours: maxHours / 3, weight: weights[0] || 0.20 },
         { label: 'The Standard', minHours: maxHours / 3, maxHours: (maxHours * 2) / 3, weight: weights[1] || 0.50 },
@@ -255,7 +277,6 @@ export const checkForTZDTrigger = async (userId, activeSessions, items) => {
 
     const roll = Math.random();
     if (roll < currentChance) {
-        // Übergib das gesamte Outfit (activeItems) und die berechnete dynamicMatrix
         await startTZD(userId, activeItems, dynamicMatrix);
         return true;
     }
@@ -389,16 +410,12 @@ export const terminateTZD = async (userId, success = true, customResult = null) 
     if (status && status.lockedItems) {
         for (const item of status.lockedItems) {
             const finalMinutes = status.accumulatedMinutes || 0;
-            await updateDoc(doc(db, `users/${userId}/items`, item.id), { 
-                wearCount: increment(success ? 1 : 0),
-                totalMinutes: increment(success ? finalMinutes : 0),
-                lastWorn: endTime
-            });
-
+            // GELÖSCHT: Manuelle Aufrechnung von wearCount und totalMinutes zur Verhinderung des Double-Countings
+            
             await addItemHistoryEntry(userId, item.id, {
                 type: success ? 'tzd_completed' : 'tzd_failed',
                 message: success 
-                    ? `Zeitloses Diktat erfolgreich beendet (${finalMinutes} Min getragen).`
+                    ? `Zeitloses Diktat erfolgreich beendet (${finalMinutes} Min).`
                     : `Zeitloses Diktat abgebrochen (${finalResult}).`
             });
         }

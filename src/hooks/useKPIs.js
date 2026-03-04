@@ -133,10 +133,6 @@ const calculateDailyNylonMinutes = (dateObj, sessions, items) => {
     return Math.floor(totalMs / 60000);
 };
 
-/**
- * useKPIs Hook
- * FIX: 'export default function' hinzugefügt, damit der Import im Dashboard funktioniert.
- */
 export default function useKPIs(items = [], activeSessionsInput, historySessionsInput) {
     const { currentUser } = useAuth();
     
@@ -316,11 +312,9 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
                 let totalDurationMs = 0;
                 let voluntaryDurationMs = 0;
                 
-                // Variablen für Compliance Fix
                 let totalLagMinutes = 0;
                 let lagCount = 0;
 
-                // NEU: Nur die letzten 40 Tage für Voluntarism, Compliance und Resistance
                 const fortyDaysAgo = new Date();
                 fortyDaysAgo.setDate(now.getDate() - 40);
 
@@ -336,8 +330,6 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
                     totalDurationMs += duration;
                     if (s.type === 'voluntary') voluntaryDurationMs += duration;
 
-                    // FIX: Robuste Berechnung für Compliance Lag
-                    // Wir erzwingen eine Zahl und filtern ungültige Werte/Strings
                     const rawLag = s.complianceLagMinutes;
                     const lagNum = Number(rawLag);
                     
@@ -350,21 +342,53 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
                 const voluntarismVal = totalDurationMs > 0 ? (voluntaryDurationMs / totalDurationMs) * 100 : 0;
                 const resistanceVal = recent40DaysSessions.length > 0 ? (recent40DaysSessions.filter(s => s.type === 'punishment').length / recent40DaysSessions.length) * 100 : 0;
                 
-                // Durchschnitt berechnen (sicher vor Division durch 0)
                 const avgLagVal = lagCount > 0 ? (totalLagMinutes / lagCount) : 0;
 
                 // ENDURANCE (Strict: Only Nylon/Lingerie)
                 const relevantEnduranceSessions = historySessions.filter(s => s.startTime);
+                
+                // NEU: Lückenlose Session-Ketten verschmelzen (15 Minuten Toleranz)
+                const sortedEnduranceSessions = [...relevantEnduranceSessions].sort((a, b) => {
+                    const startA = a.startTime.toDate ? a.startTime.toDate() : new Date(a.startTime);
+                    const startB = b.startTime.toDate ? b.startTime.toDate() : new Date(b.startTime);
+                    return startA - startB;
+                });
+
+                const mergedEnduranceSessions = [];
+                if (sortedEnduranceSessions.length > 0) {
+                    let current = { ...sortedEnduranceSessions[0] };
+                    current.parsedStart = current.startTime.toDate ? current.startTime.toDate() : new Date(current.startTime);
+                    current.parsedEnd = current.endTime ? (current.endTime.toDate ? current.endTime.toDate() : new Date(current.endTime)) : new Date();
+                    current.mergedItemIds = new Set(current.itemIds || (current.itemId ? [current.itemId] : []));
+
+                    for (let i = 1; i < sortedEnduranceSessions.length; i++) {
+                        const next = { ...sortedEnduranceSessions[i] };
+                        next.parsedStart = next.startTime.toDate ? next.startTime.toDate() : new Date(next.startTime);
+                        next.parsedEnd = next.endTime ? (next.endTime.toDate ? next.endTime.toDate() : new Date(next.endTime)) : new Date();
+                        
+                        if ((next.parsedStart - current.parsedEnd) <= 15 * 60000) { // <= 15 Minuten Lücke
+                            current.parsedEnd = new Date(Math.max(current.parsedEnd, next.parsedEnd));
+                            const nextIds = next.itemIds || (next.itemId ? [next.itemId] : []);
+                            nextIds.forEach(id => current.mergedItemIds.add(id));
+                        } else {
+                            mergedEnduranceSessions.push(current);
+                            current = next;
+                            current.parsedStart = next.parsedStart;
+                            current.parsedEnd = next.parsedEnd;
+                            current.mergedItemIds = new Set(current.itemIds || (current.itemId ? [current.itemId] : []));
+                        }
+                    }
+                    mergedEnduranceSessions.push(current);
+                }
+
                 let globalDuration = 0; let globalCount = 0;
                 let nylonDuration = 0; let nylonCount = 0;
                 let dessousDuration = 0; let dessousCount = 0;
 
-                relevantEnduranceSessions.forEach(s => {
-                    const start = s.startTime.toDate ? s.startTime.toDate() : new Date(s.startTime);
-                    const end = s.endTime ? (s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime)) : new Date();
-                    const durationHours = Math.max(0, (end - start) / 3600000);
+                mergedEnduranceSessions.forEach(s => {
+                    const durationHours = Math.max(0, (s.parsedEnd - s.parsedStart) / 3600000);
                     
-                    const sessionItemIds = s.itemIds || (s.itemId ? [s.itemId] : []);
+                    const sessionItemIds = Array.from(s.mergedItemIds);
                     const sessionItems = sessionItemIds.map(id => items.find(i => i.id === id)).filter(i => i);
                     if (sessionItems.length === 0) return;
 
@@ -398,21 +422,14 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
                     ? (releaseStats.cleanReleases / releaseStats.totalReleases) * 100 : 0;
 
                 // F. FEM INDEX 3.0 (Erosion Metric)
-                
-                // 1. PHYSIS (30%) - Körperliche Gewöhnung
                 const scoreEndurance = Math.min(100, (enduranceVal / 12) * 100);
                 const scorePhysis = (scoreEndurance * 0.4) + (nylonEnclosureVal * 0.6);
 
-                // 2. PSYCHE (30%) - Mentaler Widerstand
-                // Score Compliance: 0min lag = 100 Pkt. Pro Minute Abzug.
-                // Wir nutzen hier avgLagVal, das nun garantiert eine Zahl ist (oder 0).
                 const scoreCompliance = Math.max(0, 100 - (avgLagVal * 1.6));
                 const scorePsyche = Math.max(0, ((voluntarismVal * 0.35) + (scoreCompliance * 0.65)) - (resistanceVal * 2));
 
-                // 3. INFILTRATION (40%) - Alltags-Übernahme
                 const scoreInfiltration = (nocturnalVal * 0.5) + (coverageVal * 0.5);
 
-                // TOTAL SCORE
                 const femScore = Math.round(
                     (scorePhysis * 0.30) + 
                     (scorePsyche * 0.30) + 
@@ -459,7 +476,7 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
                         chastity: fmtPct(nylonEnclosureVal)
                     },
                     femIndex: { 
-                        score: isNaN(femScore) ? 0 : Math.min(100, femScore), // Letztes Sicherheitsnetz
+                        score: isNaN(femScore) ? 0 : Math.min(100, femScore), 
                         trend: 'stable',
                         subScores: {
                             physis: Math.round(scorePhysis),
@@ -485,7 +502,6 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
 
     }, [items, activeSessionsInput, historySessionsInput, currentUser, refreshTrigger]);
 
-    // Exponiere die Refresh-Funktion für manuelle Updates
     const refreshKPIs = () => setRefreshTrigger(prev => prev + 1);
 
     return { ...kpis, loading, refreshKPIs };

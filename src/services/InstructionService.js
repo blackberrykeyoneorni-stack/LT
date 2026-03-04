@@ -235,7 +235,6 @@ export const verifyNightCompliance = async (userId, referenceDate = new Date()) 
         ];
 
         // Suchfenster für Sessions: Von Gestern 16:00 Uhr bis Heute.
-        // Wurde von 20:00 Uhr auf 16:00 Uhr vorverlegt, um auch extrem früh gestartete Nachtsessions zuverlässig zu erfassen.
         const searchStart = new Date(year, month, day - 1, 16, 0, 0);
 
         const q = query(
@@ -246,25 +245,40 @@ export const verifyNightCompliance = async (userId, referenceDate = new Date()) 
         );
 
         const sessionsSnap = await getDocs(q);
-        const sessions = [];
+        const rawSessions = [];
         const now = new Date();
 
         sessionsSnap.forEach(doc => {
             const data = doc.data();
-            sessions.push({
+            rawSessions.push({
                 start: data.startTime.toDate(),
-                // Wenn kein endTime (läuft noch), nehmen wir "jetzt"
                 end: data.endTime ? data.endTime.toDate() : now,
                 ...data
             });
         });
+
+        // NEU: Sessions sortieren und lückenlose Ketten (Toleranz 15 Min) verschmelzen
+        rawSessions.sort((a, b) => a.start - b.start);
+        const sessions = [];
+        if (rawSessions.length > 0) {
+            let current = { ...rawSessions[0] };
+            for (let i = 1; i < rawSessions.length; i++) {
+                const next = rawSessions[i];
+                if ((next.start - current.end) <= 15 * 60000) { // 15 Min Toleranz für Session-Schnitt
+                    current.end = new Date(Math.max(current.end, next.end));
+                } else {
+                    sessions.push(current);
+                    current = { ...next };
+                }
+            }
+            sessions.push(current);
+        }
 
         let allCheckpointsCovered = true;
         const missedCheckpoints = [];
 
         // Jeden Checkpoint prüfen
         checkpoints.forEach(cp => {
-            // Eine Session ist gültig, wenn sie VOR/AM Checkpoint startete und NACH/AM Checkpoint endete
             const isCovered = sessions.some(s => s.start <= cp && s.end >= cp);
 
             if (!isCovered) {
@@ -273,8 +287,6 @@ export const verifyNightCompliance = async (userId, referenceDate = new Date()) 
             }
         });
 
-        // Ergebnis persistieren (für ProgressBar & Tag-Validierung)
-        // BUGFIX Zeitzone: Lokales Datum zwingend erzwingen, um Off-By-One-Day Fehler beim Schreiben zu verhindern.
         const offset = referenceDate.getTimezoneOffset() * 60000;
         const dateKey = new Date(referenceDate.getTime() - offset).toISOString().split('T')[0]; // YYYY-MM-DD
         
@@ -312,13 +324,11 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
         const durationMinutes = await calculateTargetDuration(uid, prefs, periodId);
 
         // SICHERHEIT: Parse als Integer, um String-Vergleiche zu vermeiden
-        // Dies verhindert Fehler bei der Wahrscheinlichkeitsberechnung unten
         const maxItems = parseInt(prefs.maxInstructionItems || 1, 10);
         const restingHours = prefs.nylonRestingHours || 24;
-        const userWeights = prefs.categoryWeights || {}; // Manuelle Gewichtungen aus Settings
+        const userWeights = prefs.categoryWeights || {}; 
 
         // 1b. NEU: Hole echte Session-Daten für robusten Recovery-Check
-        // Wir schauen so weit zurück wie die Resting-Time ist (plus Puffer)
         const recentSessionsMap = await getRecentSessionsMap(uid, restingHours + 5);
 
         // --- NEU: STEALTH MODUS KOFFER PRÜFUNG ---
@@ -346,8 +356,8 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                 isAccepted: false,
                 isPlanned: true,
                 itemName: titleNames,
-                durationMinutes, // NEU HINZUGEFÜGT
-                stealthModeActive: isStealth, // NEU FLAG ERHALTEN
+                durationMinutes, 
+                stealthModeActive: isStealth,
                 forcedRelease: { required: false, executed: false, method: null },
                 items: plannedItems.map(i => ({
                     id: i.id,
@@ -365,9 +375,21 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
 
         const safeActiveSessions = Array.isArray(activeSessions) ? activeSessions : [];
         const allActiveIds = new Set();
+        const activeCategoryKeys = new Set(); // NEU: Kategorie-Blocker
+
         safeActiveSessions.forEach(s => {
-            if (s.itemId) allActiveIds.add(s.itemId);
-            if (s.itemIds && Array.isArray(s.itemIds)) s.itemIds.forEach(id => allActiveIds.add(id));
+            const sessionIds = [];
+            if (s.itemId) sessionIds.push(s.itemId);
+            if (s.itemIds && Array.isArray(s.itemIds)) sessionIds.push(...s.itemIds);
+            
+            sessionIds.forEach(id => {
+                allActiveIds.add(id);
+                const activeItem = items.find(i => i.id === id);
+                if (activeItem) {
+                    const key = activeItem.subCategory || activeItem.mainCategory || 'Sonstiges';
+                    activeCategoryKeys.add(key);
+                }
+            });
         });
 
         const futureBlockedIds = await getFutureBlockedItemIds(uid, restingHours);
@@ -381,10 +403,8 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
 
             // --- NEU: HARTE WEICHE FÜR STEALTH (REISE) ---
             if (isStealth) {
-                // Nur Items, die im Koffer sind
                 if (!packedItemIds.includes(i.id)) return false;
                 
-                // Tagsüber = Kniestrümpfe, Nachts = Strumpfhose
                 if (isNightInstruction) {
                     if (i.subCategory !== 'Strumpfhose') return false;
                 } else {
@@ -392,19 +412,21 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                 }
             }
 
-            // Nicht, wenn bereits getragen
+            // Nicht, wenn genau dieses Item bereits getragen
             if (allActiveIds.has(i.id)) return false;
 
+            // NEU: Nicht, wenn Kategorie bereits am Körper (Blockiert Doppelungen wie 2x Strumpfhose)
+            const itemKey = i.subCategory || i.mainCategory || 'Sonstiges';
+            if (activeCategoryKeys.has(itemKey)) return false;
+
             // Nicht, wenn in Recovery (Elasthan-Ruhe)
-            // NEU: Wir prüfen gegen das effektive Datum aus Sessions, falls vorhanden
             let effectiveItem = i;
             if (recentSessionsMap[i.id]) {
                 const sessionDate = recentSessionsMap[i.id];
                 const itemDate = i.lastWorn && i.lastWorn.toDate ? i.lastWorn.toDate() : (i.lastWorn ? new Date(i.lastWorn) : null);
 
-                // Wenn Session neuer ist als Item-Eintrag, nutzen wir das Session-Datum
                 if (!itemDate || sessionDate > itemDate) {
-                    effectiveItem = { ...i, lastWorn: sessionDate }; // Temporäres Override
+                    effectiveItem = { ...i, lastWorn: sessionDate }; 
                 }
             }
 
@@ -431,7 +453,6 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
         if (availableItems.length === 0) return null;
 
         // 4. SMART HYBRID SELECTOR
-        // Schritt A: Gruppieren nach Subkategorie (oder Mainkategorie als Fallback)
         const groups = {};
         availableItems.forEach(item => {
             const key = item.subCategory || item.mainCategory || 'Sonstiges';
@@ -442,7 +463,7 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
         let availableGroupKeys = Object.keys(groups);
         const selectedItems = [];
 
-        // --- NEU: Wahrscheinlichkeits-Logik für Item-Anzahl ---
+        // --- Wahrscheinlichkeits-Logik für Item-Anzahl ---
         let targetItemCount = 1;
         const rndCount = Math.random();
 
@@ -506,10 +527,9 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
 
         if (selectedItems.length === 0) return null;
 
-        // --- NEU: SEAMLESS TRANSIT PROTOCOL (30 MIN GRACE) ---
+        // --- SEAMLESS TRANSIT PROTOCOL (30 MIN GRACE) ---
         let transitProtocol = { active: false };
         if (!isNightInstruction && !isStealth) {
-            // GROBER VORFILTER: Nur Datenbank abfragen, wenn überhaupt irgendein Lingerie-Teil gezogen wurde
             const hasAnyLingerie = selectedItems.some(i =>
                 (i.subCategory || '').toLowerCase().includes('höschen') ||
                 (i.mainCategory || '').toLowerCase().includes('lingerie') ||
@@ -532,7 +552,6 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                 if (lastNightSession && (new Date() - lastNightSession.startTime) < 24 * 60 * 60 * 1000) {
                     const nightIds = lastNightSession.itemIds || (lastNightSession.itemId ? [lastNightSession.itemId] : []);
                     
-                    // Finde das spezifische Nacht-Lingerie Item
                     const nightLingerie = items.find(i => nightIds.includes(i.id) && (
                         (i.subCategory || '').toLowerCase().includes('höschen') ||
                         (i.mainCategory || '').toLowerCase().includes('lingerie') ||
@@ -540,8 +559,6 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                     ));
 
                     if (nightLingerie) {
-                        // ZIELGENAUER AUSTAUSCH (Targeted Overwrite)
-                        // Wir suchen in der gezogenen Liste exakt nach der Subkategorie des Nacht-Items
                         const targetSubCategory = (nightLingerie.subCategory || '').toLowerCase();
                         
                         const selectedLingerieIdx = selectedItems.findIndex(i =>
