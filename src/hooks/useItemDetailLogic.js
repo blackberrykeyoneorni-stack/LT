@@ -2,13 +2,13 @@ import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { 
     doc, getDoc, updateDoc, collection, query, where, getDocs, 
-    orderBy, serverTimestamp, arrayUnion 
+    serverTimestamp, arrayUnion 
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useNFCGlobal } from '../contexts/NFCContext'; 
-import { calculateItemRecoveryStatus } from '../services/ItemService'; // SSOT Import: loadVibeTags entfernt
+import { calculateItemRecoveryStatus } from '../services/ItemService'; 
 import { startSession as startSessionService } from '../services/SessionService'; 
 import { safeDate } from '../utils/dateUtils';
 import { DEFAULT_ARCHIVE_REASONS, DEFAULT_RUN_LOCATIONS, DEFAULT_RUN_CAUSES } from '../utils/constants';
@@ -40,7 +40,6 @@ export function useItemDetailLogic() {
         categoryStructure: {}, 
         materials: [],
         locations: [],
-        // vibeTagsList entfernt
         archiveReasons: DEFAULT_ARCHIVE_REASONS,
         runLocations: DEFAULT_RUN_LOCATIONS,
         runCauses: DEFAULT_RUN_CAUSES
@@ -94,7 +93,6 @@ export function useItemDetailLogic() {
                     location: itemData.location || '',
                     suitablePeriod: itemData.suitablePeriod || 'Beide', 
                     purchaseDate: itemData.purchaseDate ? new Date(itemData.purchaseDate).toISOString().split('T')[0] : '', 
-                    // vibeTags entfernt
                     notes: itemData.notes || ''
                 });
 
@@ -112,7 +110,6 @@ export function useItemDetailLogic() {
                     categoryStructure: catSnap.exists() ? (catSnap.data().structure || {}) : {},
                     materials: matSnap.exists() ? (matSnap.data().list || []) : [],
                     locations: locSnap.exists() ? (locSnap.data().list || []) : [],
-                    // vibeTagsList entfernt
                     archiveReasons: DEFAULT_ARCHIVE_REASONS,
                     runLocations: DEFAULT_RUN_LOCATIONS,
                     runCauses: DEFAULT_RUN_CAUSES
@@ -126,14 +123,33 @@ export function useItemDetailLogic() {
                 }
                 setDropdowns(newDropdowns);
 
-                // 3. Sessions
-                const sessionsQ = query(
+                // 3. Sessions (Komplette Erfassung inkl. TZD/Array-Items)
+                const qLegacy = query(
                     collection(db, `users/${currentUser.uid}/sessions`),
-                    where('itemId', '==', id),
-                    orderBy('startTime', 'desc')
+                    where('itemId', '==', id)
                 );
-                const sessionSnaps = await getDocs(sessionsQ);
-                const sessionList = sessionSnaps.docs.map(d => ({ id: d.id, ...d.data() }));
+                const qNew = query(
+                    collection(db, `users/${currentUser.uid}/sessions`),
+                    where('itemIds', 'array-contains', id)
+                );
+
+                const [snapLegacy, snapNew] = await Promise.all([
+                    getDocs(qLegacy),
+                    getDocs(qNew)
+                ]);
+
+                // Map nutzen, um Duplikate (falls Item im Feld UND im Array steht) zu filtern
+                const sessionMap = new Map();
+                snapLegacy.docs.forEach(d => sessionMap.set(d.id, { id: d.id, ...d.data() }));
+                snapNew.docs.forEach(d => sessionMap.set(d.id, { id: d.id, ...d.data() }));
+
+                // Manuelle Sortierung (verhindert Index-Fehler bei Firebase)
+                const sessionList = Array.from(sessionMap.values()).sort((a, b) => {
+                    const startA = a.startTime?.toDate ? a.startTime.toDate().getTime() : new Date(a.startTime || 0).getTime();
+                    const startB = b.startTime?.toDate ? b.startTime.toDate().getTime() : new Date(b.startTime || 0).getTime();
+                    return startB - startA;
+                });
+                
                 setSessions(sessionList);
 
                 // Busy Check
@@ -177,7 +193,6 @@ export function useItemDetailLogic() {
         };
     }, [sessions, item]);
 
-    // SSOT FIX: Logik wurde in den Service ausgelagert
     const recoveryInfo = useMemo(() => {
         return calculateItemRecoveryStatus(item, sessions, restingHoursSetting);
     }, [item, sessions, restingHoursSetting]);

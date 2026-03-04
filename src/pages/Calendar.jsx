@@ -111,7 +111,9 @@ const useCalendarData = (currentUser, items) => {
             const snap = await getDocs(q);
             const now = new Date(); 
             
-            const loadedSessions = snap.docs.map(doc => {
+            const loadedSessions = [];
+
+            snap.docs.forEach(doc => {
                 const data = doc.data();
                 const sessionItems = (data.itemIds || [data.itemId]).map(id => items.find(i => i.id === id)).filter(Boolean);
                 
@@ -121,48 +123,59 @@ const useCalendarData = (currentUser, items) => {
                 // SINGLE SOURCE OF TRUTH CHECK
                 sessionItems.forEach(item => {
                     const cat = (item.mainCategory || '').toLowerCase();
-                    const sub = (item.subCategory || '').toLowerCase();
                     
-                    // Prüfe exakt auf die definierten Hauptkategorien
                     if (cat === 'nylons') {
                         hasNylon = true;
                     }
                     else if (cat === 'wäsche' || cat === 'dessous') {
                         hasLingerie = true;
                     }
-                    // Optional: Subkategorie-Check nur als Fallback, falls MainCategory leer ist, 
-                    // aber wir vertrauen auf die saubere Datenpflege.
                 });
 
-                // DYNAMISCHE DAUER BERECHNUNG (Der Fix für die Anzeige)
-                // Wenn durationMinutes fehlt oder 0 ist, berechne aus Start/Ende
-                let calculatedDuration = data.durationMinutes || 0;
-                
-                if (data.startTime) {
-                    const start = data.startTime.toDate();
-                    const end = data.endTime ? data.endTime.toDate() : now; // Wenn aktiv, nimm "jetzt"
-                    
-                    // Nur neu berechnen, wenn der gespeicherte Wert unplausibel klein ist (z.B. < 1) 
-                    // und die Zeitdifferenz größer ist.
-                    const diffMs = end - start;
-                    const diffMins = Math.floor(diffMs / 60000);
-                    
-                    if (calculatedDuration < 1 && diffMins > 0) {
-                        calculatedDuration = diffMins;
-                    }
+                if (!data.startTime) return;
+
+                const start = data.startTime.toDate();
+                let end;
+                let isActive = false;
+
+                // Simulation des Endes für geplante Sessions im Kalender
+                if (data.type === 'planned' && !data.endTime && data.durationMinutes) {
+                    end = new Date(start.getTime() + data.durationMinutes * 60000);
+                } else {
+                    end = data.endTime ? data.endTime.toDate() : now;
+                    isActive = !data.endTime;
                 }
 
-                return {
-                    id: doc.id,
-                    date: data.startTime ? data.startTime.toDate() : new Date(),
-                    duration: calculatedDuration,
-                    type: data.type,
-                    isActive: !data.endTime,
-                    hasNylon,
-                    hasLingerie,
-                    items: sessionItems 
-                };
+                // VIRTUELLER SCHNITT: Sessions über Mitternacht in Tagesfragmente aufteilen
+                let currentStart = new Date(start.getTime());
+
+                while (currentStart < end) {
+                    const currentEndDay = new Date(currentStart);
+                    currentEndDay.setHours(23, 59, 59, 999);
+
+                    // Das Ende des aktuellen Fragments ist entweder das wirkliche Ende oder Mitternacht
+                    const fragmentEnd = end < currentEndDay ? end : currentEndDay;
+                    const diffMins = Math.floor((fragmentEnd.getTime() - currentStart.getTime()) / 60000);
+
+                    if (diffMins > 0) {
+                        loadedSessions.push({
+                            id: `${doc.id}_${currentStart.getTime()}`, // Eindeutige ID pro Fragment
+                            originalId: doc.id,
+                            date: new Date(currentStart.getTime()),
+                            duration: diffMins,
+                            type: data.type,
+                            isActive: isActive && (fragmentEnd.getTime() === end.getTime()), // Nur letztes Fragment ist aktiv
+                            hasNylon,
+                            hasLingerie,
+                            items: sessionItems 
+                        });
+                    }
+
+                    // Für den nächsten Schleifendurchlauf auf 00:00:00 Uhr des Folgetags setzen
+                    currentStart = new Date(currentEndDay.getTime() + 1);
+                }
             });
+            
             loadedSessions.sort((a, b) => a.date - b.date);
             setSessions(loadedSessions);
 
