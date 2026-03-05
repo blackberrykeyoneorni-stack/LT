@@ -136,15 +136,13 @@ const calculateDailyNylonMinutes = (dateObj, sessions, items) => {
 export default function useKPIs(items = [], activeSessionsInput, historySessionsInput) {
     const { currentUser } = useAuth();
     
-    // Manueller Trigger & Loading State
     const [refreshTrigger, setRefreshTrigger] = useState(0);
     const [loading, setLoading] = useState(true);
 
-    // Initialer State
     const [kpis, setKpis] = useState({
         health: { orphanCount: 0 },
         financials: { avgCPW: '0.00' },
-        usage: { nylonIndex: '0.0' },
+        usage: { nylonIndex: '0.0', nylonChartData: [] },
         spermaScore: { rate: '0.0', total: 0, count: 0 },
         coreMetrics: {
             nylonEnclosure: '0.0', 
@@ -172,7 +170,6 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
         const fetchData = async () => {
             setLoading(true);
             try {
-                // 1. SESSIONS LADEN (Einmalig per getDocs)
                 let allSessions = [];
                 
                 if (historySessionsInput) {
@@ -187,7 +184,6 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
                     allSessions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 }
 
-                // 2. RELEASE STATS LADEN
                 let releaseStats = { totalReleases: 0, cleanReleases: 0, keptOn: 0 };
                 try {
                     const statsRef = doc(db, `users/${currentUser.uid}/stats/releaseStats`);
@@ -203,8 +199,6 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
                 } catch (e) {
                     console.warn("Release stats konnten nicht geladen werden", e);
                 }
-
-                // --- BERECHNUNGSLOGIK ---
                 
                 const historySessions = allSessions.filter(s => {
                     const d = s.startTime.toDate ? s.startTime.toDate() : new Date(s.startTime);
@@ -226,7 +220,7 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
                 });
                 const avgCPWVal = totalWears > 0 ? (totalCost / totalWears) : 0;
 
-                // C. NYLON INDEX
+                // C. NYLON INDEX (Lebensdauer / Alle Daten seit Start)
                 const tightsItems = items.filter(i => 
                     i.status !== 'archived' && (
                         (i.mainCategory && i.mainCategory === 'Nylons') ||
@@ -235,18 +229,11 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
                 );
 
                 const now = new Date();
-                const cutoffDate = new Date();
-                cutoffDate.setDate(now.getDate() - 30);
 
-                const recentSessions = allSessions.filter(s => {
-                    const end = s.endTime ? (s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime)) : new Date();
-                    return end >= cutoffDate;
-                });
-
-                let totalRollingMinutes = 0;
+                let totalLifetimeMinutes = 0;
                 const uniqueNylonItemsWorn = new Set(); 
 
-                recentSessions.forEach(s => {
+                historySessions.forEach(s => {
                     const sItemIds = s.itemIds || (s.itemId ? [s.itemId] : []);
                     let sessionHasNylon = false;
                     sItemIds.forEach(id => {
@@ -263,16 +250,14 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
                     if (sessionHasNylon) {
                         const start = s.startTime.toDate ? s.startTime.toDate() : new Date(s.startTime);
                         const end = s.endTime ? (s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime)) : new Date();
-                        const effectiveStart = start < cutoffDate ? cutoffDate : start;
-                        const effectiveEnd = end; 
-                        if (effectiveEnd > effectiveStart) {
-                            totalRollingMinutes += (effectiveEnd - effectiveStart) / 60000;
+                        if (end > start) {
+                            totalLifetimeMinutes += (end - start) / 60000;
                         }
                     }
                 });
 
                 const nylonIndexVal = uniqueNylonItemsWorn.size > 0 
-                    ? (totalRollingMinutes / uniqueNylonItemsWorn.size) / 60 
+                    ? (totalLifetimeMinutes / uniqueNylonItemsWorn.size) / 60 
                     : 0;
                 
                 const lifetimeTightsMinutes = tightsItems.reduce((acc, curr) => acc + (Number(curr.totalMinutes) || 0), 0);
@@ -344,10 +329,9 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
                 
                 const avgLagVal = lagCount > 0 ? (totalLagMinutes / lagCount) : 0;
 
-                // ENDURANCE (Strict: Only Nylon/Lingerie)
+                // ENDURANCE
                 const relevantEnduranceSessions = historySessions.filter(s => s.startTime);
                 
-                // NEU: Lückenlose Session-Ketten verschmelzen (15 Minuten Toleranz)
                 const sortedEnduranceSessions = [...relevantEnduranceSessions].sort((a, b) => {
                     const startA = a.startTime.toDate ? a.startTime.toDate() : new Date(a.startTime);
                     const startB = b.startTime.toDate ? b.startTime.toDate() : new Date(b.startTime);
@@ -366,7 +350,7 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
                         next.parsedStart = next.startTime.toDate ? next.startTime.toDate() : new Date(next.startTime);
                         next.parsedEnd = next.endTime ? (next.endTime.toDate ? next.endTime.toDate() : new Date(next.endTime)) : new Date();
                         
-                        if ((next.parsedStart - current.parsedEnd) <= 15 * 60000) { // <= 15 Minuten Lücke
+                        if ((next.parsedStart - current.parsedEnd) <= 15 * 60000) { 
                             current.parsedEnd = new Date(Math.max(current.parsedEnd, next.parsedEnd));
                             const nextIds = next.itemIds || (next.itemId ? [next.itemId] : []);
                             nextIds.forEach(id => current.mergedItemIds.add(id));
@@ -417,11 +401,51 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
                 
                 const nylonEnclosureVal = globalDuration > 0 ? (nylonDuration / globalDuration) * 100 : 0;
 
+                // --- NEU: NYLON CHART DATEN (60 Tage mit 5-Tages Trend) ---
+                const generateNylonChartData = () => {
+                    const data = [];
+                    const startDate = new Date(now);
+                    startDate.setDate(now.getDate() - 59);
+                    startDate.setHours(0,0,0,0);
+
+                    const preStartDate = new Date(startDate);
+                    preStartDate.setDate(preStartDate.getDate() - 4);
+                    
+                    const dailyMinutes = [];
+                    const loopDate = new Date(preStartDate);
+                    while (loopDate <= now) {
+                        const mins = calculateDailyNylonMinutes(loopDate, allSessions, items);
+                        dailyMinutes.push({
+                            date: new Date(loopDate),
+                            mins: mins
+                        });
+                        loopDate.setDate(loopDate.getDate() + 1);
+                    }
+
+                    for (let i = 4; i < dailyMinutes.length; i++) {
+                        const currentMins = dailyMinutes[i].mins;
+                        let sum = 0;
+                        for (let j = 0; j < 5; j++) {
+                            sum += dailyMinutes[i - j].mins;
+                        }
+                        const ma = sum / 5;
+                        
+                        data.push({
+                            dateStr: dailyMinutes[i].date.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }),
+                            Stunden: Number((currentMins / 60).toFixed(2)),
+                            Trend: Number((ma / 60).toFixed(2)) 
+                        });
+                    }
+                    return data;
+                };
+
+                const nylonChartData = generateNylonChartData();
+
                 // E. SCORES
                 const spermaRateVal = releaseStats.totalReleases > 0 
                     ? (releaseStats.cleanReleases / releaseStats.totalReleases) * 100 : 0;
 
-                // F. FEM INDEX 3.0 (Erosion Metric)
+                // F. FEM INDEX 3.0
                 const scoreEndurance = Math.min(100, (enduranceVal / 12) * 100);
                 const scorePhysis = (scoreEndurance * 0.4) + (nylonEnclosureVal * 0.6);
 
@@ -453,7 +477,7 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
                 setKpis({
                     health: { orphanCount },
                     financials: { avgCPW: fmtMoney(avgCPWVal) }, 
-                    usage: { nylonIndex: fmtPct(nylonIndexVal) }, 
+                    usage: { nylonIndex: fmtPct(nylonIndexVal), nylonChartData }, 
                     spermaScore: { 
                         rate: fmtPct(spermaRateVal), 
                         total: releaseStats.totalReleases, 
