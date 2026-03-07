@@ -156,6 +156,9 @@ export default function Dashboard() {
   const [oathProgress, setOathProgress] = useState(0);
   const [isHoldingOath, setIsHoldingOath] = useState(false);
   const oathTimerRef = useRef(null);
+  const releaseTimerInterval = useRef(null);
+  const isJustStartedRef = useRef(false);
+
   const [laundryOpen, setLaundryOpen] = useState(false);
   const [auditDue, setAuditDue] = useState(false);
   const [auditOpen, setAuditOpen] = useState(false);
@@ -177,7 +180,6 @@ export default function Dashboard() {
   const [releaseStep, setReleaseStep] = useState('confirm');
   const [releaseTimer, setReleaseTimer] = useState(600);
   const [releaseIntensity, setReleaseIntensity] = useState(3);
-  const releaseTimerInterval = useRef(null);
   const [indexDialogOpen, setIndexDialogOpen] = useState(false);
   const [toast, setToast] = useState({ open: false, message: '', severity: 'success' });
   
@@ -431,18 +433,20 @@ export default function Dashboard() {
       return () => clearInterval(timer);
   }, [currentInstruction, currentUser, isInstructionActive]);
 
-  // --- NEU: FORCED RELEASE VERZÖGERUNGS-TRIGGER (5 Sekunden) ---
+  // --- NEU: FORCED RELEASE VERZÖGERUNGS-TRIGGER ---
   useEffect(() => {
       if (isInstructionActive && currentInstruction) {
           const fr = currentInstruction.forcedRelease;
           // Nur auslösen, wenn erforderlich und noch nicht abgearbeitet/offen
           if (fr && fr.required === true && fr.executed === false) {
               if (!forcedReleaseOpen) {
-                  // Der verzögerte Schock
+                  // 5 Sekunden Verzögerung nur beim initialen Start, ansonsten sofort (z.B. bei Reload)
+                  const delay = isJustStartedRef.current ? 5000 : 0;
                   const timerId = setTimeout(() => {
                       setForcedReleaseMethod(fr.method);
                       setForcedReleaseOpen(true);
-                  }, 5000);
+                      isJustStartedRef.current = false; // Reset nach Trigger
+                  }, delay);
                   return () => clearTimeout(timerId);
               }
           }
@@ -502,6 +506,9 @@ export default function Dashboard() {
       if (tzdActive) { showToast("ZUGRIFF VERWEIGERT: Zeitloses Diktat aktiv.", "error"); return; }
       const targetItems = itemsToStart || currentInstruction?.items;
       if(targetItems && targetItems.length > 0) { 
+          // Markiere, dass die Session exakt jetzt in dieser Instanz gestartet wurde
+          isJustStartedRef.current = true;
+          
           await startSessionService(currentUser.uid, {
             items: targetItems,
             type: 'instruction',
@@ -511,7 +518,6 @@ export default function Dashboard() {
           
           setInstructionOpen(false); 
           showToast(`${targetItems.length} Sessions gestartet.`, "success");
-          // Trigger für Forced Release entfernt, da dies nun vom useEffect-Timer übernommen wird
       }
   };
 
