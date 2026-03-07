@@ -46,5 +46,19 @@ export default defineConfig({
         ]
       }
     })
-  ]
+  ],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // Isoliert recharts in einen eigenen Chunk, um die zirkuläre Abhängigkeit zu beheben
+          recharts: ['recharts'],
+          // Isoliert Firebase, um den Main-Chunk drastisch zu verkleinern
+          firebase: ['firebase/app', 'firebase/firestore', 'firebase/auth'],
+          // Isoliert React und Material UI
+          vendor: ['react', 'react-dom', 'react-router-dom', '@mui/material', '@mui/icons-material']
+        }
+      }
+    }
+  }
 });
