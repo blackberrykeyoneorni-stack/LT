@@ -41,6 +41,7 @@ import InstructionDialog from '../components/dialogs/InstructionDialog';
 import ReleaseProtocolDialog from '../components/dialogs/ReleaseProtocolDialog';
 import PunishmentDialog from '../components/dialogs/PunishmentDialog';
 import LaundryDialog from '../components/dialogs/LaundryDialog';
+import InflationOverlay from '../components/dashboard/InflationOverlay';
 
 import { DESIGN_TOKENS, PALETTE, MOTION } from '../theme/obsidianDesign';
 import { 
@@ -205,6 +206,18 @@ export default function Dashboard() {
 
   const showToast = (message, severity = 'success') => setToast({ open: true, message, severity });
   const handleCloseToast = () => setToast({ ...toast, open: false });
+
+  const handleAcknowledgeInflation = async () => {
+      try {
+          if (currentUser) {
+              await updateDoc(doc(db, `users/${currentUser.uid}/status/timeBank`), {
+                  pendingInflationNotice: null
+              });
+          }
+      } catch (e) {
+          console.error("Fehler beim Quittieren des Tributs:", e);
+      }
+  };
 
   // 1. Initial Load & Weekly Report Listener
   useEffect(() => {
@@ -666,6 +679,12 @@ export default function Dashboard() {
           onConfirm={handleConfirmForcedRelease}
           onFail={handleFailForcedRelease}
           onRefuse={handleRefuseForcedRelease}
+      />
+
+      <InflationOverlay 
+          open={!!timeBankData.pendingInflationNotice} 
+          noticeData={timeBankData.pendingInflationNotice} 
+          onAcknowledge={handleAcknowledgeInflation} 
       />
       
       {/* GAMBLE DIALOG */}

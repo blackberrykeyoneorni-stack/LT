@@ -6,7 +6,7 @@ const DEBT_CONFIG = {
     MAX_DEBT_MINUTES: 2880, // 48 Stunden (Das harte Limit)
     OVERDRAFT_PENALTY: 1.5, // 50% Aufschlag bei Kreditaufnahme
     DAILY_INTEREST_RATE: 0.10, // 10% Zinsen pro Tag
-    INFLATION_RATE: 0.05 // 5% Inflation pro Woche für positive Bestände
+    INFLATION_RATE: 0.10 // 10% Inflation pro Woche für positive Bestände
 };
 
 /**
@@ -285,7 +285,7 @@ export const applyDailyInterest = async (userId) => {
 };
 
 /**
- * Wöchentliche Inflation für positive Bestände (Rückwirkend).
+ * Wöchentliche Inflation für positive Bestände zum fixen Anker (Sonntag 23:00 Uhr).
  */
 export const applyWeeklyInflation = async (userId) => {
     try {
@@ -296,36 +296,72 @@ export const applyWeeklyInflation = async (userId) => {
         
         const data = docSnap.data();
         const now = new Date();
-        const lastInflation = data.lastInflationAt ? data.lastInflationAt.toDate() : new Date();
+        
+        // Berechne den letzten Sonntag um 23:00 Uhr als Ankerpunkt
+        let lastSunday23 = new Date(now);
+        lastSunday23.setDate(now.getDate() - now.getDay()); 
+        lastSunday23.setHours(23, 0, 0, 0);
 
-        const diffTime = Math.abs(now - lastInflation);
-        const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24)); 
-        const weeksPassed = Math.floor(diffDays / 7);
+        // Wenn es heute Sonntag ist, wir aber noch VOR 23:00 Uhr sind, 
+        // gilt der Sonntag der Vorwoche als letzter Anker.
+        if (now.getTime() < lastSunday23.getTime()) {
+            lastSunday23.setDate(lastSunday23.getDate() - 7);
+        }
+
+        let lastInflation = data.lastInflationAt ? data.lastInflationAt.toDate() : null;
+
+        if (!lastInflation) {
+            // Initialisierung beim ersten Aufruf auf den aktuellen Stichtag,
+            // damit die 7-Tage Zählung sauber in der Zukunft beginnt.
+            await updateDoc(docRef, { lastInflationAt: lastSunday23 });
+            return;
+        }
+
+        const timeDiff = lastSunday23.getTime() - lastInflation.getTime();
+        const weeksPassed = Math.floor(timeDiff / (1000 * 60 * 60 * 24 * 7));
 
         if (weeksPassed < 1) return; 
 
         const updates = {};
         let inflationApplied = false;
+        let totalDeductedNc = 0;
+        let totalDeductedLc = 0;
 
-        // Inflation rückwirkend auf POSITIVE Bestände (Compound Loss)
+        // Inflation auf POSITIVE Bestände
         let newNc = data.nc;
         if (newNc > 0) {
-            newNc = Math.floor(newNc * Math.pow(1 - DEBT_CONFIG.INFLATION_RATE, weeksPassed));
+            const calculatedNc = Math.floor(newNc * Math.pow(1 - DEBT_CONFIG.INFLATION_RATE, weeksPassed));
+            totalDeductedNc = newNc - calculatedNc;
+            newNc = calculatedNc;
             updates.nc = newNc;
-            inflationApplied = true;
+            if (totalDeductedNc > 0) inflationApplied = true;
         }
 
         let newLc = data.lc;
         if (newLc > 0) {
-            newLc = Math.floor(newLc * Math.pow(1 - DEBT_CONFIG.INFLATION_RATE, weeksPassed));
+            const calculatedLc = Math.floor(newLc * Math.pow(1 - DEBT_CONFIG.INFLATION_RATE, weeksPassed));
+            totalDeductedLc = newLc - calculatedLc;
+            newLc = calculatedLc;
             updates.lc = newLc;
-            inflationApplied = true;
+            if (totalDeductedLc > 0) inflationApplied = true;
         }
 
-        updates.lastInflationAt = serverTimestamp();
+        // Zeitstempel strikt auf den berechneten Anker setzen
+        updates.lastInflationAt = lastSunday23;
+
+        // Tribute Notice generieren, falls etwas abgezogen wurde
+        if (inflationApplied) {
+            updates.pendingInflationNotice = {
+                deductedNc: totalDeductedNc,
+                deductedLc: totalDeductedLc,
+                weeks: weeksPassed,
+                timestamp: new Date().toISOString()
+            };
+        }
+
         await updateDoc(docRef, updates);
 
-        if (inflationApplied) console.log(`TimeBank: Applied ${weeksPassed} weeks of retroactive inflation.`);
+        if (inflationApplied) console.log(`TimeBank: Applied ${weeksPassed} weeks of inflation at anchor.`);
     } catch (e) {
         console.error("Fehler bei der Credit-Inflation:", e);
     }
