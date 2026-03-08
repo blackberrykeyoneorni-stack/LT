@@ -14,12 +14,10 @@ import { motion } from 'framer-motion';
 // Services
 import { checkActiveSuspension } from '../services/SuspensionService';
 import { isAuditDue, initializeAudit, confirmAuditItem } from '../services/AuditService';
-import { getActivePunishment, clearPunishment, findPunishmentItem, registerOathRefusal, registerPunishment } from '../services/PunishmentService';
+import { getActivePunishment, clearPunishment, findPunishmentItem, registerPunishment } from '../services/PunishmentService';
 import { loadMonthlyBudget } from '../services/BudgetService';
-import { generateAndSaveInstruction, getLastInstruction } from '../services/InstructionService';
-import { checkForTZDTrigger, getTZDStatus, triggerEvasionPenalty } from '../services/TZDService';
-import { registerRelease as apiRegisterRelease } from '../services/ReleaseService'; 
-import { startSession as startSessionService, stopSession as stopSessionService } from '../services/SessionService';
+import { getTZDStatus, checkForTZDTrigger } from '../services/TZDService';
+import { stopSession as stopSessionService } from '../services/SessionService';
 import { checkGambleTrigger, determineGambleStake, rollTheDice, isImmunityActive, recordGambleAction } from '../services/OfferService';
 import { runTimeBankAuditor } from '../services/TimeBankService'; 
 
@@ -27,6 +25,7 @@ import { runTimeBankAuditor } from '../services/TimeBankService';
 import useSessionProgress from '../hooks/dashboard/useSessionProgress';
 import useFemIndex from '../hooks/dashboard/useFemIndex'; 
 import useKPIs from '../hooks/useKPIs'; 
+import useInstructionManager from '../hooks/dashboard/useInstructionManager';
 
 // Components
 import TzdOverlay from '../components/dashboard/TzdOverlay'; 
@@ -53,7 +52,6 @@ import { Icons } from '../theme/appIcons';
 import LocalLaundryServiceIcon from '@mui/icons-material/LocalLaundryService';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
-import NightlightRoundIcon from '@mui/icons-material/NightlightRound';
 import TimerIcon from '@mui/icons-material/Timer';
 import LinkOffIcon from '@mui/icons-material/LinkOff';
 import AnalyticsIcon from '@mui/icons-material/Analytics';
@@ -66,31 +64,6 @@ const REFLECTION_TAGS = [
     "Sicher / Geborgen", "Erregt", "Gedemütigt", "Exponiert / Öffentlich", 
     "Feminin", "Besitztum (Owned)", "Unwürdig", "Stolz"
 ];
-
-// --- HILFSFUNKTIONEN ---
-const getLocalISODate = (date) => { 
-    const offset = date.getTimezoneOffset() * 60000;
-    return new Date(date.getTime() - offset).toISOString().split('T')[0];
-};
-
-const calculatePeriodId = () => {
-    const d = new Date(); 
-    const mins = d.getHours() * 60 + d.getMinutes(); 
-    const isDay = mins >= 450 && mins < 1380;
-    let dateStr = getLocalISODate(d);
-    if (mins < 450) { 
-        const y = new Date(d); y.setDate(y.getDate() - 1); dateStr = getLocalISODate(y); 
-    }
-    return `${dateStr}-${isDay ? 'day' : 'night'}`;
-};
-
-const checkIsHoliday = (date) => {
-    const d = date.getDate(); const m = date.getMonth() + 1;
-    if (m === 12 && (d === 24 || d === 25 || d === 26)) return true;
-    if (m === 12 && d === 31) return true;
-    if (m === 1 && d === 1) return true;
-    return false;
-};
 
 const formatTime = (totalMins) => {
     const h = Math.floor(totalMins / 60);
@@ -137,7 +110,6 @@ export default function Dashboard() {
   const kpis = useKPIs(items, activeSessions); 
   const { femIndex, femIndexLoading, indexDetails, phase, subScores } = useFemIndex(kpis); 
 
-  const [now, setNow] = useState(Date.now());
   const [tzdActive, setTzdActive] = useState(false);
   const [tzdStartTime, setTzdStartTime] = useState(null); 
   const [isCheckingProtocol, setIsCheckingProtocol] = useState(true); 
@@ -146,19 +118,11 @@ export default function Dashboard() {
   const [loadingSuspension, setLoadingSuspension] = useState(true);
   
   // UI States
-  const [instructionOpen, setInstructionOpen] = useState(false);
-  const [currentInstruction, setCurrentInstruction] = useState(null);
-  const [instructionStatus, setInstructionStatus] = useState('idle');
   const [reflectionOpen, setReflectionOpen] = useState(false);
   const [sessionToStop, setSessionToStop] = useState(null);
   const [selectedFeelings, setSelectedFeelings] = useState([]);
   const [reflectionNote, setReflectionNote] = useState('');
-  const [oathProgress, setOathProgress] = useState(0);
-  const [isHoldingOath, setIsHoldingOath] = useState(false);
-  const oathTimerRef = useRef(null);
-  const releaseTimerInterval = useRef(null);
-  const isJustStartedRef = useRef(false);
-
+  
   const [laundryOpen, setLaundryOpen] = useState(false);
   const [auditDue, setAuditDue] = useState(false);
   const [auditOpen, setAuditOpen] = useState(false);
@@ -173,19 +137,16 @@ export default function Dashboard() {
   const [monthlyBudget, setMonthlyBudget] = useState(0);
   const [currentSpent, setCurrentSpent] = useState(0); 
   const [maxInstructionItems, setMaxInstructionItems] = useState(1);
-  const [currentPeriod, setCurrentPeriod] = useState(calculatePeriodId());
-  const [isFreeDay, setIsFreeDay] = useState(false);
-  const [freeDayReason, setFreeDayReason] = useState('');
+  
   const [releaseDialogOpen, setReleaseDialogOpen] = useState(false);
   const [releaseStep, setReleaseStep] = useState('confirm');
   const [releaseTimer, setReleaseTimer] = useState(600);
   const [releaseIntensity, setReleaseIntensity] = useState(3);
+  const releaseTimerInterval = useRef(null);
+  
   const [indexDialogOpen, setIndexDialogOpen] = useState(false);
   const [toast, setToast] = useState({ open: false, message: '', severity: 'success' });
   
-  const [forcedReleaseOpen, setForcedReleaseOpen] = useState(false);
-  const [forcedReleaseMethod, setForcedReleaseMethod] = useState(null);
-
   // GAMBLE & TimeBank State
   const [offerOpen, setOfferOpen] = useState(false);
   const [gambleStake, setGambleStake] = useState([]);
@@ -196,18 +157,27 @@ export default function Dashboard() {
 
   const [weeklyReport, setWeeklyReport] = useState(null);
 
+  const showToast = (message, severity = 'success') => setToast({ open: true, message, severity });
+  const handleCloseToast = () => setToast({ ...toast, open: false });
+
   // Derived State
-  const isNight = currentPeriod ? currentPeriod.includes('night') : false;
-  const isInstructionActive = activeSessions.some(s => s.type === 'instruction');
   const isPunishmentRunning = activeSessions.some(s => s.type === 'punishment');
   const isDailyGoalMet = progress.isDailyGoalMet;
-  
   const hasVoluntarySession = activeSessions.some(s => s.type === 'voluntary' && !s.endTime);
   const budgetBalance = monthlyBudget - currentSpent;
   const isStealthActive = activeSuspension?.type === 'stealth_travel';
 
-  const showToast = (message, severity = 'success') => setToast({ open: true, message, severity });
-  const handleCloseToast = () => setToast({ ...toast, open: false });
+  // --- HOOK INTEGRATION: INSTRUCTION MANAGER ---
+  const {
+      currentPeriod, isNight, isFreeDay, freeDayReason,
+      instructionOpen, setInstructionOpen, currentInstruction, instructionStatus, isInstructionActive,
+      oathProgress, isHoldingOath, forcedReleaseOpen, forcedReleaseMethod,
+      handleStartRequest, startOathPress, cancelOathPress, handleDeclineOath,
+      handleConfirmForcedRelease, handleFailForcedRelease, handleRefuseForcedRelease
+  } = useInstructionManager({
+      currentUser, items, activeSessions, sessionsLoading, isStealthActive, 
+      tzdActive, setTzdActive, showToast, setPunishmentStatus
+  });
 
   const handleAcknowledgeInflation = async () => {
       try {
@@ -270,9 +240,7 @@ export default function Dashboard() {
         }
     });
 
-    const timer = setInterval(() => setNow(Date.now()), 60000);
     return () => { 
-        clearInterval(timer);
         unsubscribeTB(); 
         unsubProtocol();
     };
@@ -341,129 +309,6 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, [currentUser, items, activeSessions, itemsLoading, tzdActive, isInstructionActive, hasGambledThisSession, punishmentStatus, punishmentItem, isStealthActive]);
 
-  // 4. Instruction / Period
-  useEffect(() => {
-    if (items.length > 0 && !sessionsLoading && currentPeriod) {
-        const isIdle = instructionStatus === 'idle';
-        const wrongPeriod = currentInstruction && currentInstruction.periodId !== currentPeriod;
-        
-        if ((isIdle || wrongPeriod) && instructionStatus !== 'loading') { 
-            const check = async () => {
-                setInstructionStatus('loading');
-                try {
-                    let instr = await getLastInstruction(currentUser.uid);
-                    
-                    if (instr && instr.periodId === currentPeriod) {
-                        if (instr.isAccepted && !instr.evasionPenaltyTriggered) {
-                            const acceptedDate = instr.acceptedAt?.toDate ? instr.acceptedAt.toDate() : new Date(instr.acceptedAt);
-                            const ageInMinutes = (new Date() - acceptedDate) / 60000;
-                            
-                            const qSession = query(
-                                collection(db, `users/${currentUser.uid}/sessions`),
-                                where('periodId', '==', instr.periodId),
-                                where('type', '==', 'instruction')
-                            );
-                            const sessionSnap = await getDocs(qSession);
-                            const hasEverStarted = !sessionSnap.empty;
-
-                            if (ageInMinutes > 30 && !hasEverStarted) {
-                                console.log("Flucht erkannt (Initial Check - Post Oath)! Trigger 150% TZD.");
-                                await triggerEvasionPenalty(currentUser.uid, instr.items);
-                                
-                                await updateDoc(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), { 
-                                    evasionPenaltyTriggered: true 
-                                });
-                                
-                                setTzdActive(true); 
-                                setInstructionOpen(false); 
-                                instr = null;
-                            }
-                        }
-                        if (instr) setCurrentInstruction(instr);
-
-                    } else if (!isFreeDay || currentPeriod.includes('night') || isStealthActive) {
-                        const newInstr = await generateAndSaveInstruction(currentUser.uid, items, activeSessions, currentPeriod);
-                        setCurrentInstruction(newInstr);
-                    } else {
-                        setCurrentInstruction(null);
-                    }
-                } catch(e){ console.error("Instruction Load Error", e); } 
-                finally { setInstructionStatus('ready'); }
-            };
-            check();
-        }
-    }
-  }, [items.length, sessionsLoading, currentPeriod, currentInstruction, instructionStatus, isFreeDay, activeSessions, isStealthActive]);
-
-  useEffect(() => {
-      if (!currentInstruction || !currentInstruction.isAccepted || currentInstruction.evasionPenaltyTriggered) return;
-      if (isInstructionActive) return; 
-
-      const timer = setInterval(async () => {
-          const acceptedDate = currentInstruction.acceptedAt?.toDate ? currentInstruction.acceptedAt.toDate() : new Date(currentInstruction.acceptedAt);
-          const ageInMinutes = (Date.now() - acceptedDate) / 60000;
-
-          if (ageInMinutes > 30) {
-              const qSession = query(
-                  collection(db, `users/${currentUser.uid}/sessions`),
-                  where('periodId', '==', currentInstruction.periodId),
-                  where('type', '==', 'instruction')
-              );
-              const sessionSnap = await getDocs(qSession);
-
-              if (sessionSnap.empty) {
-                  console.log("Flucht erkannt (Live Watcher - Post Oath)! Trigger 150% TZD.");
-                  
-                  setCurrentInstruction(prev => ({ ...prev, evasionPenaltyTriggered: true }));
-                  setInstructionOpen(false);
-
-                  await triggerEvasionPenalty(currentUser.uid, currentInstruction.items);
-                  
-                  await updateDoc(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), { 
-                      evasionPenaltyTriggered: true
-                  });
-                  
-                  setTzdActive(true); 
-                  showToast("Zeitüberschreitung nach Eid: Strafe eingeleitet.", "error");
-              }
-              clearInterval(timer);
-          }
-      }, 60000); 
-
-      return () => clearInterval(timer);
-  }, [currentInstruction, currentUser, isInstructionActive]);
-
-  // --- NEU: FORCED RELEASE VERZÖGERUNGS-TRIGGER ---
-  useEffect(() => {
-      if (isInstructionActive && currentInstruction) {
-          const fr = currentInstruction.forcedRelease;
-          // Nur auslösen, wenn erforderlich und noch nicht abgearbeitet/offen
-          if (fr && fr.required === true && fr.executed === false) {
-              if (!forcedReleaseOpen) {
-                  // 5 Sekunden Verzögerung nur beim initialen Start, ansonsten sofort (z.B. bei Reload)
-                  const delay = isJustStartedRef.current ? 5000 : 0;
-                  const timerId = setTimeout(() => {
-                      setForcedReleaseMethod(fr.method);
-                      setForcedReleaseOpen(true);
-                      isJustStartedRef.current = false; // Reset nach Trigger
-                  }, delay);
-                  return () => clearTimeout(timerId);
-              }
-          }
-      }
-  }, [isInstructionActive, currentInstruction, forcedReleaseOpen]);
-
-  useEffect(() => {
-    const newPeriod = calculatePeriodId();
-    if (newPeriod !== currentPeriod) setCurrentPeriod(newPeriod);
-    const d = new Date(now);
-    const day = d.getDay();
-    const isWeekend = (day === 0 || day === 6);
-    const isHoliday = checkIsHoliday(d);
-    setIsFreeDay(isWeekend || isHoliday);
-    setFreeDayReason(isHoliday ? 'Holiday' : (isWeekend ? 'Weekend' : ''));
-  }, [now]);
-
   // HANDLERS (Gamble)
   const handleGambleAccept = async () => {
       await recordGambleAction(currentUser.uid, 'accept');
@@ -502,45 +347,6 @@ export default function Dashboard() {
   };
 
   // HANDLERS
-  const handleStartRequest = async (itemsToStart) => { 
-      if (tzdActive) { showToast("ZUGRIFF VERWEIGERT: Zeitloses Diktat aktiv.", "error"); return; }
-      const targetItems = itemsToStart || currentInstruction?.items;
-      if(targetItems && targetItems.length > 0) { 
-          // Markiere, dass die Session exakt jetzt in dieser Instanz gestartet wurde
-          isJustStartedRef.current = true;
-          
-          await startSessionService(currentUser.uid, {
-            items: targetItems,
-            type: 'instruction',
-            periodId: currentInstruction.periodId,
-            acceptedAt: currentInstruction.acceptedAt
-          });
-          
-          setInstructionOpen(false); 
-          showToast(`${targetItems.length} Sessions gestartet.`, "success");
-      }
-  };
-
-  const startOathPress = () => { setIsHoldingOath(true); setOathProgress(0); oathTimerRef.current = setInterval(() => { setOathProgress(prev => { if (prev >= 100) { clearInterval(oathTimerRef.current); handleAcceptOath(); return 100; } return prev + 0.4; }); }, 20); };
-  const cancelOathPress = () => { clearInterval(oathTimerRef.current); setIsHoldingOath(false); setOathProgress(0); };
-  
-  const handleAcceptOath = async () => { 
-      const nowISO = new Date().toISOString(); 
-      const batch = writeBatch(db); 
-      batch.update(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), { isAccepted: true, acceptedAt: nowISO }); 
-      await batch.commit(); 
-      setCurrentInstruction(prev => ({ ...prev, isAccepted: true, acceptedAt: nowISO })); 
-      setIsHoldingOath(false); 
-  };
-  
-  const handleDeclineOath = async () => { 
-      await registerOathRefusal(currentUser.uid); 
-      const newPunishment = await getActivePunishment(currentUser.uid);
-      setPunishmentStatus(newPunishment || { active: false }); 
-      setInstructionOpen(false); 
-      setIsHoldingOath(false); 
-  };
-
   const executeStartPunishment = async () => { 
       if(punishmentItem) { 
           await addDoc(collection(db,`users/${currentUser.uid}/sessions`),{ itemId:punishmentItem.id, itemIds:[punishmentItem.id], type:'punishment', startTime:serverTimestamp(), endTime:null }); 
@@ -580,61 +386,6 @@ export default function Dashboard() {
   const handleStartReleaseTimer = () => { setReleaseStep('timer'); if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current); releaseTimerInterval.current = setInterval(() => { setReleaseTimer(prev => { if(prev <= 1) { clearInterval(releaseTimerInterval.current); setReleaseStep('decision'); return 0; } return prev - 1; }); }, 1000); };
   const handleSkipTimer = () => { if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current); setReleaseStep('decision'); };
   const handleReleaseDecision = async (outcome) => { try { await hookRegisterRelease(outcome, releaseIntensity); if (outcome === 'maintained') showToast("Disziplin bewiesen.", "success"); else showToast("Sessions beendet.", "warning"); } catch (e) { showToast("Fehler beim Release", "error"); } finally { setReleaseDialogOpen(false); if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current); } };
-
-  // --- NEU: FORCED RELEASE ERFOLG (Geschluckt) ---
-  const handleConfirmForcedRelease = async (outcome) => {
-      try {
-          await apiRegisterRelease(currentUser.uid, 'maintained', 5, 'clean');
-          await updateDoc(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), { "forcedRelease.executed": true });
-          setCurrentInstruction(prev => ({ ...prev, forcedRelease: { ...prev.forcedRelease, executed: true } }));
-          setForcedReleaseOpen(false);
-          showToast("Protokoll erfüllt. Sauber und gehorsam.", "success");
-      } catch (e) {
-          console.error("Error confirming forced release:", e);
-          showToast("Fehler beim Speichern.", "error");
-      }
-  };
-
-  // --- NEU: FORCED RELEASE VERSAGEN (Ruiniert / Zu Schwach) ---
-  const handleFailForcedRelease = async () => {
-      try {
-          await registerPunishment(currentUser.uid, "Schwäche: Zwangsentladung fehlgeschlagen (Item ruiniert)", 60);
-          const newStatus = await getActivePunishment(currentUser.uid);
-          setPunishmentStatus(newStatus || { active: false });
-          
-          const batch = writeBatch(db);
-          // Versetze alle getragenen Items der Instruktion in den Status 'washing' (ruiniert)
-          if (currentInstruction && currentInstruction.items) {
-              currentInstruction.items.forEach(item => {
-                  batch.update(doc(db, `users/${currentUser.uid}/items`, item.id), { status: 'washing' });
-              });
-          }
-          
-          batch.update(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), { "forcedRelease.executed": true });
-          await batch.commit();
-
-          setCurrentInstruction(prev => ({ ...prev, forcedRelease: { ...prev.forcedRelease, executed: true } }));
-          setForcedReleaseOpen(false);
-          showToast("Schwäche protokolliert. Ausrüstung ruiniert. Strafe aktiv.", "error");
-      } catch (e) {
-          console.error("Error failing forced release:", e);
-      }
-  };
-
-  const handleRefuseForcedRelease = async () => {
-      try {
-          await registerPunishment(currentUser.uid, "Not-Abbruch Zwangsentladung verweigert", 120);
-          const newStatus = await getActivePunishment(currentUser.uid);
-          setPunishmentStatus(newStatus || { active: false });
-          
-          await updateDoc(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), { "forcedRelease.executed": true });
-          setCurrentInstruction(prev => ({ ...prev, forcedRelease: { ...prev.forcedRelease, executed: true } }));
-          setForcedReleaseOpen(false);
-          showToast("Verweigerung registriert. Massive Strafe aktiv.", "warning");
-      } catch (e) {
-          console.error("Error refusing forced release:", e);
-      }
-  };
 
   if (loadingSuspension) return <Box sx={{ p: 4, textAlign: 'center' }}>System Check...</Box>;
 
