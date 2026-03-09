@@ -282,16 +282,22 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
                 }
                 const nocturnalVal = daysCount > 0 ? (nocturnalSuccessCount / daysCount) * 100 : 0;
 
+                // OPTION A: 24h Coverage Durchschnitt für Nylon Enclosure
                 let totalGapHours = 0;
                 let gapDaysCount = 0;
+                let totalNylonMinutesHistory = 0; 
+                
                 const gapLoopDate = new Date(HISTORY_START_DATE);
                 while (gapLoopDate <= now) {
                     gapDaysCount++;
                     const wornMinutes = calculateDailyNylonMinutes(gapLoopDate, allSessions, items);
+                    totalNylonMinutesHistory += wornMinutes;
                     totalGapHours += ((1440 - wornMinutes) / 60);
                     gapLoopDate.setDate(gapLoopDate.getDate() + 1);
                 }
                 const avgGapVal = gapDaysCount > 0 ? (totalGapHours / gapDaysCount) : 24;
+                const avgNylonMinutesPerDay = gapDaysCount > 0 ? (totalNylonMinutesHistory / gapDaysCount) : 0;
+                const nylonEnclosureVal = (avgNylonMinutesPerDay / 1440) * 100; // Prozentualer Anteil an 24 Stunden
 
                 // Voluntarism & Compliance Lag
                 let totalDurationMs = 0;
@@ -398,10 +404,8 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
                 const enduranceVal = globalCount > 0 ? (globalDuration / globalCount) : 0;
                 const enduranceNylonVal = nylonCount > 0 ? (nylonDuration / nylonCount) : 0;
                 const enduranceDessousVal = dessousCount > 0 ? (dessousDuration / dessousCount) : 0;
-                
-                const nylonEnclosureVal = globalDuration > 0 ? (nylonDuration / globalDuration) * 100 : 0;
 
-                // --- NEU: NYLON CHART DATEN (60 Tage mit 5-Tages Trend) ---
+                // --- NYLON CHART DATEN (60 Tage mit 5-Tages Trend) ---
                 const generateNylonChartData = () => {
                     const data = [];
                     const startDate = new Date(now);
