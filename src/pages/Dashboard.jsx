@@ -16,9 +16,8 @@ import { checkActiveSuspension } from '../services/SuspensionService';
 import { isAuditDue, initializeAudit, confirmAuditItem } from '../services/AuditService';
 import { getActivePunishment, clearPunishment, findPunishmentItem, registerPunishment } from '../services/PunishmentService';
 import { loadMonthlyBudget } from '../services/BudgetService';
-import { getTZDStatus, checkForTZDTrigger } from '../services/TZDService';
 import { stopSession as stopSessionService } from '../services/SessionService';
-import { checkGambleTrigger, determineGambleStake, rollTheDice, isImmunityActive, recordGambleAction } from '../services/OfferService';
+import { isImmunityActive } from '../services/OfferService';
 import { runTimeBankAuditor } from '../services/TimeBankService'; 
 
 // Hooks
@@ -26,6 +25,7 @@ import useSessionProgress from '../hooks/dashboard/useSessionProgress';
 import useFemIndex from '../hooks/dashboard/useFemIndex'; 
 import useKPIs from '../hooks/useKPIs'; 
 import useInstructionManager from '../hooks/dashboard/useInstructionManager';
+import useTZDAndGamble from '../hooks/dashboard/useTZDAndGamble';
 
 // Components
 import TzdOverlay from '../components/dashboard/TzdOverlay'; 
@@ -110,10 +110,6 @@ export default function Dashboard() {
   const kpis = useKPIs(items, activeSessions); 
   const { femIndex, femIndexLoading, indexDetails, phase, subScores } = useFemIndex(kpis); 
 
-  const [tzdActive, setTzdActive] = useState(false);
-  const [tzdStartTime, setTzdStartTime] = useState(null); 
-  const [isCheckingProtocol, setIsCheckingProtocol] = useState(true); 
-  
   const [activeSuspension, setActiveSuspension] = useState(null);
   const [loadingSuspension, setLoadingSuspension] = useState(true);
   
@@ -147,14 +143,7 @@ export default function Dashboard() {
   const [indexDialogOpen, setIndexDialogOpen] = useState(false);
   const [toast, setToast] = useState({ open: false, message: '', severity: 'success' });
   
-  // GAMBLE & TimeBank State
-  const [offerOpen, setOfferOpen] = useState(false);
-  const [gambleStake, setGambleStake] = useState([]);
-  const [isForcedGamble, setIsForcedGamble] = useState(false);
-  const [hasGambledThisSession, setHasGambledThisSession] = useState(false);
-  const [immunityActive, setImmunityActive] = useState(false);
   const [timeBankData, setTimeBankData] = useState({ nc: 0, lc: 0 });
-
   const [weeklyReport, setWeeklyReport] = useState(null);
 
   const showToast = (message, severity = 'success') => setToast({ open: true, message, severity });
@@ -166,6 +155,17 @@ export default function Dashboard() {
   const hasVoluntarySession = activeSessions.some(s => s.type === 'voluntary' && !s.endTime);
   const budgetBalance = monthlyBudget - currentSpent;
   const isStealthActive = activeSuspension?.type === 'stealth_travel';
+
+  // --- HOOK INTEGRATION: TZD & GAMBLE MANAGER ---
+  const {
+      tzdActive, setTzdActive, isCheckingProtocol,
+      offerOpen, gambleStake, isForcedGamble,
+      immunityActive, setImmunityActive,
+      handleGambleAccept, handleGambleDecline
+  } = useTZDAndGamble({
+      currentUser, items, itemsLoading, activeSessions,
+      punishmentStatus, punishmentItem, isStealthActive, showToast
+  });
 
   // --- HOOK INTEGRATION: INSTRUCTION MANAGER ---
   const {
@@ -244,107 +244,13 @@ export default function Dashboard() {
         unsubscribeTB(); 
         unsubProtocol();
     };
-  }, [currentUser]); 
+  }, [currentUser, setImmunityActive]); 
 
   // 2. Punishment Item Load
   useEffect(() => {
       if (items.length > 0) setPunishmentItem(findPunishmentItem(items));
   }, [items]);
 
-  // 3. TZD Check + GAMBLE TRIGGER
-  useEffect(() => {
-    let interval;
-    const checkTZD = async () => {
-        if (!currentUser || itemsLoading) return;
-        
-        try {
-            const status = await getTZDStatus(currentUser.uid);
-            
-            if (status.isActive) { 
-                if (!tzdActive) {
-                    setTzdActive(true);
-                    if(status.startTime) setTzdStartTime(status.startTime);
-                }
-            } else { 
-                if (tzdActive) {
-                    setTzdActive(false); 
-                    setTzdStartTime(null);
-                }
-                
-                if (!hasGambledThisSession && items.length > 0 && !isStealthActive) {
-                    const activePunishItem = punishmentStatus.active ? punishmentItem : null;
-                    const gambleResult = await checkGambleTrigger(currentUser.uid, false, isInstructionActive, activePunishItem);
-                    if (gambleResult.trigger) {
-                        const stake = determineGambleStake(items);
-                        if (stake.length > 0) {
-                            setGambleStake(stake);
-                            setIsForcedGamble(gambleResult.isForced);
-                            setOfferOpen(true);
-                            setHasGambledThisSession(true);
-                        }
-                    } else {
-                        setHasGambledThisSession(true); 
-                    }
-                }
-
-                if (isInstructionActive && !isStealthActive) { 
-                    const triggered = await checkForTZDTrigger(currentUser.uid, activeSessions, items); 
-                    if (triggered) {
-                        setTzdActive(true);
-                        setTzdStartTime(new Date()); 
-                    }
-                } 
-            }
-        } catch (e) {
-            console.error("TZD Check Error", e);
-        } finally {
-            setIsCheckingProtocol(false);
-        }
-    };
-
-    if (currentUser && !itemsLoading) { 
-        checkTZD(); 
-        interval = setInterval(checkTZD, 300000); 
-    }
-    return () => clearInterval(interval);
-  }, [currentUser, items, activeSessions, itemsLoading, tzdActive, isInstructionActive, hasGambledThisSession, punishmentStatus, punishmentItem, isStealthActive]);
-
-  // HANDLERS (Gamble)
-  const handleGambleAccept = async () => {
-      await recordGambleAction(currentUser.uid, 'accept');
-      const result = await rollTheDice(currentUser.uid, gambleStake);
-      setOfferOpen(false);
-      
-      if (result.win) {
-          showToast("GEWINN! 24h Immunität aktiviert.", "success");
-          setImmunityActive(true);
-      } else {
-          const voluntarySessions = activeSessions.filter(s => s.type === 'voluntary' && !s.endTime);
-          
-          if (voluntarySessions.length > 0) {
-              try {
-                  const stopPromises = voluntarySessions.map(s => 
-                      stopSessionService(currentUser.uid, s.id, { 
-                          feelings: ['System Override'], 
-                          note: 'Zwangsabbruch durch Gamble-Verlust (System Override).' 
-                      })
-                  );
-                  await Promise.all(stopPromises);
-                  showToast(`${voluntarySessions.length} Session(s) durch Protokoll überschrieben.`, "warning");
-              } catch (e) { console.error(e); }
-          }
-
-          showToast("VERLOREN. Zeitloses Diktat aktiviert.", "error");
-          setTzdActive(true);
-          setTzdStartTime(new Date());
-      }
-  };
-
-  const handleGambleDecline = async () => {
-      await recordGambleAction(currentUser.uid, 'decline');
-      setOfferOpen(false);
-      showToast("Sicher ist sicher...", "info");
-  };
 
   // HANDLERS
   const executeStartPunishment = async () => { 
@@ -444,7 +350,6 @@ export default function Dashboard() {
           onAcknowledge={handleAcknowledgeInflation} 
       />
       
-      {/* GAMBLE DIALOG */}
       <OfferDialog 
           open={offerOpen} 
           stakeItems={gambleStake} 
