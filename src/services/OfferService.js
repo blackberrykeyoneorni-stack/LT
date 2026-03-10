@@ -1,5 +1,5 @@
 import { db } from '../firebase';
-import { doc, getDoc, setDoc, updateDoc, serverTimestamp, Timestamp, increment, writeBatch, query, collection, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, serverTimestamp, Timestamp, increment } from 'firebase/firestore';
 import { startTZD } from './TZDService';
 
 // --- KONFIGURATION ---
@@ -53,7 +53,6 @@ export const isImmunityActive = async (userId) => {
  */
 export const checkGambleTrigger = async (userId, isTzdActive, isInstructionActive, activePunishmentItem) => {
     // 1. SCHUTZRAUM: Keine Gambles bei Pflichtaufgaben
-    // GEÄNDERT: isInstructionActive entfernt, damit hybride Eskalation bei laufenden Sessions greifen kann
     if (isTzdActive) return { trigger: false };
 
     // 2. AUSNAHME: Buttplug-Strafen erlauben Gambles
@@ -93,7 +92,6 @@ export const checkGambleTrigger = async (userId, isTzdActive, isInstructionActiv
 
     // 5. WÜRFELN (Die 3% Micro-Chance)
     if (Math.random() < GAMBLE_CHANCE) {
-        // Trigger erfolgreich! Cooldown sofort setzen (Exploit-Schutz)
         await setDoc(statsRef, {
             lastGambleOfferedAt: serverTimestamp()
         }, { merge: true });
@@ -108,38 +106,67 @@ export const checkGambleTrigger = async (userId, isTzdActive, isInstructionActiv
 };
 
 /**
- * Ermittelt den Einsatz.
+ * Ermittelt den Einsatz (Exakt 3 Items, 1 Strumpfhose zwingend, 1 Mystery Item).
  */
 export const determineGambleStake = (items) => {
     if (!items || items.length === 0) return [];
 
     const activeItems = items.filter(i => i.status === 'active');
     
-    const tights = activeItems.filter(i => {
-        const sub = (i.subCategory || '').toLowerCase();
-        return sub.includes('strumpfhose');
-    });
-    
-    const panties = activeItems.filter(i => {
-        const sub = (i.subCategory || '').toLowerCase();
-        return sub.includes('höschen');
-    });
-
-    if (tights.length === 0) return [];
+    // 1. Zwingend: Exakt 1 Strumpfhose (Darf nie Mystery sein)
+    const tights = activeItems.filter(i => (i.subCategory || '').toLowerCase().includes('strumpfhose'));
+    if (tights.length === 0) return []; 
 
     const selectedTights = tights[Math.floor(Math.random() * tights.length)];
-    
-    const selectedPanties = panties.length > 0 
-        ? panties[Math.floor(Math.random() * panties.length)] 
-        : null;
 
-    const stake = [selectedTights];
+    // 2. Andere Items filtern (Keine weitere Strumpfhose, keine Plugs)
+    const otherItems = activeItems.filter(i => {
+        if (i.id === selectedTights.id) return false;
+        
+        const sub = (i.subCategory || '').toLowerCase();
+        const main = (i.mainCategory || '').toLowerCase();
+        const name = (i.name || '').toLowerCase();
+
+        // Keine zweite Strumpfhose
+        if (sub.includes('strumpfhose')) return false;
+
+        // Absolute Sperre für Buttplugs/Anal-Toys im Gamble/TZD
+        if (sub.includes('plug') || main.includes('anal') || name.includes('plug') || name.includes('butt') || sub.includes('butt')) return false;
+
+        // Erlaubt sind Dessous, Lingerie, Nylons, Accessoires
+        if (main.includes('dessous') || main.includes('lingerie') || main.includes('wäsche') ||
+            main.includes('nylon') || main.includes('accessoire') || main.includes('zubehör')) {
+            return true;
+        }
+        return false;
+    });
+
+    // 3. Zwei weitere Items mit UNTERSCHIEDLICHEN Subkategorien auswählen
+    const selectedOthers = [];
+    const usedSubCats = new Set();
     
-    if (selectedPanties && selectedPanties.id !== selectedTights.id) {
-        stake.push(selectedPanties);
+    // Mischen für Zufälligkeit
+    const shuffledOthers = otherItems.sort(() => 0.5 - Math.random());
+
+    for (const item of shuffledOthers) {
+        const sub = (item.subCategory || 'sonstiges').toLowerCase();
+        if (!usedSubCats.has(sub)) {
+            selectedOthers.push(item);
+            usedSubCats.add(sub);
+        }
+        if (selectedOthers.length === 2) break; // Wir brauchen genau 2 weitere
     }
 
-    return stake;
+    const finalStake = [selectedTights, ...selectedOthers];
+
+    // 4. Das letzte Item (Index 2) als "Mystery Item" maskieren, falls vorhanden
+    if (finalStake.length === 3) {
+        finalStake[2] = { ...finalStake[2], isMystery: true };
+    } else if (finalStake.length === 2) {
+        finalStake[1] = { ...finalStake[1], isMystery: true };
+    }
+
+    return finalStake;
 };
 
 /**
@@ -155,129 +182,7 @@ export const recordGambleAction = async (userId, action) => {
 };
 
 /**
- * NEU: Autoritäre TZD-Eskalation. Sammelt aktuell getragene Items und füllt 
- * auf exakt 3 Items auf (strikt begrenzt auf Nylons und Dessous mit Gewichtung).
- */
-const buildAuthoritarianTZDItems = async (userId) => {
-    const TARGET_ITEM_COUNT = 3; 
-    
-    // 1. Hole aktive Sessions
-    const sessionsSnap = await getDocs(query(collection(db, `users/${userId}/sessions`), where('endTime', '==', null)));
-    const activeSessions = [];
-    const inheritedItemIds = new Set();
-    
-    sessionsSnap.forEach(docSnap => {
-        const data = docSnap.data();
-        activeSessions.push({ id: docSnap.id, ...data });
-        if (data.itemId) inheritedItemIds.add(data.itemId);
-        if (data.itemIds && Array.isArray(data.itemIds)) {
-            data.itemIds.forEach(id => inheritedItemIds.add(id));
-        }
-    });
-
-    // 2. Hole alle Items
-    const itemsSnap = await getDocs(collection(db, `users/${userId}/items`));
-    const allItems = [];
-    itemsSnap.forEach(docSnap => allItems.push({ id: docSnap.id, ...docSnap.data() }));
-
-    // 3. Hole Preferences für Gewichte
-    let userWeights = {};
-    const prefSnap = await getDoc(doc(db, `users/${userId}/settings/preferences`));
-    if (prefSnap.exists() && prefSnap.data().categoryWeights) {
-        userWeights = prefSnap.data().categoryWeights;
-    }
-
-    // 4. Vererbung (Lock-In der aktuell getragenen Items)
-    const lockedItems = allItems.filter(i => inheritedItemIds.has(i.id));
-    const itemsNeeded = Math.max(0, TARGET_ITEM_COUNT - lockedItems.length);
-
-    const finalItems = [...lockedItems];
-
-    // 5. Fehlende Items auffüllen (Autoritärer Filter: nur Nylons & Dessous)
-    if (itemsNeeded > 0) {
-        let availableItems = allItems.filter(i => {
-            if (i.status !== 'active') return false;
-            if (inheritedItemIds.has(i.id)) return false; // Bereits vererbt
-            
-            const cat = (i.mainCategory || '').toLowerCase();
-            if (cat.includes('nylon') || cat.includes('lingerie') || cat.includes('dessous')) {
-                return true;
-            }
-            return false;
-        });
-
-        const groups = {};
-        availableItems.forEach(item => {
-            const key = item.subCategory || item.mainCategory || 'Sonstiges';
-            if (!groups[key]) groups[key] = [];
-            groups[key].push(item);
-        });
-
-        let availableGroupKeys = Object.keys(groups);
-
-        for (let k = 0; k < itemsNeeded; k++) {
-            if (availableGroupKeys.length === 0) break;
-
-            let totalWeight = 0;
-            const weightedGroups = availableGroupKeys.map(key => {
-                const count = groups[key].length;
-                const rootScore = Math.sqrt(count);
-                const manualWeight = parseInt(userWeights[key] || 1);
-                const finalScore = rootScore * manualWeight;
-                totalWeight += finalScore;
-                return { key, score: finalScore };
-            });
-
-            let randomValue = Math.random() * totalWeight;
-            let chosenCategoryKey = null;
-
-            for (const group of weightedGroups) {
-                randomValue -= group.score;
-                if (randomValue <= 0) {
-                    chosenCategoryKey = group.key;
-                    break;
-                }
-            }
-            if (!chosenCategoryKey && weightedGroups.length > 0) {
-                chosenCategoryKey = weightedGroups[weightedGroups.length - 1].key;
-            }
-
-            const itemsInGroup = groups[chosenCategoryKey];
-            const randomItemIndex = Math.floor(Math.random() * itemsInGroup.length);
-            const selected = itemsInGroup[randomItemIndex];
-            
-            finalItems.push(selected);
-
-            // Update Arrays um Dopplungen der gleichen Subkategorie zu vermeiden
-            availableGroupKeys = availableGroupKeys.filter(key => key !== chosenCategoryKey);
-        }
-    }
-
-    // 6. Laufende Sessions hart beenden (Vom TZD überschrieben)
-    if (activeSessions.length > 0) {
-        const batch = writeBatch(db);
-        activeSessions.forEach(session => {
-            const sessionRef = doc(db, `users/${userId}/sessions`, session.id);
-            batch.update(sessionRef, {
-                endTime: serverTimestamp(),
-                tzdExecuted: true,
-                finalNote: 'Hart beendet: Vom Spiel-TZD überschrieben (Autoritäre Eskalation).'
-            });
-        });
-        await batch.commit();
-    }
-
-    return {
-        finalItems,
-        inheritedItemIds: Array.from(inheritedItemIds),
-        isColdStart: lockedItems.length === 0,
-        addedItemsCount: finalItems.length - lockedItems.length
-    };
-};
-
-/**
- * Führt den Münzwurf aus.
- * FIX: Gibt immer penaltyDuration (number oder null) zurück.
+ * Führt den Münzwurf aus und setzt exakt die Gamble-Items (inklusive Mystery) als Strafe ein.
  */
 export const rollTheDice = async (userId, stakeItems) => {
     const roll = Math.random();
@@ -292,15 +197,18 @@ export const rollTheDice = async (userId, stakeItems) => {
             penaltyDuration: null 
         };
     } else {
-        // VERLUST - Autoritäre TZD-Eskalation
-        const escalationResult = await buildAuthoritarianTZDItems(userId);
-        
+        // VERLUST - Das Gamble *ist* das TZD. 
         const duration = 1440; // Exakt 24 Stunden
         
-        // Nutze finalItems anstatt der Wetteinsätze. Fallback falls das Inventar komplett leer ist.
-        const penaltyItems = escalationResult.finalItems.length > 0 ? escalationResult.finalItems : stakeItems;
+        // Mystery-Flag für die Speicherung in der Datenbank (TZD-Historie) entfernen
+        const penaltyItems = stakeItems.map(item => {
+            const cleanItem = { ...item };
+            delete cleanItem.isMystery;
+            return cleanItem;
+        });
         
-        await startTZD(userId, penaltyItems, null, duration, 'spiel_tzd', escalationResult); 
+        await startTZD(userId, penaltyItems, null, duration, 'spiel_tzd'); 
+        
         return { 
             win: false, 
             type: 'tzd_lock',

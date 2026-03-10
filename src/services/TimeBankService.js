@@ -133,12 +133,13 @@ export const calculateEarnedCredits = async (userId, session) => {
     // 1. HARTE SPERRE: Prüfen auf Straf-Indikatoren
     if (
         session.type === 'punishment' ||       
+        session.type === 'tzd' ||
         session.isPunitive === true ||         
         session.evasionPenaltyTriggered === true || 
         session.source === 'gamble_loss' ||
         session.tzdExecuted === true // NEU: TZD darf ebenfalls keine Credits generieren
     ) {
-        console.log("TimeBank: PUNITIVE SESSION DETECTED. 0 Credits awarded.");
+        console.log("TimeBank: PUNITIVE/TZD SESSION DETECTED. 0 Credits awarded.");
         return 0;
     }
 

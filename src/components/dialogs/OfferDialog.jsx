@@ -4,7 +4,7 @@ import {
   Typography, Box, Button, CircularProgress, Avatar 
 } from '@mui/material';
 import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
-import { motion, AnimatePresence } from 'framer-motion'; 
+import { motion } from 'framer-motion'; 
 import CasinoIcon from '@mui/icons-material/Casino';
 import ShieldIcon from '@mui/icons-material/Shield';
 import LockIcon from '@mui/icons-material/Lock';
@@ -70,37 +70,55 @@ export default function OfferDialog({ open, stakeItems, onAccept, onDecline, has
                             </Box>
 
                             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2, textTransform: 'uppercase', letterSpacing: 1 }}>
-                                Dein Einsatz
+                                Es stehen {stakeItems.length} Items auf dem Spiel.<br/>Zwei sind bekannt, eines ist dein Restrisiko.
                             </Typography>
                             
                             {/* ITEM DISPLAY */}
-                            <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, mb: 2 }}>
-                                {stakeItems.map(item => (
-                                    <Box key={item.id} sx={{ position: 'relative', width: 100, textAlign: 'center' }}>
-                                        <Avatar 
-                                            src={item.imageUrl} 
-                                            variant="rounded" 
-                                            sx={{ 
-                                                width: 70, 
-                                                height: 70, 
-                                                border: `1px solid ${isForced ? PALETTE.accents.red : PALETTE.accents.gold}`,
-                                                mx: 'auto',
-                                                mb: 1
-                                            }} 
-                                        />
-                                        <Typography 
-                                            variant="body2" 
-                                            sx={{ fontWeight: 'bold', color: '#fff', lineHeight: 1.2, fontSize: '0.75rem', mb: 0.5 }}
-                                            noWrap
-                                        >
-                                            {item.name || item.brand || 'Unbekannt'}
-                                        </Typography>
-                                        <Typography variant="caption" sx={{ fontSize: '0.65rem', color: isForced ? PALETTE.accents.red : PALETTE.accents.gold, display: 'block' }}>
-                                            {item.customId || 'ID ???'}
-                                        </Typography>
-                                        <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.secondary', display: 'block' }}>
-                                            {item.subCategory}
-                                        </Typography>
+                            <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1, mb: 2 }}>
+                                {stakeItems.map((item, index) => (
+                                    <Box key={item.id || index} sx={{ position: 'relative', width: 90, textAlign: 'center' }}>
+                                        {item.isMystery ? (
+                                            <>
+                                                <Avatar 
+                                                    variant="rounded" 
+                                                    sx={{ 
+                                                        width: 70, height: 70, mx: 'auto', mb: 1,
+                                                        border: `1px dashed ${isForced ? PALETTE.accents.red : PALETTE.accents.gold}`,
+                                                        bgcolor: 'rgba(0,0,0,0.5)',
+                                                        color: isForced ? PALETTE.accents.red : PALETTE.accents.gold,
+                                                        fontWeight: 'bold', fontSize: '1.5rem'
+                                                    }} 
+                                                >
+                                                    ?
+                                                </Avatar>
+                                                <Typography variant="body2" sx={{ fontWeight: 'bold', color: '#fff', lineHeight: 1.2, fontSize: '0.75rem', mb: 0.5 }} noWrap>
+                                                    Mystery Item
+                                                </Typography>
+                                                <Typography variant="caption" sx={{ fontSize: '0.65rem', color: isForced ? PALETTE.accents.red : PALETTE.accents.gold, display: 'block' }}>
+                                                    Ungewisses Schicksal
+                                                </Typography>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Avatar 
+                                                    src={item.imageUrl} 
+                                                    variant="rounded" 
+                                                    sx={{ 
+                                                        width: 70, height: 70, mx: 'auto', mb: 1,
+                                                        border: `1px solid ${isForced ? PALETTE.accents.red : PALETTE.accents.gold}`
+                                                    }} 
+                                                />
+                                                <Typography variant="body2" sx={{ fontWeight: 'bold', color: '#fff', lineHeight: 1.2, fontSize: '0.75rem', mb: 0.5 }} noWrap>
+                                                    {item.name || item.brand || 'Unbekannt'}
+                                                </Typography>
+                                                <Typography variant="caption" sx={{ fontSize: '0.65rem', color: isForced ? PALETTE.accents.red : PALETTE.accents.gold, display: 'block' }}>
+                                                    {item.customId || 'ID ???'}
+                                                </Typography>
+                                                <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.secondary', display: 'block' }}>
+                                                    {item.subCategory}
+                                                </Typography>
+                                            </>
+                                        )}
                                     </Box>
                                 ))}
                             </Box>

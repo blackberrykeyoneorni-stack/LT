@@ -85,7 +85,7 @@ export const startTZD = async (userId, targetItems, durationMatrix, overrideDura
 
     await setDoc(doc(db, `users/${userId}/status/tzd`), tzdData);
 
-    // --- NEU: Session-Schnitt zur Eliminierung des Double-Countings ---
+    // --- Session-Schnitt zur Eliminierung des Double-Countings ---
     try {
         const activeSessionsQuery = query(collection(db, `users/${userId}/sessions`), where('isActive', '==', true), where('type', '==', 'instruction'));
         const activeSessionsSnap = await getDocs(activeSessionsQuery);
@@ -94,14 +94,13 @@ export const startTZD = async (userId, targetItems, durationMatrix, overrideDura
         for (const sessionDoc of activeSessionsSnap.docs) {
             const sData = sessionDoc.data();
             periodIdToCarryOver = sData.periodId || periodIdToCarryOver;
-            // Laufende Session beenden (Zeiten werden sauber verbucht)
             await stopSession(userId, sessionDoc.id, { note: 'Beendet für TZD-Start (Schnitt)' });
         }
 
-        // TZD als neue Session starten
+        // TZD als völlig isolierten Typen 'tzd' starten
         await startSession(userId, {
             items: itemsArray,
-            type: 'instruction',
+            type: 'tzd',
             periodId: periodIdToCarryOver,
             note: customType === 'spiel_tzd' ? 'TZD-Session (Gamble)' : 'TZD-Session',
             instructionDurationMinutes: targetDuration
@@ -388,7 +387,7 @@ export const terminateTZD = async (userId, success = true, customResult = null) 
     try {
         const q = query(
             collection(db, `users/${userId}/sessions`),
-            where('type', '==', 'instruction'),
+            where('type', '==', 'tzd'), 
             where('endTime', '==', null)
         );
         const querySnapshot = await getDocs(q);
@@ -410,8 +409,6 @@ export const terminateTZD = async (userId, success = true, customResult = null) 
     if (status && status.lockedItems) {
         for (const item of status.lockedItems) {
             const finalMinutes = status.accumulatedMinutes || 0;
-            // GELÖSCHT: Manuelle Aufrechnung von wearCount und totalMinutes zur Verhinderung des Double-Countings
-            
             await addItemHistoryEntry(userId, item.id, {
                 type: success ? 'tzd_completed' : 'tzd_failed',
                 message: success 

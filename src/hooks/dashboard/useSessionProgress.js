@@ -9,9 +9,8 @@ export default function useSessionProgress(currentUser, items) {
     const [activeSessions, setActiveSessions] = useState([]);
     const [loading, setLoading] = useState(true);
     const [nightCompliance, setNightCompliance] = useState(null);
-    const [discountMinutes, setDiscountMinutes] = useState(0); // NEU: Tages-Rabatt
+    const [discountMinutes, setDiscountMinutes] = useState(0); 
     
-    // Startwert 4 (Fallback)
     const [dailyTargetHours, setDailyTargetHours] = useState(DEFAULT_PROTOCOL_RULES.currentDailyGoal || 4); 
     const [nightStartHour, setNightStartHour] = useState(23); 
     const [completedTodayMinutes, setCompletedTodayMinutes] = useState(0);
@@ -118,7 +117,7 @@ export default function useSessionProgress(currentUser, items) {
         };
     }, [currentUser]);
 
-    // 2b. NEU: DISCOUNT LISTENER (Time Bank Rabatt live abfragen)
+    // 2b. DISCOUNT LISTENER
     useEffect(() => {
         if (!currentUser) return;
         const instrRef = doc(db, `users/${currentUser.uid}/status/dailyInstruction`);
@@ -157,7 +156,7 @@ export default function useSessionProgress(currentUser, items) {
         const qHistory = query(
             collection(db, `users/${currentUser.uid}/sessions`),
             where('startTime', '>=', startOfDay),
-            where('type', '==', 'instruction')
+            where('type', 'in', ['instruction', 'tzd']) // TZD Zählt nun 1:1 für den Fortschritt
         );
 
         const unsubHistory = onSnapshot(qHistory, (snapshot) => {
@@ -181,13 +180,12 @@ export default function useSessionProgress(currentUser, items) {
         };
     }, [currentUser]);
 
-    // 4. Progress Berechnung (MIT RABATT-LOGIK)
+    // 4. Progress Berechnung
     const calculateProgress = () => {
         const now = new Date();
         
-        // MATHEMATIK: Basis-Ziel minus erkauften Rabatt
         let targetMinutes = (dailyTargetHours * 60) - discountMinutes;
-        if (targetMinutes < 0) targetMinutes = 0; // Kein negatives Ziel
+        if (targetMinutes < 0) targetMinutes = 0; 
         
         if (now.getHours() >= nightStartHour) {
             return {
@@ -213,8 +211,9 @@ export default function useSessionProgress(currentUser, items) {
             };
         }
 
+        // Wertet nun Instruction und TZD als aktive Tragezeit
         const activeInstruction = activeSessions.find(s => 
-            s.type === 'instruction' && 
+            (s.type === 'instruction' || s.type === 'tzd') && 
             (!s.periodId || !s.periodId.includes('night'))
         );
 
@@ -242,7 +241,7 @@ export default function useSessionProgress(currentUser, items) {
             isDailyGoalMet: isGoalMet,
             isLive,
             nightCompliance,
-            discountMinutes // Zur Anzeige im Balken weiterleiten
+            discountMinutes
         };
     };
 
