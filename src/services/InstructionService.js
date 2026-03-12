@@ -467,25 +467,38 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
         let targetItemCount = 1;
         const rndCount = Math.random();
 
-        if (maxItems === 1) {
-            targetItemCount = 1;
-        } else if (maxItems === 2) {
-            if (rndCount < 0.75) {
-                targetItemCount = 2;
-            } else {
-                targetItemCount = 1;
-            }
-        } else if (maxItems >= 3) { 
-            if (rndCount < 0.55) {
+        if (isNightInstruction) {
+            // NEU: Nacht-Anweisung überschreibt maxItems und nutzt feste Wahrscheinlichkeiten
+            // 45% für 3 Items, 45% für 2 Items, 10% für 1 Item
+            if (rndCount < 0.45) {
                 targetItemCount = 3;
-            } else if (rndCount < 0.95) { 
+            } else if (rndCount < 0.90) { 
                 targetItemCount = 2;
             } else {
                 targetItemCount = 1;
             }
+            console.log(`InstructionService: Nacht-Modus aktiv. Random=${rndCount.toFixed(2)} -> TargetCount=${targetItemCount}`);
+        } else {
+            // Bisherige Logik für den Tag
+            if (maxItems === 1) {
+                targetItemCount = 1;
+            } else if (maxItems === 2) {
+                if (rndCount < 0.75) {
+                    targetItemCount = 2;
+                } else {
+                    targetItemCount = 1;
+                }
+            } else if (maxItems >= 3) { 
+                if (rndCount < 0.55) {
+                    targetItemCount = 3;
+                } else if (rndCount < 0.95) { 
+                    targetItemCount = 2;
+                } else {
+                    targetItemCount = 1;
+                }
+            }
+            console.log(`InstructionService: Tag-Modus. MaxItems=${maxItems}, Random=${rndCount.toFixed(2)} -> TargetCount=${targetItemCount}`);
         }
-
-        console.log(`InstructionService: MaxItems=${maxItems}, Random=${rndCount.toFixed(2)} -> TargetCount=${targetItemCount}`);
 
         // Schleife zum Ziehen der Items
         for (let k = 0; k < targetItemCount; k++) {
