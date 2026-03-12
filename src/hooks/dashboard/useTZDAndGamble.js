@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { getTZDStatus, checkForTZDTrigger } from '../../services/TZDService';
+import { getTZDStatus, checkForTZDTrigger, performCheckIn } from '../../services/TZDService';
 import { checkGambleTrigger, determineGambleStake, rollTheDice, recordGambleAction } from '../../services/OfferService';
 import { stopSession as stopSessionService } from '../../services/SessionService';
 
@@ -40,6 +40,19 @@ export default function useTZDAndGamble({
                     if (!tzdActive) {
                         setTzdActive(true);
                         if(status.startTime) setTzdStartTime(status.startTime);
+                    }
+
+                    // AUTO-COMPLETE TZD (Beendet TZD automatisch, wenn Zeit inkl. Strafen abgelaufen ist)
+                    if (status.stage === 'running' && status.startTime) {
+                        const elapsed = Math.floor((Date.now() - status.startTime.getTime()) / 60000);
+                        if (elapsed >= status.targetDurationMinutes) {
+                            const checkInResult = await performCheckIn(currentUser.uid, status);
+                            if (checkInResult && checkInResult.completed) {
+                                setTzdActive(false);
+                                setTzdStartTime(null);
+                                if (showToast) showToast("Zeitloses Diktat automatisch beendet.", "success");
+                            }
+                        }
                     }
                 } else { 
                     if (tzdActive) {
@@ -83,7 +96,7 @@ export default function useTZDAndGamble({
             interval = setInterval(checkTZD, 300000); 
         }
         return () => clearInterval(interval);
-    }, [currentUser, items, activeSessions, itemsLoading, tzdActive, isInstructionActive, hasGambledThisSession, punishmentStatus, punishmentItem, isStealthActive]);
+    }, [currentUser, items, activeSessions, itemsLoading, tzdActive, isInstructionActive, hasGambledThisSession, punishmentStatus, punishmentItem, isStealthActive, showToast]);
 
     // --- HANDLERS: GAMBLE ---
     const handleGambleAccept = useCallback(async () => {

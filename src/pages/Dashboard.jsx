@@ -45,7 +45,7 @@ import InflationOverlay from '../components/dashboard/InflationOverlay';
 import { DESIGN_TOKENS, PALETTE, MOTION } from '../theme/obsidianDesign';
 import { 
     Box, Typography, Dialog, DialogTitle, DialogContent, DialogActions, 
-    Snackbar, Alert, FormGroup, FormControlLabel, Checkbox, TextField, 
+    Snackbar, Alert, TextField, 
     Button, Container, Paper, Chip, LinearProgress, Divider 
 } from '@mui/material';
 import { Icons } from '../theme/appIcons';
@@ -59,11 +59,6 @@ import LockIcon from '@mui/icons-material/Lock';
 import ShieldIcon from '@mui/icons-material/Shield'; 
 import WaterDropIcon from '@mui/icons-material/WaterDrop';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp'; 
-
-const REFLECTION_TAGS = [
-    "Sicher / Geborgen", "Erregt", "Gedemütigt", "Exponiert / Öffentlich", 
-    "Feminin", "Besitztum (Owned)", "Unwürdig", "Stolz"
-];
 
 const formatTime = (totalMins) => {
     const h = Math.floor(totalMins / 60);
@@ -114,11 +109,6 @@ export default function Dashboard() {
   const [loadingSuspension, setLoadingSuspension] = useState(true);
   
   // UI States
-  const [reflectionOpen, setReflectionOpen] = useState(false);
-  const [sessionToStop, setSessionToStop] = useState(null);
-  const [selectedFeelings, setSelectedFeelings] = useState([]);
-  const [reflectionNote, setReflectionNote] = useState('');
-  
   const [laundryOpen, setLaundryOpen] = useState(false);
   const [auditDue, setAuditDue] = useState(false);
   const [auditOpen, setAuditOpen] = useState(false);
@@ -262,27 +252,43 @@ export default function Dashboard() {
           setPunishmentScanOpen(false); 
       } 
   };
-  const handlePunishmentScanTrigger = () => { startBindingScan((scannedId) => { if (punishmentItem && (scannedId === punishmentItem.nfcTagId || scannedId === punishmentItem.customId || scannedId === punishmentItem.id)) { if (punishmentScanMode === 'start') executeStartPunishment(); else if (punishmentScanMode === 'stop') { setPunishmentScanOpen(false); setSelectedFeelings([]); setReflectionNote(''); setReflectionOpen(true); } } else { showToast("Falscher Tag!", "error"); } }); };
-
-  const handleRequestStopSession = (session) => { 
+  
+  const handleRequestStopSession = async (session) => { 
       if (tzdActive) { showToast("STOPPEN VERWEIGERT.", "error"); return; }
       if (session.type === 'punishment') { 
           const elapsed = Math.floor((Date.now() - session.startTime.getTime()) / 60000); 
           if (elapsed < (punishmentStatus.durationMinutes || 30)) return; 
       } 
-      setSessionToStop(session); setSelectedFeelings([]); setReflectionNote(''); setReflectionOpen(true); 
-  };
-  
-  const handleConfirmStopSession = async () => { 
-      if (!sessionToStop) return; 
+      
       try { 
-          await stopSessionService(currentUser.uid, sessionToStop.id, { feelings: selectedFeelings, note: reflectionNote }); 
+          await stopSessionService(currentUser.uid, session.id, { feelings: [], note: '' }); 
           
-          if(sessionToStop.type === 'punishment') { 
+          if(session.type === 'punishment') { 
               await clearPunishment(currentUser.uid); 
               setPunishmentStatus({ active: false, deferred: false, reason: null, durationMinutes: 0 });
           } 
-      } catch(e){ showToast("Fehler", "error"); } finally { setReflectionOpen(false); setSessionToStop(null); } 
+          showToast("Session beendet.", "success");
+      } catch(e){ 
+          showToast("Fehler beim Beenden", "error"); 
+      } 
+  };
+
+  const handlePunishmentScanTrigger = () => { 
+      startBindingScan((scannedId) => { 
+          if (punishmentItem && (scannedId === punishmentItem.nfcTagId || scannedId === punishmentItem.customId || scannedId === punishmentItem.id)) { 
+              if (punishmentScanMode === 'start') {
+                  executeStartPunishment(); 
+              } else if (punishmentScanMode === 'stop') { 
+                  setPunishmentScanOpen(false); 
+                  const pSession = activeSessions.find(s => s.type === 'punishment');
+                  if (pSession) {
+                      handleRequestStopSession(pSession); 
+                  }
+              } 
+          } else { 
+              showToast("Falscher Tag!", "error"); 
+          } 
+      }); 
   };
 
   const handleStartAudit = async () => { const auditItems = await initializeAudit(currentUser.uid, items); setPendingAuditItems(auditItems); setCurrentAuditIndex(0); setAuditOpen(true); };
@@ -559,21 +565,6 @@ export default function Dashboard() {
           <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}>
               <Button onClick={() => setAuditOpen(false)} color="inherit">Abbrechen</Button>
               <Button onClick={handleConfirmAuditItem} variant="contained" color="warning">Bestätigen</Button>
-          </DialogActions>
-      </Dialog>
-
-      <Dialog open={reflectionOpen} onClose={() => setReflectionOpen(false)} fullWidth maxWidth="sm" PaperProps={DESIGN_TOKENS.dialog.paper}>
-          <DialogTitle sx={DESIGN_TOKENS.dialog.title.sx}>Reflektion</DialogTitle>
-          <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
-              <FormGroup>
-                  {REFLECTION_TAGS.map(t => (
-                      <FormControlLabel key={t} control={<Checkbox onChange={() => setSelectedFeelings(prev => prev.includes(t) ? prev.filter(f => f !== t) : [...prev, t])}/>} label={t}/>
-                  ))}
-              </FormGroup>
-          </DialogContent>
-          <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}>
-              <Button onClick={() => setReflectionOpen(false)} color="inherit">Abbrechen</Button>
-              <Button onClick={handleConfirmStopSession} variant="contained">Bestätigen</Button>
           </DialogActions>
       </Dialog>
 
