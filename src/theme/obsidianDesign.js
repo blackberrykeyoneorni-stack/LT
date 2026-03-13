@@ -2,7 +2,7 @@
 
 /**
  * 1. CORE TOKENS - SYNTHETIC SISSY (SHEER NYLON)
- * (Diese liegen nun hier, um zirkuläre Importe mit materialTheme.js zu verhindern!)
+ * (Diese liegen hier, um zirkuläre Importe mit materialTheme.js zu verhindern!)
  */
 export const m3Tokens = {
   primary: '#FF007F',          

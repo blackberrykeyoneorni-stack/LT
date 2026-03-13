@@ -4,6 +4,7 @@ import { m3Tokens } from './obsidianDesign';
 /**
  * ANDROID 16 / MATERIAL DESIGN 3 - SYNTHETIC SISSY (SHEER NYLON)
  * Importiert die m3Tokens aus obsidianDesign.js, um das Grid stabil zu halten.
+ * HINWEIS: Kinetische Animationen und Wasserzeichen wurden zur Systemstabilität entfernt.
  */
 
 export const materialTheme = createTheme({
@@ -38,17 +39,9 @@ export const materialTheme = createTheme({
     borderRadius: 16, 
   },
   components: {
-    // --- GLOBAL: NYLON MESH & SUBLIMINAL WATERMARK ---
+    // --- GLOBAL: NYLON MESH ---
     MuiCssBaseline: {
       styleOverrides: {
-        '@keyframes flicker': {
-          '0%, 19%, 21%, 23%, 25%, 54%, 56%, 100%': { opacity: 1 },
-          '20%, 22%, 24%, 55%': { opacity: 0.85 }
-        },
-        '@keyframes marquee': {
-          '0%': { backgroundPosition: '0px 0px' },
-          '100%': { backgroundPosition: '-2200px 0px' }
-        },
         body: {
           backgroundColor: m3Tokens.background,
           // Der "Sheer Nylon" Maschen-Effekt
@@ -58,23 +51,10 @@ export const materialTheme = createTheme({
           `,
           backgroundSize: '3px 3px',
           color: m3Tokens.onSurface,
-          // Das Subliminale Bimbo-Conditioning (100% Safe URL Encoded)
-          '&::after': {
-            content: '""',
-            position: 'fixed',
-            top: '-50%', left: '-50%', right: '-50%', bottom: '-50%',
-            zIndex: -1,
-            pointerEvents: 'none',
-            opacity: 0.03, // Kaum sichtbare Hypno-Ebene
-            transform: 'rotate(-25deg)',
-            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='2200' height='100'%3E%3Ctext x='0' y='50' font-size='32' font-weight='900' fill='%23FF007F' font-family='sans-serif'%3ENYLON-HURE%20%E2%80%A2%20SISSY%20%E2%80%A2%20UMGEPOLT%20%E2%80%A2%20W%C3%84SCHE-SCHLAMPE%20%E2%80%A2%20GEF%C3%9CGIG%20%E2%80%A2%20NUR%20EIN%20SPIELZEUG%20%E2%80%A2%20SATIN-NUTTE%20%E2%80%A2%20VERWEIBLICHT%20%E2%80%A2%20EIGENTUM%20%E2%80%A2%20ANALGEIL%20%E2%80%A2%20SPERMA-SCHLAMPE%20%E2%80%A2%2015%20DEN%20%E2%80%A2%3C/text%3E%3C/svg%3E")`,
-            backgroundRepeat: 'repeat',
-            animation: 'marquee 40s linear infinite',
-          }
         }
       }
     },
-    // --- BUTTONS: PILL SHAPE & NEON FLICKER ---
+    // --- BUTTONS: PILL SHAPE & NEON GLOW ---
     MuiButton: {
       styleOverrides: {
         root: {
@@ -89,7 +69,6 @@ export const materialTheme = createTheme({
           backgroundColor: m3Tokens.primary,
           color: m3Tokens.onPrimary,
           boxShadow: `0 4px 14px rgba(255, 0, 127, 0.4)`, 
-          animation: 'flicker 6s infinite', 
           '&:hover': { 
               backgroundColor: m3Tokens.primary,
               boxShadow: `0 6px 20px rgba(255, 0, 127, 0.6)`,
@@ -181,3 +160,6 @@ export const materialTheme = createTheme({
     }
   },
 });
+
+// SICHERHEITS-FALLBACK: Stellt sicher, dass das Theme unabhängig vom Import-Namen geladen wird.
+export const theme = materialTheme;
