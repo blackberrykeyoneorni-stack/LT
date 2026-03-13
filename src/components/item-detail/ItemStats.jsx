@@ -8,10 +8,23 @@ import { PALETTE, DESIGN_TOKENS } from '../../theme/obsidianDesign';
 
 export default function ItemStats({ stats }) {
     const StatBox = ({ icon, val, label, color }) => (
-        <Paper sx={{ p: 1.5, textAlign: 'center', ...DESIGN_TOKENS.glassCard }}>
+        <Paper sx={{ p: 1, textAlign: 'center', ...DESIGN_TOKENS.glassCard }}>
             {React.cloneElement(icon, { sx: { color: color, fontSize: 24, mb: 0.5, filter: `drop-shadow(0 0 5px ${color})` } })}
-            <Typography variant="h5" sx={{ fontWeight: 800, color: PALETTE.accents.blue, textShadow: `0 0 10px ${PALETTE.accents.blue}80` }}>{val}</Typography>
-            <Typography variant="caption" sx={{ color: PALETTE.text.secondary, textTransform: 'uppercase', letterSpacing: 1 }}>{label}</Typography>
+            <Typography 
+                sx={{ 
+                    // Fluid Typography mit Fallback und Ellipsis, verhindert Zerstörung der Box durch Überlänge (z.B. > 10.000€)
+                    fontSize: 'clamp(1rem, 3vw, 1.5rem)', 
+                    fontWeight: 800, 
+                    color: PALETTE.accents.blue, 
+                    textShadow: `0 0 10px ${PALETTE.accents.blue}80`,
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis'
+                }}
+            >
+                {val}
+            </Typography>
+            <Typography variant="caption" sx={{ color: PALETTE.text.secondary, textTransform: 'uppercase', letterSpacing: 0.5 }}>{label}</Typography>
         </Paper>
     );
 

@@ -38,7 +38,7 @@ export default function ItemGallery({ item, isEditing, onToggleEdit, onSave, onW
             borderBottom: `1px solid rgba(255, 0, 127, 0.3)`, boxShadow: `0 4px 30px rgba(255, 0, 127, 0.2)`
         }}>
             {images.length > 0 ? (
-                <Swiper modules={[Navigation, Pagination]} spaceBetween={0} slidesPerView={1} navigation pagination={{ clickable: true }} style={swiperStyles} loop={images.length > 1}>
+                <Swiper grabCursor={true} allowTouchMove={true} modules={[Navigation, Pagination]} spaceBetween={0} slidesPerView={1} navigation pagination={{ clickable: true }} style={swiperStyles} loop={images.length > 1}>
                     {images.map((img, index) => (
                         <SwiperSlide key={index}>
                             <img src={img} alt={`Bild ${index}`} style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: isEditing ? 0.6 : 1, transition: 'opacity 0.3s' }} onClick={() => { if (!isEditing) { setCurrentFullscreenIndex(index); setOverlayOpen(true); } }} />
@@ -49,9 +49,10 @@ export default function ItemGallery({ item, isEditing, onToggleEdit, onSave, onW
                 <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', color: PALETTE.primary.main }}><PhotoCamera sx={{ fontSize: 60, mb: 2, opacity: 0.5 }} /><Typography sx={{ opacity: 0.5, textTransform: 'uppercase', letterSpacing: 2 }}>Kein Bild</Typography></Box>
             )}
 
-            <Box sx={{ position: 'absolute', top: 10, left: 10, right: 10, display: 'flex', justifyContent: 'space-between', zIndex: 10 }}>
-                <IconButton onClick={() => navigate(-1)} sx={{ bgcolor: 'rgba(17,13,16,0.6)', backdropFilter: 'blur(4px)', color: 'white', '&:hover':{bgcolor:'rgba(17,13,16,0.9)'} }}><ArrowBackIcon /></IconButton>
-                <Stack direction="row" spacing={1}>
+            {/* Container mit pointerEvents: 'none' verhindert, dass der Glassmorphismus den Swiper Swipe-Befehl blockiert */}
+            <Box sx={{ position: 'absolute', top: 10, left: 10, right: 10, display: 'flex', justifyContent: 'space-between', zIndex: 10, pointerEvents: 'none' }}>
+                <IconButton onClick={() => navigate(-1)} sx={{ pointerEvents: 'auto', bgcolor: 'rgba(17,13,16,0.6)', backdropFilter: 'blur(4px)', color: 'white', '&:hover':{bgcolor:'rgba(17,13,16,0.9)'} }}><ArrowBackIcon /></IconButton>
+                <Stack direction="row" spacing={1} sx={{ pointerEvents: 'auto' }}>
                     {isEditing && (
                         <IconButton component="label" sx={{ bgcolor: PALETTE.accents.blue, color: '#000', '&:hover':{bgcolor: '#FFF'} }}><AddAPhotoIcon /><input type="file" hidden accept="image/*" multiple onChange={onAddImages} /></IconButton>
                     )}
@@ -64,7 +65,7 @@ export default function ItemGallery({ item, isEditing, onToggleEdit, onSave, onW
                 <Box sx={{ height: '100%', bgcolor: '#000', display: 'flex', flexDirection: 'column', justifyContent: 'center', position: 'relative' }}>
                     <IconButton onClick={() => setOverlayOpen(false)} sx={{ position: 'absolute', top: 16, right: 16, color: PALETTE.primary.main, zIndex: 20 }}><CloseIcon /></IconButton>
                     {images.length > 0 && (
-                        <Swiper modules={[Navigation, Pagination]} initialSlide={currentFullscreenIndex} spaceBetween={20} slidesPerView={1} navigation pagination={{ clickable: true }} style={swiperStyles}>
+                        <Swiper grabCursor={true} allowTouchMove={true} modules={[Navigation, Pagination]} initialSlide={currentFullscreenIndex} spaceBetween={20} slidesPerView={1} navigation pagination={{ clickable: true }} style={swiperStyles}>
                             {images.map((img, idx) => (
                                 <SwiperSlide key={idx} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}><img src={img} style={{ width: '100%', maxHeight: '100vh', objectFit: 'contain' }} alt="Fullscreen" /></SwiperSlide>
                             ))}

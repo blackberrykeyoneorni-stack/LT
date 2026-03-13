@@ -3,6 +3,7 @@ import { createTheme } from '@mui/material/styles';
 /**
  * ANDROID 16 / MATERIAL DESIGN 3 - SYNTHETIC SISSY (SHEER NYLON)
  * Integriert die Sissy/Bimbo Farbpalette exakt in die M3-Token-Struktur.
+ * BEINHALTET: Subliminales Conditioning & Kinetische Unruhe (Neon Flicker).
  */
 
 const m3Tokens = {
@@ -66,22 +67,30 @@ export const materialTheme = createTheme({
   },
   typography: {
     fontFamily: '"Roboto", "Helvetica", "Arial", sans-serif',
-    h4: { fontSize: '32px', lineHeight: '40px', fontWeight: 700 }, // Etwas dominanter im Sissy-Theme
+    h4: { fontSize: '32px', lineHeight: '40px', fontWeight: 700 }, 
     h5: { fontSize: '28px', lineHeight: '36px', fontWeight: 700 },
     h6: { fontSize: '24px', lineHeight: '32px', fontWeight: 700 },
     subtitle1: { fontSize: '16px', lineHeight: '24px', fontWeight: 500, letterSpacing: '0.15px' },
     subtitle2: { fontSize: '14px', lineHeight: '20px', fontWeight: 500, letterSpacing: '0.1px' },
     body1: { fontSize: '16px', lineHeight: '24px', letterSpacing: '0.5px' },
     body2: { fontSize: '14px', lineHeight: '20px', letterSpacing: '0.25px' },
-    button: { textTransform: 'uppercase', fontWeight: 700, letterSpacing: '1px' }, // Buttons lauter
+    button: { textTransform: 'uppercase', fontWeight: 700, letterSpacing: '1px' }, 
   },
   shape: {
     borderRadius: 16, 
   },
   components: {
-    // --- GLOBAL: NYLON MESH (Maschenmuster) ---
+    // --- GLOBAL: NYLON MESH & SUBLIMINAL WATERMARK ---
     MuiCssBaseline: {
       styleOverrides: {
+        '@keyframes flicker': {
+          '0%, 19%, 21%, 23%, 25%, 54%, 56%, 100%': { opacity: 1 },
+          '20%, 22%, 24%, 55%': { opacity: 0.85 }
+        },
+        '@keyframes marquee': {
+          '0%': { backgroundPosition: '0px 0px' },
+          '100%': { backgroundPosition: '-2200px 0px' }
+        },
         body: {
           backgroundColor: m3Tokens.background,
           // Der "Sheer Nylon" Maschen-Effekt via CSS Gradients
@@ -91,10 +100,26 @@ export const materialTheme = createTheme({
           `,
           backgroundSize: '3px 3px',
           color: m3Tokens.onSurface,
+          position: 'relative',
+          overflowX: 'hidden',
+          // Das Subliminale Bimbo-Conditioning
+          '&::after': {
+            content: '""',
+            position: 'fixed',
+            top: '-50%', left: '-50%', right: '-50%', bottom: '-50%',
+            zIndex: -1,
+            pointerEvents: 'none',
+            opacity: 0.03, // Kaum sichtbare Hypno-Ebene
+            transform: 'rotate(-25deg)',
+            // Endlos-SVG-String (URL encoded für Kompatibilität)
+            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='2200' height='100'%3E%3Ctext x='0' y='50' font-size='32' font-weight='900' fill='%23FF007F' font-family='sans-serif'%3ENYLON-HURE • SISSY • UMGEPOLT • WÄSCHE-SCHLAMPE • GEFÜGIG • NUR EIN SPIELZEUG • SATIN-NUTTE • VERWEIBLICHT • EIGENTUM • ANALGEIL • SPERMA-SCHLAMPE • 15 DEN • %3C/text%3E%3C/svg%3E")`,
+            backgroundRepeat: 'repeat',
+            animation: 'marquee 40s linear infinite',
+          }
         }
       }
     },
-    // --- BUTTONS: PILL SHAPE & NEON GLOW ---
+    // --- BUTTONS: PILL SHAPE & NEON FLICKER ---
     MuiButton: {
       styleOverrides: {
         root: {
@@ -109,6 +134,7 @@ export const materialTheme = createTheme({
           backgroundColor: m3Tokens.primary,
           color: m3Tokens.onPrimary,
           boxShadow: `0 4px 14px rgba(255, 0, 127, 0.4)`, // Matte Neon Pink Glow
+          animation: 'flicker 6s infinite', // Kinetische Unruhe
           '&:hover': { 
               backgroundColor: m3Tokens.primary,
               boxShadow: `0 6px 20px rgba(255, 0, 127, 0.6)`,
@@ -143,7 +169,7 @@ export const materialTheme = createTheme({
             root: {
                 borderRadius: '28px', 
                 backgroundColor: m3Tokens.surfaceContainerHigh,
-                backdropFilter: 'blur(16px)', // Intensiver Blur für Dialoge
+                backdropFilter: 'blur(16px)', 
                 backgroundImage: 'none',
                 border: `1px solid ${m3Tokens.outline}`,
                 boxShadow: `0 0 40px rgba(255, 0, 127, 0.15)`,
