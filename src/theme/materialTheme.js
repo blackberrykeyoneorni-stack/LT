@@ -100,8 +100,6 @@ export const materialTheme = createTheme({
           `,
           backgroundSize: '3px 3px',
           color: m3Tokens.onSurface,
-          position: 'relative',
-          overflowX: 'hidden',
           // Das Subliminale Bimbo-Conditioning
           '&::after': {
             content: '""',
