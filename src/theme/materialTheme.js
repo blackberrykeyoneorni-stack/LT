@@ -1,52 +1,10 @@
 import { createTheme } from '@mui/material/styles';
+import { m3Tokens } from './obsidianDesign';
 
 /**
  * ANDROID 16 / MATERIAL DESIGN 3 - SYNTHETIC SISSY (SHEER NYLON)
- * Integriert die Sissy/Bimbo Farbpalette exakt in die M3-Token-Struktur.
- * BEINHALTET: Subliminales Conditioning & Kinetische Unruhe (Neon Flicker).
+ * Importiert die m3Tokens aus obsidianDesign.js, um das Grid stabil zu halten.
  */
-
-const m3Tokens = {
-  // PRIMARY: Bimbo Pink / Hot Pink
-  primary: '#FF007F',          
-  onPrimary: '#000000',        // Maximaler Kontrast (Schwarz auf Pink)
-  primaryContainer: 'rgba(255, 0, 127, 0.2)', 
-  onPrimaryContainer: '#FFB6C1', 
-
-  // SECONDARY: Synthetic Cyan
-  secondary: '#00E5FF',        
-  onSecondary: '#000000',
-  secondaryContainer: 'rgba(0, 229, 255, 0.2)',
-  onSecondaryContainer: '#CCFFFF',
-
-  // TERTIARY: Submissive Lavender
-  tertiary: '#DDA0DD',         
-  onTertiary: '#000000',
-  tertiaryContainer: 'rgba(221, 160, 221, 0.2)',
-  onTertiaryContainer: '#F8E0F8',
-
-  // ERROR: Vulgar Red
-  error: '#FF0040',            
-  onError: '#FFFFFF',
-  errorContainer: 'rgba(255, 0, 64, 0.2)',
-  onErrorContainer: '#FFB3C6',
-
-  // SURFACES: Denier Black (Nylon-Optik)
-  background: '#110D10',       // Tiefes, fast schwarzes Nylon
-  onBackground: '#FFFFFF',
-  surface: '#110D10',
-  onSurface: '#FFFFFF',
-  onSurfaceVariant: 'rgba(255, 182, 193, 0.8)', // Sissy Pink für Sekundärtexte
-  
-  // SURFACE CONTAINER (Für Glassmorphismus vorbereitet)
-  surfaceContainerLow: 'rgba(17, 13, 16, 0.4)',   
-  surfaceContainer: 'rgba(17, 13, 16, 0.7)',      
-  surfaceContainerHigh: 'rgba(17, 13, 16, 0.85)',  
-  surfaceContainerHighest: 'rgba(255, 0, 127, 0.05)', // Zart rosa eingefärbt für Inputs
-
-  outline: 'rgba(255, 0, 127, 0.3)', // Pinkish seam
-  outlineVariant: 'rgba(255, 0, 127, 0.15)',
-};
 
 export const materialTheme = createTheme({
   palette: {
@@ -93,14 +51,14 @@ export const materialTheme = createTheme({
         },
         body: {
           backgroundColor: m3Tokens.background,
-          // Der "Sheer Nylon" Maschen-Effekt via CSS Gradients
+          // Der "Sheer Nylon" Maschen-Effekt
           backgroundImage: `
             linear-gradient(rgba(255, 0, 127, 0.03) 1px, transparent 1px),
             linear-gradient(90deg, rgba(255, 0, 127, 0.03) 1px, transparent 1px)
           `,
           backgroundSize: '3px 3px',
           color: m3Tokens.onSurface,
-          // Das Subliminale Bimbo-Conditioning
+          // Das Subliminale Bimbo-Conditioning (100% Safe URL Encoded)
           '&::after': {
             content: '""',
             position: 'fixed',
@@ -109,8 +67,7 @@ export const materialTheme = createTheme({
             pointerEvents: 'none',
             opacity: 0.03, // Kaum sichtbare Hypno-Ebene
             transform: 'rotate(-25deg)',
-            // Endlos-SVG-String (URL encoded für Kompatibilität)
-            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='2200' height='100'%3E%3Ctext x='0' y='50' font-size='32' font-weight='900' fill='%23FF007F' font-family='sans-serif'%3ENYLON-HURE • SISSY • UMGEPOLT • WÄSCHE-SCHLAMPE • GEFÜGIG • NUR EIN SPIELZEUG • SATIN-NUTTE • VERWEIBLICHT • EIGENTUM • ANALGEIL • SPERMA-SCHLAMPE • 15 DEN • %3C/text%3E%3C/svg%3E")`,
+            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='2200' height='100'%3E%3Ctext x='0' y='50' font-size='32' font-weight='900' fill='%23FF007F' font-family='sans-serif'%3ENYLON-HURE%20%E2%80%A2%20SISSY%20%E2%80%A2%20UMGEPOLT%20%E2%80%A2%20W%C3%84SCHE-SCHLAMPE%20%E2%80%A2%20GEF%C3%9CGIG%20%E2%80%A2%20NUR%20EIN%20SPIELZEUG%20%E2%80%A2%20SATIN-NUTTE%20%E2%80%A2%20VERWEIBLICHT%20%E2%80%A2%20EIGENTUM%20%E2%80%A2%20ANALGEIL%20%E2%80%A2%20SPERMA-SCHLAMPE%20%E2%80%A2%2015%20DEN%20%E2%80%A2%3C/text%3E%3C/svg%3E")`,
             backgroundRepeat: 'repeat',
             animation: 'marquee 40s linear infinite',
           }
@@ -131,8 +88,8 @@ export const materialTheme = createTheme({
         contained: {
           backgroundColor: m3Tokens.primary,
           color: m3Tokens.onPrimary,
-          boxShadow: `0 4px 14px rgba(255, 0, 127, 0.4)`, // Matte Neon Pink Glow
-          animation: 'flicker 6s infinite', // Kinetische Unruhe
+          boxShadow: `0 4px 14px rgba(255, 0, 127, 0.4)`, 
+          animation: 'flicker 6s infinite', 
           '&:hover': { 
               backgroundColor: m3Tokens.primary,
               boxShadow: `0 6px 20px rgba(255, 0, 127, 0.6)`,
@@ -153,7 +110,7 @@ export const materialTheme = createTheme({
       styleOverrides: {
         root: {
           backgroundColor: m3Tokens.surfaceContainer,
-          backdropFilter: 'blur(12px)', // Sheer Nylon Effekt
+          backdropFilter: 'blur(12px)', 
           borderRadius: '16px', 
           backgroundImage: 'none',
           boxShadow: '0 8px 32px rgba(255, 0, 127, 0.1)',

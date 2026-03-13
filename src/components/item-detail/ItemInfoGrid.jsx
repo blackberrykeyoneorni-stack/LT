@@ -23,7 +23,15 @@ const UnifiedField = ({ label, value, icon, isEditing, onChange, type = "text", 
             </Typography>
             {isEditing ? (
                 type === 'select' ? (
-                    <Select value={value || ''} onChange={onChange} variant="standard" disableUnderline displayEmpty MenuProps={{ disablePortal: true }} sx={{ color: '#fff', fontSize: '1rem', fontWeight: 500 }}>
+                    <Select 
+                        value={value || ''} 
+                        onChange={onChange} 
+                        variant="standard" 
+                        disableUnderline 
+                        displayEmpty 
+                        // WICHTIG: disablePortal wurde HIER GELÖSCHT! Das Menü darf aus dem Drawer ausbrechen, um nicht den Bildschirm einzufrieren.
+                        sx={{ color: '#fff', fontSize: '1rem', fontWeight: 500 }}
+                    >
                         {options.map(opt => <MenuItem key={opt} value={opt}>{opt}</MenuItem>)}
                     </Select>
                 ) : type === 'rating' ? (
