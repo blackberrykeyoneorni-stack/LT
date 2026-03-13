@@ -11,7 +11,10 @@ export default function FooterActions({ onWash, onArchive }) {
                 variant="outlined" fullWidth 
                 startIcon={<LocalLaundryServiceIcon />}
                 onClick={onWash}
-                sx={{ borderColor: PALETTE.accents.blue, color: PALETTE.accents.blue, '&:hover': { bgcolor: `${PALETTE.accents.blue}10` } }}
+                sx={{ 
+                    borderColor: PALETTE.accents.blue, color: PALETTE.accents.blue, borderRadius: '9999px', fontWeight: 'bold',
+                    '&:hover': { bgcolor: `${PALETTE.accents.blue}10`, boxShadow: `0 0 10px ${PALETTE.accents.blue}40` } 
+                }}
             >
                 Waschen
             </Button>
@@ -19,6 +22,10 @@ export default function FooterActions({ onWash, onArchive }) {
                 variant="outlined" color="error" fullWidth 
                 startIcon={<DeleteIcon />}
                 onClick={onArchive}
+                sx={{
+                    borderColor: PALETTE.accents.red, color: PALETTE.accents.red, borderRadius: '9999px', fontWeight: 'bold',
+                    '&:hover': { bgcolor: `${PALETTE.accents.red}10`, boxShadow: `0 0 10px ${PALETTE.accents.red}40` }
+                }}
             >
                 Archiv
             </Button>

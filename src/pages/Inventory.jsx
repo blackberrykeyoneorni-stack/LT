@@ -91,11 +91,11 @@ export default function Inventory() {
   const [filterCategory, setFilterCategory] = usePersistentState('inv_filterCategory', 'All');
   const [filterBrand, setFilterBrand] = usePersistentState('inv_filterBrand', 'All');
   const [filterMaterial, setFilterMaterial] = usePersistentState('inv_filterMaterial', 'All'); 
-  const [filterLocation, setFilterLocation] = usePersistentState('inv_filterLocation', 'All'); // NEU
-  const [filterMinRating, setFilterMinRating] = usePersistentState('inv_filterMinRating', '0'); // String für LocalStorage Sicherheit
+  const [filterLocation, setFilterLocation] = usePersistentState('inv_filterLocation', 'All'); 
+  const [filterMinRating, setFilterMinRating] = usePersistentState('inv_filterMinRating', '0'); 
   const [sortBy, setSortBy] = usePersistentState('inv_sortBy', 'dateDesc');
   
-  // Temporärer State für NFC Scans (überschreibt Filter temporär)
+  // Temporärer State für NFC Scans
   const [scannedLocation, setScannedLocation] = useState(null);
 
   // LOAD SETTINGS
@@ -132,8 +132,6 @@ export default function Inventory() {
   useEffect(() => {
       if (locationRouter.state?.filterLocation) {
           setScannedLocation(locationRouter.state.filterLocation);
-          // Bei NFC Scan setzen wir temporäre Filter zurück, damit man das Ergebnis sieht
-          // Persistent States werden aber nicht gelöscht, nur temporär ignoriert durch die Logik unten
       }
   }, [locationRouter]);
 
@@ -145,10 +143,8 @@ export default function Inventory() {
   }, [imagePreview]);
 
   // --- COMBINED LOCATIONS ---
-  // Kombiniert gespeicherte Locations aus Settings mit tatsächlich genutzten Locations aus Items
   const availableLocations = useMemo(() => {
       const fromSettings = dropdowns.locations || [];
-      // KORREKTUR: Liest nun primär `location` und fällt auf `storageLocation` zurück
       const fromItems = items.map(i => i.location || i.storageLocation).filter(l => l && l.trim() !== '');
       return [...new Set([...fromSettings, ...fromItems])].sort();
   }, [dropdowns.locations, items]);
@@ -175,16 +171,14 @@ export default function Inventory() {
       }
       setIsSaving(true);
       try {
-        let finalImageUrl = newItem.imageUrl; // Fallback auf existierenden Wert
+        let finalImageUrl = newItem.imageUrl; 
 
-        // 1. Upload Image if selected
         if (imageFile) {
             const storageRef = ref(storage, `users/${currentUser.uid}/items/${Date.now()}_${imageFile.name}`);
             const snapshot = await uploadBytes(storageRef, imageFile);
             finalImageUrl = await getDownloadURL(snapshot.ref);
         }
 
-        // 2. Create Firestore Doc
         await addDoc(collection(db, `users/${currentUser.uid}/items`), {
             ...newItem,
             imageUrl: finalImageUrl,
@@ -196,7 +190,6 @@ export default function Inventory() {
             lastWorn: null
         });
 
-        // 3. Reset
         setAddItemOpen(false);
         setNewItem(defaultNewItem);
         setImageFile(null);
@@ -214,7 +207,6 @@ export default function Inventory() {
   const getRecoveryInfo = (item) => {
       if (!item) return null;
       
-      // Lockerer Kategorie-Check (Nylon, Strumpf, Tights...)
       const cat = (item.mainCategory || '').toLowerCase();
       const sub = (item.subCategory || '').toLowerCase();
       const isNylonRelated = cat.includes('nylon') || cat.includes('strumpf') || cat.includes('tights') || 
@@ -222,14 +214,11 @@ export default function Inventory() {
 
       if (!isNylonRelated) return null;
 
-      // Robuste Datumskonvertierung
       let lastWornDate = null;
       if (item.lastWorn) {
-        // Falls Firestore Timestamp
         if (typeof item.lastWorn.toDate === 'function') {
             lastWornDate = item.lastWorn.toDate();
         } else {
-            // Falls String oder Date Objekt
             lastWornDate = new Date(item.lastWorn);
         }
       }
@@ -246,15 +235,12 @@ export default function Inventory() {
   useEffect(() => {
     let res = [...items];
     
-    // Prio 1: NFC Scan Location
     if (scannedLocation) {
-        // KORREKTUR: Berücksichtigt location und storageLocation
         res = res.filter(i => {
             const loc = i.location || i.storageLocation;
             return loc && loc.trim() === scannedLocation.trim();
         });
     } else {
-        // Prio 2: Manuelle Filter
         if (filterStatus === 'active') {
             res = res.filter(i => (i.status === 'active' || !i.status));
         } else if (filterStatus !== 'All') {
@@ -265,16 +251,13 @@ export default function Inventory() {
         if (filterBrand !== 'All') res = res.filter(i => i.brand === filterBrand);
         if (filterMaterial !== 'All') res = res.filter(i => i.material === filterMaterial); 
         
-        // NEU: Lagerort Filter
         if (filterLocation !== 'All') {
-            // KORREKTUR: Berücksichtigt location und storageLocation
             res = res.filter(i => (i.location || i.storageLocation) === filterLocation);
         }
 
         if (parseInt(filterMinRating) > 0) res = res.filter(i => i.condition >= parseInt(filterMinRating));
     }
     
-    // Sortierung mit Crash-Schutz
     res.sort((a, b) => {
       switch (sortBy) {
         case 'dateDesc': return (safeDate(b.purchaseDate) || 0) - (safeDate(a.purchaseDate) || 0);
@@ -311,9 +294,9 @@ export default function Inventory() {
                 <Typography variant="h4" sx={DESIGN_TOKENS.textGradient}>Inventar ({filteredItems.length})</Typography>
                 <Box>
                     <IconButton color="primary" onClick={startGlobalScan} disabled={nfcScanning}>
-                        {nfcScanning ? <CircularProgress size={24} /> : <NfcIcon />}
+                        {nfcScanning ? <CircularProgress size={24} color="primary" /> : <NfcIcon />}
                     </IconButton>
-                    <IconButton onClick={() => setFilterOpen(true)}><FilterListIcon /></IconButton>
+                    <IconButton onClick={() => setFilterOpen(true)} sx={{ color: PALETTE.text.primary }}><FilterListIcon /></IconButton>
                 </Box>
           </Box>
 
@@ -321,7 +304,6 @@ export default function Inventory() {
           <Box sx={{ mb: 2, px: 2, display: 'flex', gap: 1, overflowX: 'auto', pb: 1 }}>
                 {scannedLocation && <Chip icon={<Inventory2Icon />} label={`Ort: ${scannedLocation}`} onDelete={() => { setScannedLocation(null); }} sx={DESIGN_TOKENS.chip.active}/>}
                 
-                {/* Zeige Chips nur wenn nicht All */}
                 {!scannedLocation && (
                     <>
                         {filterCategory !== 'All' && <Chip label={filterCategory} onDelete={() => setFilterCategory('All')} sx={DESIGN_TOKENS.chip.active} />}
@@ -332,34 +314,31 @@ export default function Inventory() {
                 )}
           </Box>
 
-          {/* GRID */}
+          {/* GRID (THE CATALOG OF OBJECTIFICATION) */}
           <Grid container spacing={2} sx={{ px: 2 }}>
             {filteredItems.map((item) => {
             const recoveryInfo = getRecoveryInfo(item);
             const isResting = recoveryInfo?.isResting;
             const imgUrl = getImage(item);
-            const catColors = getCategoryColor(item.mainCategory);
             const isWashing = item.status === 'washing';
             const isArchived = item.status === 'archived';
 
-            let borderColor = catColors.border;
-            let background = catColors.bg;
+            // Base Style for "Sheer Nylon" Cards
+            let borderColor = 'rgba(255, 0, 127, 0.3)'; // Sheer pink seam
             let imgFilter = 'none';
-            
-            // --- ID CHIP STYLING LOGIC ---
             let idChipBg = 'rgba(0,0,0,0.6)';
-            let idChipColor = 'white';
+            let idChipColor = PALETTE.accents.blue; // Synthetic Cyan
 
             if (isArchived) {
                 idChipBg = PALETTE.accents.red;
+                idChipColor = '#FFF';
                 borderColor = PALETTE.accents.red;
-                background = 'rgba(20, 0, 0, 0.4)';
                 imgFilter = 'grayscale(1)';
             } 
             else if (isWashing) {
-                idChipBg = '#2979ff';
-                borderColor = '#2979ff';
-                background = `rgba(41, 121, 255, 0.1)`;
+                idChipBg = PALETTE.accents.blue;
+                idChipColor = '#000';
+                borderColor = PALETTE.accents.blue;
                 imgFilter = 'grayscale(0.8)';
             }
             else if (isResting) {
@@ -371,15 +350,15 @@ export default function Inventory() {
                 <Grid item xs={6} sm={4} md={3} key={item.id} component={motion.div} variants={MOTION.listItem} layout>
                     <Card sx={{ 
                         height: '100%', display: 'flex', flexDirection: 'column',
-                        ...DESIGN_TOKENS.glassCard, borderColor: borderColor, background: background,
+                        ...DESIGN_TOKENS.glassCard, borderColor: borderColor,
                     }}>
                         <CardActionArea sx={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'stretch' }} onClick={() => navigate('/item/' + item.id)}>
-                        <Box sx={{ position: 'relative', pt: '100%', bgcolor: 'rgba(0,0,0,0.2)', overflow: 'hidden' }}>
+                        <Box sx={{ position: 'relative', pt: '100%', bgcolor: 'rgba(0,0,0,0.4)', overflow: 'hidden' }}>
                             {imgUrl ? (
                                 <CardMedia component="img" image={imgUrl} alt={getDisplayName(item)} sx={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', objectFit: 'cover', filter: imgFilter }} />
-                            ) : (<CheckroomIcon sx={{ position: 'absolute', top: '35%', left: '35%', fontSize: 40, opacity: 0.3 }} />)}
+                            ) : (<CheckroomIcon sx={{ position: 'absolute', top: '35%', left: '35%', fontSize: 40, opacity: 0.3, color: PALETTE.primary.main }} />)}
                             
-                            {/* --- MODIFIED ID CHIP --- */}
+                            {/* --- NEON BARCODE ID CHIP --- */}
                             {item.customId && (
                                 <Chip 
                                     icon={<FingerprintIcon style={{ fontSize: 14, color: idChipColor }} />} 
@@ -392,15 +371,16 @@ export default function Inventory() {
                                         bgcolor: idChipBg, 
                                         backdropFilter: 'blur(4px)', 
                                         color: idChipColor, 
-                                        fontWeight: 'bold',
-                                        height: '22px',       // Kleiner als Standard
-                                        fontSize: '0.7rem',  // Kleinere Schrift
+                                        fontWeight: 800,
+                                        border: `1px solid ${idChipColor}40`,
+                                        height: '22px',       
+                                        fontSize: '0.7rem',  
                                         '& .MuiChip-icon': { marginLeft: '4px' } 
                                     }} 
                                 />
                             )}
 
-                            {isWashing && <LocalLaundryServiceIcon sx={{ position: 'absolute', bottom: 8, right: 8, color: '#2979ff', filter: 'drop-shadow(0 0 4px black)' }} />}
+                            {isWashing && <LocalLaundryServiceIcon sx={{ position: 'absolute', bottom: 8, right: 8, color: PALETTE.accents.blue, filter: `drop-shadow(0 0 6px ${PALETTE.accents.blue})` }} />}
                             
                             {/* --- RECOVERY CHIP --- */}
                             {isResting && item.status === 'active' && (
@@ -425,11 +405,13 @@ export default function Inventory() {
                             )}
                         </Box>
                         <CardContent sx={{ flexGrow: 1, p: 1.5 }}>
-                            <Typography variant="subtitle2" noWrap sx={{ fontWeight: 'bold' }}>{getDisplayName(item)}</Typography>
-                            <Typography variant="caption" color="text.secondary" noWrap display="block">{item.mainCategory}</Typography>
+                            <Typography variant="subtitle2" noWrap sx={{ fontWeight: 800, color: '#FFF' }}>{getDisplayName(item)}</Typography>
+                            <Typography variant="caption" noWrap display="block" sx={{ color: PALETTE.text.secondary, textTransform: 'uppercase', letterSpacing: 0.5, fontSize: '0.65rem' }}>
+                                {item.mainCategory}
+                            </Typography>
                             <Stack direction="row" spacing={1} sx={{ mt: 1, alignItems: 'center', justifyContent: 'space-between' }}>
                                 <Chip label={item.brand} size="small" variant="outlined" sx={{ fontSize: '0.65rem', height: 20, ...DESIGN_TOKENS.chip.default }} />
-                                <Rating value={item.condition} readOnly size="small" max={5} sx={{ fontSize: '0.8rem' }} />
+                                <Rating value={item.condition} readOnly size="small" max={5} sx={{ fontSize: '0.8rem', color: PALETTE.primary.main }} />
                             </Stack>
                         </CardContent>
                         </CardActionArea>
@@ -440,7 +422,7 @@ export default function Inventory() {
           </Grid>
       </motion.div>
       
-      {/* --- ADD ITEM DRAWER (Zentralisiertes Bottom Sheet) --- */}
+      {/* --- ADD ITEM DRAWER --- */}
       <Drawer 
         anchor="bottom" 
         open={addItemOpen} 
@@ -448,105 +430,70 @@ export default function Inventory() {
         PaperProps={DESIGN_TOKENS.bottomSheet}
       >
         <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-            <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+            <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255, 0, 127, 0.2)' }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <AddIcon color="primary" />
-                    <Typography variant="h6">Neues Item erfassen</Typography>
+                    <AddIcon sx={{ color: PALETTE.primary.main }} />
+                    <Typography variant="h6" sx={{ color: PALETTE.primary.main, textTransform: 'uppercase', fontWeight: 800 }}>Neues Item erfassen</Typography>
                 </Box>
-                <IconButton onClick={() => setAddItemOpen(false)}><CloseIcon /></IconButton>
+                <IconButton onClick={() => setAddItemOpen(false)} sx={{ color: PALETTE.text.primary }}><CloseIcon /></IconButton>
             </Box>
 
             <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 2 }}>
                 <Container maxWidth="sm" disableGutters>
                     
-                    {/* IMAGE UPLOAD UI */}
                     <Box sx={{ mb: 3, textAlign: 'center' }}>
-                        <input
-                            accept="image/*"
-                            style={{ display: 'none' }}
-                            id="raised-button-file"
-                            type="file"
-                            onChange={handleImageChange}
-                        />
+                        <input accept="image/*" style={{ display: 'none' }} id="raised-button-file" type="file" onChange={handleImageChange} />
                         <label htmlFor="raised-button-file">
                             <Box sx={{
-                                width: '100%',
-                                height: 200,
-                                borderRadius: 2,
+                                width: '100%', height: 200, borderRadius: 4,
                                 border: `2px dashed ${imagePreview ? PALETTE.accents.green : PALETTE.primary.main}`,
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                cursor: 'pointer',
-                                overflow: 'hidden',
-                                position: 'relative',
-                                bgcolor: 'rgba(0,0,0,0.2)',
-                                transition: 'all 0.2s',
-                                '&:hover': { bgcolor: 'rgba(255,255,255,0.05)' }
+                                display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+                                overflow: 'hidden', position: 'relative', bgcolor: 'rgba(0,0,0,0.4)',
+                                transition: 'all 0.2s', '&:hover': { bgcolor: 'rgba(255,0,127,0.1)' }
                             }}>
                                 {imagePreview ? (
                                     <img src={imagePreview} alt="Preview" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
                                 ) : (
                                     <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, p: 2 }}>
                                             <CloudUploadIcon sx={{ fontSize: 40, color: PALETTE.primary.main }} />
-                                            <Typography variant="body2" color="text.secondary">
-                                                Bild auswählen oder aufnehmen
-                                            </Typography>
+                                            <Typography variant="body2" sx={{ color: PALETTE.text.secondary, textTransform: 'uppercase' }}>Bild hochladen</Typography>
                                     </Box>
                                 )}
                             </Box>
                         </label>
                         {imagePreview && (
-                            <Button 
-                                size="small" 
-                                color="error" 
-                                startIcon={<DeleteIcon />} 
-                                onClick={handleRemoveImage} 
-                                sx={{ mt: 1 }}
-                            >
-                                Bild entfernen
-                            </Button>
+                            <Button size="small" color="error" startIcon={<DeleteIcon />} onClick={handleRemoveImage} sx={{ mt: 1 }}>Bild entfernen</Button>
                         )}
                     </Box>
 
-                    <Divider sx={{ mb: 3, borderColor: 'rgba(255,255,255,0.1)' }} />
+                    <Divider sx={{ mb: 3, borderColor: 'rgba(255, 0, 127, 0.1)' }} />
                     
-                    {/* REUSED ITEM GRID */}
-                    <ItemInfoGrid 
-                        isEditing={true}
-                        formData={newItem}
-                        setFormData={setNewItem}
-                        dropdowns={dropdowns}
-                        item={{}}
-                    />
+                    <ItemInfoGrid isEditing={true} formData={newItem} setFormData={setNewItem} dropdowns={dropdowns} item={{}} />
                 </Container>
             </Box>
 
-            <Box sx={{ p: 2, borderTop: '1px solid rgba(255,255,255,0.1)', bgcolor: 'rgba(0,0,0,0.4)' }}>
+            <Box sx={{ p: 2, borderTop: '1px solid rgba(255, 0, 127, 0.2)', bgcolor: 'rgba(0,0,0,0.6)' }}>
                 <Button 
-                    variant="contained" 
-                    fullWidth 
-                    size="large"
+                    variant="contained" fullWidth size="large"
                     startIcon={isSaving ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
-                    onClick={handleSaveItem}
-                    disabled={isSaving}
-                    sx={{ ...DESIGN_TOKENS.buttonGradient, height: 56 }}
+                    onClick={handleSaveItem} disabled={isSaving}
+                    sx={{ ...DESIGN_TOKENS.buttonGradient, height: 56, borderRadius: '9999px' }}
                 >
-                    {isSaving ? "Lade hoch & Speichere..." : "Item Hinzufügen"}
+                    {isSaving ? "Speichere..." : "Item Hinzufügen"}
                 </Button>
             </Box>
         </Box>
       </Drawer>
 
-      {/* --- FILTER DRAWER (PERSISTENT & WITH LOCATION) --- */}
-      <Drawer anchor="right" open={filterOpen} onClose={() => setFilterOpen(false)} PaperProps={{ sx: { bgcolor: '#121212', borderLeft: '1px solid #333' } }}>
+      {/* --- FILTER DRAWER --- */}
+      <Drawer anchor="right" open={filterOpen} onClose={() => setFilterOpen(false)} PaperProps={{ sx: { bgcolor: 'rgba(17, 13, 16, 0.95)', backdropFilter: 'blur(16px)', borderLeft: `1px solid rgba(255,0,127,0.3)` } }}>
         <Box sx={{ width: 280, p: 3, pt: 8, height: '100%', overflowY: 'auto' }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
-              <Typography variant="h6">Filtern & Sortieren</Typography>
-              <IconButton onClick={() => setFilterOpen(false)}><CloseIcon /></IconButton>
+              <Typography variant="h6" sx={{ color: PALETTE.primary.main, textTransform: 'uppercase', fontWeight: 800 }}>Filtern & Sortieren</Typography>
+              <IconButton onClick={() => setFilterOpen(false)} sx={{ color: PALETTE.text.primary }}><CloseIcon /></IconButton>
           </Box>
           
-          <TextField select fullWidth size="small" margin="dense" label="Sortierung" value={sortBy} onChange={e => setSortBy(e.target.value)}>
+          <TextField select fullWidth size="small" margin="dense" label="Sortierung" value={sortBy} onChange={e => setSortBy(e.target.value)} sx={DESIGN_TOKENS.inputField}>
             <MenuItem value="dateDesc">Neueste zuerst</MenuItem>
             <MenuItem value="dateAsc">Älteste zuerst</MenuItem>
             <MenuItem value="priceDesc">Preis (Hoch {'>'} Niedrig)</MenuItem>
@@ -555,55 +502,45 @@ export default function Inventory() {
             <MenuItem value="nameAsc">Name A-Z</MenuItem>
           </TextField>
 
-          <Typography variant="subtitle2" color="primary" sx={{ mt: 3, mb: 1 }}>Filter</Typography>
+          <Typography variant="subtitle2" sx={{ mt: 3, mb: 1, color: PALETTE.text.secondary, textTransform: 'uppercase', letterSpacing: 1 }}>Filter</Typography>
           
-          <TextField select fullWidth label="Status" margin="dense" size="small" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
+          <TextField select fullWidth label="Status" margin="dense" size="small" value={filterStatus} onChange={e => setFilterStatus(e.target.value)} sx={DESIGN_TOKENS.inputField}>
               <MenuItem value="active">Verfügbar</MenuItem>
               <MenuItem value="All">Alle</MenuItem>
               <MenuItem value="washing">In der Wäsche</MenuItem>
               <MenuItem value="archived">Archiviert</MenuItem>
           </TextField>
 
-          {/* NEUER LAGERORT FILTER */}
-          <TextField select fullWidth label="Lagerort" margin="dense" size="small" value={filterLocation} onChange={e => setFilterLocation(e.target.value)}>
+          <TextField select fullWidth label="Lagerort" margin="dense" size="small" value={filterLocation} onChange={e => setFilterLocation(e.target.value)} sx={DESIGN_TOKENS.inputField}>
               <MenuItem value="All">Alle Orte</MenuItem>
-              {availableLocations.map(loc => (
-                  <MenuItem key={loc} value={loc}>{loc}</MenuItem>
-              ))}
+              {availableLocations.map(loc => (<MenuItem key={loc} value={loc}>{loc}</MenuItem>))}
           </TextField>
 
-          <TextField select fullWidth label="Kategorie" margin="dense" size="small" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
+          <TextField select fullWidth label="Kategorie" margin="dense" size="small" value={filterCategory} onChange={e => setFilterCategory(e.target.value)} sx={DESIGN_TOKENS.inputField}>
               <MenuItem value="All">Alle</MenuItem>
               {categories.map(c => <MenuItem key={c} value={c}>{c}</MenuItem>)}
           </TextField>
 
-          <TextField select fullWidth label="Marke" margin="dense" size="small" value={filterBrand} onChange={e => setFilterBrand(e.target.value)}>
+          <TextField select fullWidth label="Marke" margin="dense" size="small" value={filterBrand} onChange={e => setFilterBrand(e.target.value)} sx={DESIGN_TOKENS.inputField}>
               <MenuItem value="All">Alle Marken</MenuItem>
               {dropdowns.brands.map(b => <MenuItem key={b} value={b}>{b}</MenuItem>)}
           </TextField>
 
-          <TextField select fullWidth label="Material" margin="dense" size="small" value={filterMaterial} onChange={e => setFilterMaterial(e.target.value)}>
+          <TextField select fullWidth label="Material" margin="dense" size="small" value={filterMaterial} onChange={e => setFilterMaterial(e.target.value)} sx={DESIGN_TOKENS.inputField}>
               <MenuItem value="All">Alle Materialien</MenuItem>
               {dropdowns.materials.map(m => <MenuItem key={m} value={m}>{m}</MenuItem>)}
           </TextField>
 
-          <Button variant="outlined" fullWidth sx={{ mt: 4 }} onClick={() => { 
-              // Reset to defaults
-              setFilterStatus('active'); 
-              setFilterCategory('All'); 
-              setFilterBrand('All'); 
-              setFilterMaterial('All'); 
-              setFilterLocation('All');
-              setFilterMinRating('0'); 
-              setSortBy('dateDesc'); 
-              setScannedLocation(null); 
+          <Button variant="outlined" fullWidth sx={{ mt: 4, ...DESIGN_TOKENS.buttonSecondary }} onClick={() => { 
+              setFilterStatus('active'); setFilterCategory('All'); setFilterBrand('All'); setFilterMaterial('All'); 
+              setFilterLocation('All'); setFilterMinRating('0'); setSortBy('dateDesc'); setScannedLocation(null); 
           }}>
               Zurücksetzen
           </Button>
         </Box>
       </Drawer>
 
-      <Fab color="primary" sx={{ position: 'fixed', bottom: 90, right: 20 }} onClick={() => setAddItemOpen(true)}>
+      <Fab sx={{ position: 'fixed', bottom: 90, right: 20, bgcolor: PALETTE.primary.main, color: '#000', boxShadow: `0 0 20px ${PALETTE.primary.main}80`, '&:hover': {bgcolor: PALETTE.primary.dark} }} onClick={() => setAddItemOpen(true)}>
         <AddIcon />
       </Fab>
     </Container>

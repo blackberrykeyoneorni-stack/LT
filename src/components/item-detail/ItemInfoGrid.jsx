@@ -1,5 +1,5 @@
 import React from 'react';
-import { Grid, Box, Typography, TextField, FormControl, InputLabel, Select, MenuItem, Rating, OutlinedInput, Chip, InputBase } from '@mui/material';
+import { Grid, Box, Typography, TextField, Select, MenuItem, Rating, InputBase } from '@mui/material';
 import LabelIcon from '@mui/icons-material/Label';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import BrandingWatermarkIcon from '@mui/icons-material/BrandingWatermark';
@@ -10,15 +10,15 @@ import Inventory2Icon from '@mui/icons-material/Inventory2';
 import LocationOnIcon from '@mui/icons-material/LocationOn';
 import NotesIcon from '@mui/icons-material/Notes';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
-import { PALETTE } from '../../theme/obsidianDesign';
+import { PALETTE, DESIGN_TOKENS } from '../../theme/obsidianDesign';
 
 const UnifiedField = ({ label, value, icon, isEditing, onChange, type = "text", options = [], multiline = false, rows = 1 }) => {
     return (
         <Box sx={{ 
-            p: 1.5, bgcolor: PALETTE.background.lightGlass, borderRadius: 1, height: '100%', 
-            border: `1px solid ${PALETTE.background.glassBorder}`, display: 'flex', flexDirection: 'column', justifyContent: 'center'
+            p: 1.5, ...DESIGN_TOKENS.glassCard, borderRadius: 2, height: '100%', 
+            display: 'flex', flexDirection: 'column', justifyContent: 'center'
         }}>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5, opacity: 0.7 }}>
+            <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5, color: PALETTE.text.secondary, textTransform: 'uppercase', letterSpacing: 0.5 }}>
                 {icon} {label}
             </Typography>
             {isEditing ? (
@@ -27,12 +27,12 @@ const UnifiedField = ({ label, value, icon, isEditing, onChange, type = "text", 
                         {options.map(opt => <MenuItem key={opt} value={opt}>{opt}</MenuItem>)}
                     </Select>
                 ) : type === 'rating' ? (
-                    <Rating value={parseInt(value) || 0} onChange={(e, v) => onChange({ target: { value: v } })} size="small" />
+                    <Rating value={parseInt(value) || 0} onChange={(e, v) => onChange({ target: { value: v } })} size="small" sx={{ color: PALETTE.primary.main }} />
                 ) : (
                     <InputBase value={value || ''} onChange={onChange} type={type} multiline={multiline} rows={rows} fullWidth placeholder="-" sx={{ color: '#fff', fontSize: '1rem', fontWeight: 500 }} />
                 )
             ) : (
-                type === 'rating' ? <Rating value={parseInt(value) || 0} readOnly size="small" /> : <Typography variant="body1" sx={{ fontWeight: 500, color: '#fff' }}>{type === 'date' && value ? new Date(value).toLocaleDateString() : (value || '-')}</Typography>
+                type === 'rating' ? <Rating value={parseInt(value) || 0} readOnly size="small" sx={{ color: PALETTE.primary.main }} /> : <Typography variant="body1" sx={{ fontWeight: 700, color: '#fff', textShadow: '0 0 5px rgba(255,255,255,0.2)' }}>{type === 'date' && value ? new Date(value).toLocaleDateString() : (value || '-')}</Typography>
             )}
         </Box>
     );
@@ -51,9 +51,9 @@ export default function ItemInfoGrid({ isEditing, formData, item, setFormData, d
                     <TextField label="Name" variant="outlined" fullWidth value={formData.name || ''} onChange={e => handleChange('name', e.target.value)} sx={{ '& .MuiInputBase-input': { fontSize: '1.2rem', textAlign: 'center' } }} />
                 ) : (
                     <>
-                        <Typography variant="overline" sx={{ color: PALETTE.primary.main, letterSpacing: 2, fontWeight: 'bold' }}>{displayItem.brand ? displayItem.brand.toUpperCase() : 'NO BRAND'}</Typography>
-                        <Typography variant="h4" sx={{ fontWeight: 700, mb: 0.5, textShadow: '0 2px 10px rgba(0,0,0,0.5)' }}>{displayItem.name}</Typography>
-                        <Typography variant="body1" color="text.secondary">{displayItem.model}</Typography>
+                        <Typography variant="overline" sx={{ color: PALETTE.primary.main, letterSpacing: 3, fontWeight: 900 }}>{displayItem.brand ? displayItem.brand.toUpperCase() : 'NO BRAND'}</Typography>
+                        <Typography variant="h4" sx={{ fontWeight: 800, mb: 0.5, color: '#FFF', textShadow: `0 0 15px ${PALETTE.primary.main}80` }}>{displayItem.name}</Typography>
+                        <Typography variant="body1" sx={{ color: PALETTE.text.secondary, textTransform: 'uppercase', letterSpacing: 1 }}>{displayItem.model}</Typography>
                     </>
                 )}
             </Box>
@@ -77,7 +77,7 @@ export default function ItemInfoGrid({ isEditing, formData, item, setFormData, d
                     </Box>
                 ) : (
                     <>
-                    {displayItem.notes && (<Box sx={{ p: 2, bgcolor: PALETTE.background.lightGlass, borderRadius: 2, display:'flex', gap:1 }}><NotesIcon color="action" fontSize="small" /><Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>"{displayItem.notes}"</Typography></Box>)}
+                    {displayItem.notes && (<Box sx={{ p: 2, ...DESIGN_TOKENS.glassCard, borderRadius: 2, display:'flex', gap:1 }}><NotesIcon sx={{ color: PALETTE.text.secondary, fontSize: 'small' }} /><Typography variant="body2" sx={{ color: PALETTE.text.secondary, fontStyle: 'italic' }}>"{displayItem.notes}"</Typography></Box>)}
                     </>
                 )}
             </Box>

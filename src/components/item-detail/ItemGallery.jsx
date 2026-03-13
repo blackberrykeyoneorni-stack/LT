@@ -33,7 +33,10 @@ export default function ItemGallery({ item, isEditing, onToggleEdit, onSave, onW
         : (item.images && item.images.length > 0 ? item.images : [item.imageUrl].filter(Boolean));
     
     return (
-        <Box sx={{ position: 'relative', height: 400, bgcolor: '#000', overflow: 'hidden' }}>
+        <Box sx={{ 
+            position: 'relative', height: 400, bgcolor: 'rgba(0,0,0,0.8)', overflow: 'hidden',
+            borderBottom: `1px solid rgba(255, 0, 127, 0.3)`, boxShadow: `0 4px 30px rgba(255, 0, 127, 0.2)`
+        }}>
             {images.length > 0 ? (
                 <Swiper modules={[Navigation, Pagination]} spaceBetween={0} slidesPerView={1} navigation pagination={{ clickable: true }} style={swiperStyles} loop={images.length > 1}>
                     {images.map((img, index) => (
@@ -43,23 +46,23 @@ export default function ItemGallery({ item, isEditing, onToggleEdit, onSave, onW
                     ))}
                 </Swiper>
             ) : (
-                <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', color: '#333' }}><PhotoCamera sx={{ fontSize: 60, mb: 2 }} /><Typography>Kein Bild</Typography></Box>
+                <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', color: PALETTE.primary.main }}><PhotoCamera sx={{ fontSize: 60, mb: 2, opacity: 0.5 }} /><Typography sx={{ opacity: 0.5, textTransform: 'uppercase', letterSpacing: 2 }}>Kein Bild</Typography></Box>
             )}
 
             <Box sx={{ position: 'absolute', top: 10, left: 10, right: 10, display: 'flex', justifyContent: 'space-between', zIndex: 10 }}>
-                <IconButton onClick={() => navigate(-1)} sx={{ bgcolor: 'rgba(0,0,0,0.6)', color: 'white', '&:hover':{bgcolor:'rgba(0,0,0,0.8)'} }}><ArrowBackIcon /></IconButton>
+                <IconButton onClick={() => navigate(-1)} sx={{ bgcolor: 'rgba(17,13,16,0.6)', backdropFilter: 'blur(4px)', color: 'white', '&:hover':{bgcolor:'rgba(17,13,16,0.9)'} }}><ArrowBackIcon /></IconButton>
                 <Stack direction="row" spacing={1}>
                     {isEditing && (
-                        <IconButton component="label" sx={{ bgcolor: PALETTE.accents.green, color: 'black', '&:hover':{bgcolor: PALETTE.primary.main} }}><AddAPhotoIcon /><input type="file" hidden accept="image/*" multiple onChange={onAddImages} /></IconButton>
+                        <IconButton component="label" sx={{ bgcolor: PALETTE.accents.blue, color: '#000', '&:hover':{bgcolor: '#FFF'} }}><AddAPhotoIcon /><input type="file" hidden accept="image/*" multiple onChange={onAddImages} /></IconButton>
                     )}
-                    <IconButton onClick={onWriteNFC} sx={{ bgcolor: 'rgba(0,0,0,0.6)', color: 'white', '&:hover':{bgcolor:'rgba(0,0,0,0.8)'} }}><NfcIcon /></IconButton>
-                    <IconButton onClick={isEditing ? onSave : onToggleEdit} sx={{ bgcolor: isEditing ? PALETTE.primary.main : 'rgba(0,0,0,0.6)', color: isEditing ? 'black' : 'white', '&:hover':{bgcolor: isEditing ? PALETTE.primary.dark : 'rgba(0,0,0,0.8)'} }}>{isEditing ? <SaveIcon /> : <EditIcon />}</IconButton>
+                    <IconButton onClick={onWriteNFC} sx={{ bgcolor: 'rgba(17,13,16,0.6)', backdropFilter: 'blur(4px)', color: PALETTE.accents.blue, border: `1px solid ${PALETTE.accents.blue}40`, '&:hover':{bgcolor:'rgba(17,13,16,0.9)'} }}><NfcIcon /></IconButton>
+                    <IconButton onClick={isEditing ? onSave : onToggleEdit} sx={{ bgcolor: isEditing ? PALETTE.primary.main : 'rgba(17,13,16,0.6)', backdropFilter: 'blur(4px)', color: isEditing ? '#000' : PALETTE.primary.main, border: `1px solid ${PALETTE.primary.main}40`, '&:hover':{bgcolor: isEditing ? PALETTE.primary.dark : 'rgba(17,13,16,0.9)'} }}>{isEditing ? <SaveIcon /> : <EditIcon />}</IconButton>
                 </Stack>
             </Box>
             
             <Dialog fullScreen open={overlayOpen} onClose={() => setOverlayOpen(false)}>
                 <Box sx={{ height: '100%', bgcolor: '#000', display: 'flex', flexDirection: 'column', justifyContent: 'center', position: 'relative' }}>
-                    <IconButton onClick={() => setOverlayOpen(false)} sx={{ position: 'absolute', top: 16, right: 16, color: 'white', zIndex: 20 }}><CloseIcon /></IconButton>
+                    <IconButton onClick={() => setOverlayOpen(false)} sx={{ position: 'absolute', top: 16, right: 16, color: PALETTE.primary.main, zIndex: 20 }}><CloseIcon /></IconButton>
                     {images.length > 0 && (
                         <Swiper modules={[Navigation, Pagination]} initialSlide={currentFullscreenIndex} spaceBetween={20} slidesPerView={1} navigation pagination={{ clickable: true }} style={swiperStyles}>
                             {images.map((img, idx) => (

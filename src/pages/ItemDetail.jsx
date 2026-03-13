@@ -23,7 +23,7 @@ export default function ItemDetail() {
         actions 
     } = useItemDetailLogic();
 
-    if (loading) return <Box sx={{ display: 'flex', justifyContent: 'center', mt: 10 }}><CircularProgress /></Box>;
+    if (loading) return <Box sx={{ display: 'flex', justifyContent: 'center', mt: 10 }}><CircularProgress color="primary" /></Box>;
     if (!item) return null;
 
     return (
@@ -66,7 +66,7 @@ export default function ItemDetail() {
                     {!isEditing ? (
                         <ItemStats stats={stats} />
                     ) : (
-                        <Button variant="contained" onClick={actions.save} fullWidth sx={{ mt: 3, ...DESIGN_TOKENS.buttonGradient }}>
+                        <Button variant="contained" onClick={actions.save} fullWidth sx={{ mt: 3, py: 1.5, ...DESIGN_TOKENS.buttonGradient }}>
                             Änderungen Speichern
                         </Button>
                     )}

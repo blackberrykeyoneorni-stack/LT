@@ -7,14 +7,14 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import GavelIcon from '@mui/icons-material/Gavel'; 
 import InfoIcon from '@mui/icons-material/Info'; 
 import { formatDuration } from '../../utils/formatters';
-import { PALETTE } from '../../theme/obsidianDesign';
+import { PALETTE, DESIGN_TOKENS } from '../../theme/obsidianDesign';
 
 export default function ItemHistory({ historyEvents }) {
     if (!historyEvents || historyEvents.length === 0) return null;
 
     return (
         <Box sx={{ mb: 10 }}>
-            <Typography variant="h6" gutterBottom sx={{ borderBottom: `1px solid ${PALETTE.background.glassBorder}`, pb: 1 }}>Historie</Typography>
+            <Typography variant="h6" gutterBottom sx={{ borderBottom: `1px solid ${PALETTE.background.glassBorder}`, pb: 1, color: PALETTE.primary.main, textTransform: 'uppercase', fontWeight: 800 }}>Historie</Typography>
             <Stack spacing={1}>
                 {historyEvents.map((event, idx) => {
                     let label = '';
@@ -30,15 +30,11 @@ export default function ItemHistory({ historyEvents }) {
                         color = s.type === 'instruction' ? 'secondary' : 'default';
                         icon = <AccessTimeIcon style={{ fontSize: 16 }} />;
                         
-                        // Startzeit liegt bereits als Date-Objekt in event.date vor (durch useItemDetailLogic)
                         const startTime = event.date;
-                        // Endzeit sicher parsen
                         const endTime = s.endTime ? (s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime)) : null;
 
                         if (endTime && startTime) {
                             sub = `${startTime.toLocaleDateString()}, ${startTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} - ${endTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`;
-                            
-                            // Dauer live berechnen (Ende - Start), statt gespeicherten Wert zu nutzen
                             const diffMs = endTime.getTime() - startTime.getTime();
                             const diffMins = Math.floor(diffMs / 60000);
                             durationLabel = formatDuration(diffMins);
@@ -66,16 +62,13 @@ export default function ItemHistory({ historyEvents }) {
                         icon = <DeleteIcon style={{ fontSize: 16 }} />;
                         durationLabel = 'End of Life';
                     } 
-                    // --- NEU: TZD EREIGNISSE ---
                     else if (event.type && event.type.startsWith('tzd_')) {
                         label = "Zeitloses Diktat";
-                        // Greift die formatierten Messages aus der TZDService.js ab
                         sub = event.data?.message || `${event.date.toLocaleDateString()} • Systemeingriff`;
                         color = event.data?.isPenalty ? "error" : "warning";
                         icon = <GavelIcon style={{ fontSize: 16 }} />;
                         durationLabel = 'TZD';
                     } 
-                    // --- NEU: GENERISCHER FALLBACK ---
                     else {
                         label = event.type ? event.type.toUpperCase() : "Protokoll-Ereignis";
                         sub = event.data?.message || `${event.date.toLocaleDateString()} • Status Update`;
@@ -84,13 +77,19 @@ export default function ItemHistory({ historyEvents }) {
                         durationLabel = 'Info';
                     }
 
+                    // Sissy Color Mapping for Chips
+                    const mappedColor = color === 'secondary' ? 'primary' : (color === 'info' ? 'secondary' : color);
+                    const iconColor = color === 'success' ? PALETTE.accents.green : (color === 'info' ? PALETTE.accents.blue : (color === 'error' ? PALETTE.accents.red : PALETTE.primary.main));
+
                     return (
-                        <Paper key={idx} sx={{ p: 2, bgcolor: PALETTE.background.lightGlass, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Paper key={idx} sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', ...DESIGN_TOKENS.glassCard }}>
                             <Box>
-                                <Typography variant="body2" sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 1 }}>{icon} {label}</Typography>
-                                <Typography variant="caption" color="text.secondary">{sub}</Typography>
+                                <Typography variant="body2" sx={{ fontWeight: 800, color: '#FFF', display: 'flex', alignItems: 'center', gap: 1 }}>
+                                    <span style={{ color: iconColor, display: 'flex', alignItems: 'center' }}>{icon}</span> {label}
+                                </Typography>
+                                <Typography variant="caption" sx={{ color: PALETTE.text.secondary }}>{sub}</Typography>
                             </Box>
-                            <Chip label={durationLabel} color={color} size="small" variant="outlined" />
+                            <Chip label={durationLabel} color={mappedColor} size="small" sx={{ fontWeight: 'bold', borderRadius: '6px' }} />
                         </Paper>
                     );
                 })}

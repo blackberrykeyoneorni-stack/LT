@@ -14,19 +14,19 @@ export default function ActionPanel({ isBusy, recoveryInfo, onStartSession }) {
                 <Paper sx={{ 
                     ...DESIGN_TOKENS.glassCard, 
                     p: 2, mb: 2, 
-                    borderLeft: `4px solid ${PALETTE.accents.gold}`,
+                    borderLeft: `4px solid ${PALETTE.accents.blue}`,
                     display: 'flex', flexDirection: 'column', gap: 2
                 }}>
                     <Stack direction="row" spacing={2} alignItems="center">
-                        <Avatar sx={{ bgcolor: `${PALETTE.accents.gold}22`, color: PALETTE.accents.gold }}>
+                        <Avatar sx={{ bgcolor: `${PALETTE.accents.blue}22`, color: PALETTE.accents.blue }}>
                             <HotelIcon />
                         </Avatar>
                         <Box>
-                            <Typography variant="h6" sx={{ fontSize: '1.1rem', fontWeight: 600, color: PALETTE.accents.gold }}>
+                            <Typography variant="h6" sx={{ fontSize: '1.1rem', fontWeight: 800, color: PALETTE.accents.blue, textTransform: 'uppercase' }}>
                                 Recovery Mode
                             </Typography>
-                            <Typography variant="body2" color="text.secondary">
-                                Material-Erholung. Verbleibend: <strong>{recoveryInfo.remainingHours} Std.</strong>
+                            <Typography variant="body2" sx={{ color: PALETTE.text.secondary }}>
+                                Material-Erholung. Verbleibend: <strong style={{ color: '#FFF' }}>{recoveryInfo.remainingHours} Std.</strong>
                             </Typography>
                         </Box>
                     </Stack>
@@ -36,8 +36,8 @@ export default function ActionPanel({ isBusy, recoveryInfo, onStartSession }) {
                         value={recoveryInfo.progress} 
                         sx={{ 
                             borderRadius: 1, height: 6, 
-                            bgcolor: `${PALETTE.accents.gold}22`,
-                            '& .MuiLinearProgress-bar': { backgroundColor: PALETTE.accents.gold }
+                            bgcolor: `${PALETTE.accents.blue}22`,
+                            '& .MuiLinearProgress-bar': { backgroundColor: PALETTE.accents.blue, filter: `drop-shadow(0 0 5px ${PALETTE.accents.blue})` }
                         }} 
                     />
                     
@@ -45,8 +45,9 @@ export default function ActionPanel({ isBusy, recoveryInfo, onStartSession }) {
                         variant="outlined" size="small" startIcon={<WarningAmberIcon />}
                         onClick={() => onStartSession(true)}
                         sx={{ 
-                            justifyContent: 'flex-start', color: PALETTE.accents.gold, borderColor: `${PALETTE.accents.gold}66`,
-                            '&:hover': { borderColor: PALETTE.accents.gold, bgcolor: `${PALETTE.accents.gold}11` }
+                            justifyContent: 'flex-start', color: PALETTE.accents.blue, borderColor: `${PALETTE.accents.blue}66`,
+                            borderRadius: '9999px', fontWeight: 'bold',
+                            '&:hover': { borderColor: PALETTE.accents.blue, bgcolor: `${PALETTE.accents.blue}11` }
                         }}
                     >
                         Trotzdem tragen (Risk)
@@ -56,15 +57,18 @@ export default function ActionPanel({ isBusy, recoveryInfo, onStartSession }) {
         );
     }
 
-    // Fall 2: Startbereit
+    // Fall 2: Startbereit (The massive pink pill)
     if (!isBusy) {
         return (
             <Box sx={{ mb: 4 }}>
                 <Button 
                     variant="contained" fullWidth size="large"
                     onClick={() => onStartSession(false)}
-                    startIcon={<PlayArrowIcon />}
-                    sx={{ py: 1.5, fontWeight: 'bold', mb: 1, ...DESIGN_TOKENS.buttonGradient }}
+                    startIcon={<PlayArrowIcon sx={{ fontSize: '1.8rem !important' }}/>}
+                    sx={{ 
+                        py: 2, fontWeight: 900, mb: 1, fontSize: '1.1rem',
+                        ...DESIGN_TOKENS.buttonGradient, color: '#000' 
+                    }}
                 >
                     TRAGEN BEGINNEN
                 </Button>
@@ -72,11 +76,11 @@ export default function ActionPanel({ isBusy, recoveryInfo, onStartSession }) {
         );
     }
 
-    // Fall 3: Aktiv
+    // Fall 3: Aktiv (Lavender devotion)
     return (
         <Box sx={{ mb: 4 }}>
              <Paper sx={{ ...DESIGN_TOKENS.glassCard, p: 2, bgcolor: `${PALETTE.accents.green}20`, border: `1px solid ${PALETTE.accents.green}`, textAlign: 'center' }}>
-                <Typography variant="h6" sx={{ color: PALETTE.accents.green, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
+                <Typography variant="h6" sx={{ color: PALETTE.accents.green, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1 }}>
                   <PlayArrowIcon /> WIRD GERADE GETRAGEN
                 </Typography>
             </Paper>
