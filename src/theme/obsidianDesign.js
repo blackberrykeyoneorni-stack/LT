@@ -5,23 +5,24 @@ import { materialTheme } from './materialTheme';
 const t = materialTheme.palette.m3;
 
 /**
- * ADAPTER: OBSIDIAN -> MATERIAL 3
- * Übersetzt alte Design-Tokens in strikte Material Design 3 Werte.
- * Verhindert "bunte" Ausreißer.
+ * ADAPTER: OBSIDIAN -> MATERIAL 3 (SYNTHETIC SISSY EDITION)
+ * Übersetzt Design-Tokens in die "Sheer Nylon" Ästhetik.
+ * Nutzt Glassmorphismus und harte Neon-Kontraste.
  */
 
 export const PALETTE = {
   background: {
     default: t.background,
-    paper: t.surfaceContainer,
-    glass: t.surfaceContainer, // Kein Glas mehr -> Solid Surface
-    glassBorder: 'transparent', // M3 nutzt keine Borders für Tiefe
-    lightGlass: t.surfaceContainerHigh, 
+    paper: 'rgba(17, 13, 16, 0.70)', // Sheer Nylon Background
+    glass: 'rgba(17, 13, 16, 0.65)', // Glassmorphism Base
+    glassBorder: 'rgba(255, 0, 127, 0.20)', // Sheer pink seam
+    lightGlass: 'rgba(17, 13, 16, 0.85)', // Tighter Nylon weave
   },
   primary: {
     main: t.primary,
     dark: t.onPrimary,
     contrastText: t.onPrimary,
+    glow: 'rgba(255, 0, 127, 0.4)' // Matte Neon Pink Glow
   },
   secondary: {
     main: t.secondary,
@@ -29,40 +30,40 @@ export const PALETTE = {
   },
   text: {
     primary: t.onSurface,
-    secondary: t.onSurfaceVariant,
-    muted: t.outline,
+    secondary: t.onSurfaceVariant, // Soft Sissy Pink
+    muted: 'rgba(255, 182, 193, 0.5)',
   },
-  // Mapping der alten "Bunten Farben" auf das M3 Schema
-  // Das erzwingt Konsistenz.
   accents: {
-    purple: t.tertiary,      // Wird zum tertiären Akzent
-    blue: t.secondary,       // Wird zum sekundären Akzent
-    green: t.primary,        // Erfolgs-Indikatoren folgen Primary oder Custom Success
-    red: t.error,            // Fehler bleiben rot (M3 Error)
-    gold: t.tertiaryContainer, // Warnungen nutzen Tertiary Container
-    pink: t.tertiary,        
+    purple: t.primary,       // Hot Pink für intense Highlights
+    blue: t.secondary,       // Synthetic Cyan
+    green: t.tertiary,       // Submissive Lavender
+    red: t.error,            // Vulgar Red
+    gold: t.secondary,       // Mapped to Synthetic Cyan
+    pink: t.primary,         // Bimbo Pink
     grey: t.outlineVariant,
     crimson: t.errorContainer
   },
   gradients: {
-    // Löschen aller Verläufe. M3 ist Flat/Tonal.
     primary: t.primary, 
     secondary: t.secondary,
     dark: t.background,
-    glass: t.surfaceContainer, 
+    glass: 'rgba(17, 13, 16, 0.70)', 
   }
 };
 
-// M3 Card Style Definition für Wiederverwendung
+// Sissy Card Style: Glassmorphismus, Blur und Neon-Naht
 const M3_CARD_STYLE = {
-    backgroundColor: t.surfaceContainer,
-    borderRadius: '16px', // M3 Standard
-    border: 'none',
-    boxShadow: 'none',
+    backgroundColor: 'rgba(17, 13, 16, 0.65)',
+    backdropFilter: 'blur(12px)',
+    WebkitBackdropFilter: 'blur(12px)', // iOS Support
+    border: '1px solid rgba(255, 0, 127, 0.20)', // Sheer pink seam
+    borderRadius: '16px',
+    boxShadow: '0 8px 32px rgba(255, 0, 127, 0.1)', // Diffuse pink glow
     color: t.onSurface,
-    transition: 'background-color 0.2s',
+    transition: 'all 0.3s ease',
     '&:hover': {
-        backgroundColor: t.surfaceContainerHigh, // Hover State Layer
+        backgroundColor: 'rgba(17, 13, 16, 0.80)',
+        borderColor: 'rgba(255, 0, 127, 0.40)',
     }
 };
 
@@ -70,71 +71,75 @@ export const DESIGN_TOKENS = {
   bottomNavSpacer: {
     pb: '80px', 
     minHeight: '100vh',
-    background: t.background,
+    background: 'transparent',
   },
   container: { maxWidth: 'md', disableGutters: false, sx: { px: 2, pt: 2 } },
 
-  // Text Gradient entfernt -> Plain Text
+  // Text Gradient: Bimbo Pink zu Synthetic Cyan
   textGradient: {
-    color: t.onSurface,
-    fontWeight: 400,
-    background: 'none',
-    WebkitBackgroundClip: 'unset',
-    WebkitTextFillColor: 'unset',
+    background: `linear-gradient(90deg, ${t.primary} 0%, ${t.secondary} 100%)`, 
+    WebkitBackgroundClip: 'text',
+    WebkitTextFillColor: 'transparent',
+    backgroundClip: 'text',
+    color: 'transparent',
+    fontWeight: 700,
   },
   
   sectionHeader: {
-    fontSize: '14px', // Label Large
+    fontSize: '14px', 
     fontWeight: 500,
-    letterSpacing: '0.1px',
-    textTransform: 'none', // Sentence Case
+    letterSpacing: '1px',
+    textTransform: 'uppercase', // Sissy Ästhetik verlangt etwas mehr Dominanz im Text
     color: t.primary,
     mb: 2, mt: 4, 
     display: 'flex', alignItems: 'center', gap: 2,
     '&::after': { 
         content: '""', flex: 1, height: '1px', 
-        background: t.outlineVariant 
+        background: `linear-gradient(90deg, ${t.primary}40 0%, transparent 100%)` 
     }
   },
   
   glassCard: M3_CARD_STYLE,
   
-  // Button Gradient entfernt -> Filled Button (Pill)
   buttonGradient: {
     background: t.primary, 
     color: t.onPrimary,
-    fontWeight: 500,
-    borderRadius: '9999px', // Pill Shape erzwungen
-    textTransform: 'none',
-    boxShadow: 'none',
+    fontWeight: 700,
+    borderRadius: '9999px', 
+    textTransform: 'uppercase',
+    letterSpacing: '1px',
+    boxShadow: `0 4px 14px rgba(255, 0, 127, 0.4)`, // Neon Glow
     '&:hover': {
-      backgroundColor: t.primary, // State Layer wird durch MUI gehandhabt
-      boxShadow: 'none',
+      backgroundColor: t.primary, 
+      boxShadow: `0 6px 20px rgba(255, 0, 127, 0.6)`,
     },
     '&:disabled': {
         background: t.onSurface + '1F', 
         color: t.onSurface + '61', 
+        boxShadow: 'none'
     }
   },
 
   buttonSecondary: {
     border: `1px solid ${t.outline}`,
     color: t.primary,
-    borderRadius: '9999px', // Pill Shape erzwungen
-    textTransform: 'none',
+    borderRadius: '9999px', 
+    textTransform: 'uppercase',
+    letterSpacing: '1px',
     background: 'transparent',
     '&:hover': {
         background: t.primary + '14', 
-        borderColor: t.primary
+        borderColor: t.primary,
+        boxShadow: `0 0 10px rgba(255, 0, 127, 0.2)`
     }
   },
 
   inputField: {
     '& .MuiOutlinedInput-root': {
-        borderRadius: '4px', 
+        borderRadius: '8px', 
         bgcolor: t.surfaceContainerHighest,
-        '& fieldset': { border: 'none' }, 
-        '&:hover fieldset': { border: 'none' },
+        '& fieldset': { border: `1px solid ${t.outlineVariant}` }, 
+        '&:hover fieldset': { borderColor: t.outline },
         '&.Mui-focused fieldset': { border: `2px solid ${t.primary}` },
         '& input': { color: t.onSurface }
     },
@@ -145,30 +150,35 @@ export const DESIGN_TOKENS = {
   dialog: {
       paper: {
           sx: {
-            borderRadius: '28px', // Extra Large
-            bgcolor: t.surfaceContainerHigh,
+            borderRadius: '28px', 
+            background: 'rgba(17, 13, 16, 0.85)',
+            backdropFilter: 'blur(16px)',
+            WebkitBackdropFilter: 'blur(16px)',
+            border: `1px solid rgba(255, 0, 127, 0.3)`,
+            boxShadow: `0 0 40px rgba(255, 0, 127, 0.15)`,
             backgroundImage: 'none',
-            boxShadow: 'none',
           }
       },
-      title: { sx: { pb: 2, fontSize: '24px', fontWeight: 400, color: t.onSurface, textAlign: 'center' } },
-      content: { sx: { py: 2 }, dividers: false },
-      actions: { sx: { p: 3, justifyContent: 'flex-end', gap: 1 } }
+      title: { sx: { pb: 2, fontSize: '20px', fontWeight: 700, textTransform: 'uppercase', color: t.primary, textAlign: 'center', letterSpacing: '1px', borderBottom: `1px solid rgba(255, 0, 127, 0.1)` } },
+      content: { sx: { py: 3 }, dividers: false },
+      actions: { sx: { p: 3, justifyContent: 'space-between', gap: 1, borderTop: `1px solid rgba(255, 0, 127, 0.1)` } }
   },
 
-  bottomSheet: { sx: { background: t.surfaceContainer, borderRadius: '28px 28px 0 0' } },
+  bottomSheet: { sx: { background: 'rgba(17, 13, 16, 0.90)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', borderTop: `1px solid rgba(255, 0, 127, 0.3)`, borderRadius: '28px 28px 0 0' } },
 
-  // Accordion -> Expansion Panels (Flat)
   accordion: {
     root: {
-      bgcolor: t.surfaceContainerLow,
+      bgcolor: 'rgba(17, 13, 16, 0.5)',
+      backdropFilter: 'blur(8px)',
+      border: `1px solid rgba(255, 0, 127, 0.1)`,
       backgroundImage: 'none',
       boxShadow: 'none',
       borderRadius: '16px !important',
       marginBottom: 8,
       '&:before': { display: 'none' },
       '&.Mui-expanded': { 
-          bgcolor: t.surfaceContainer,
+          bgcolor: 'rgba(17, 13, 16, 0.7)',
+          borderColor: `rgba(255, 0, 127, 0.3)`,
           marginBottom: 16 
       },
     },
@@ -187,19 +197,20 @@ export const DESIGN_TOKENS = {
         bgcolor: t.secondaryContainer, 
         color: t.onSecondaryContainer,
         borderRadius: '8px',
-        border: 'none',
-        fontWeight: 500
+        border: `1px solid ${t.secondary}`,
+        fontWeight: 700,
+        boxShadow: `0 0 10px rgba(0, 229, 255, 0.3)`
     }
   },
 
   calendar: {
     '.react-calendar': { width: '100%', backgroundColor: 'transparent', border: 'none', fontFamily: 'inherit' },
-    '.react-calendar__navigation button': { color: t.onSurface, fontSize: '1rem', fontWeight: 500 },
-    '.react-calendar__month-view__weekdays': { textTransform: 'uppercase', fontSize: '0.75rem', color: t.onSurfaceVariant, fontWeight: 500 },
+    '.react-calendar__navigation button': { color: t.onSurface, fontSize: '1rem', fontWeight: 700, textTransform: 'uppercase' },
+    '.react-calendar__month-view__weekdays': { textTransform: 'uppercase', fontSize: '0.75rem', color: t.primary, fontWeight: 700 },
     '.react-calendar__tile': { padding: '10px 0', color: t.onSurface, fontSize: '0.9rem' },
     '.react-calendar__tile:enabled:hover': { backgroundColor: t.surfaceContainerHighest, borderRadius: '20px' }, 
-    '.react-calendar__tile--now': { background: 'transparent', border: `1px solid ${t.primary}`, borderRadius: '20px', color: t.primary },
-    '.react-calendar__tile--active': { background: `${t.primary} !important`, color: `${t.onPrimary} !important`, borderRadius: '20px' },
+    '.react-calendar__tile--now': { background: 'transparent', border: `1px dashed ${t.primary}`, borderRadius: '20px', color: t.primary },
+    '.react-calendar__tile--active': { background: `${t.primary} !important`, color: `${t.onPrimary} !important`, borderRadius: '20px', boxShadow: `0 0 15px ${t.primary}80` },
   }
 };
 
@@ -212,12 +223,12 @@ export const CHART_THEME = {
         ticks: { text: { fill: t.onSurfaceVariant, fontSize: 11 } } 
     },
     tooltip: {
-        container: { background: t.surfaceContainerHighest, color: t.onSurface, borderRadius: '12px', border: 'none' }
+        container: { background: 'rgba(17, 13, 16, 0.9)', backdropFilter: 'blur(8px)', color: t.onSurface, borderRadius: '12px', border: `1px solid ${t.primary}40` }
     },
     colors: [t.primary, t.secondary, t.tertiary, t.error, t.outline]
 };
 
-export const getCategoryColor = () => ({ border: 'transparent', bg: t.surfaceContainerHigh });
+export const getCategoryColor = () => ({ border: 'transparent', bg: 'rgba(255, 0, 127, 0.1)' });
 
 export const MOTION = {
     page: { initial: { opacity: 0, y: 10 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0 }, transition: { duration: 0.3, ease: [0.2, 0.0, 0, 1.0] } },

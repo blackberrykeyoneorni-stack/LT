@@ -1,52 +1,50 @@
 import { createTheme } from '@mui/material/styles';
 
 /**
- * ANDROID 16 / MATERIAL DESIGN 3 - DARK BOUDOIR THEME
- * Basierend auf der Google Material 3 Spezifikation.
- * Seed Color: Edles Magenta / Roségold -> Generierte Tonal Palette für Dark Mode.
+ * ANDROID 16 / MATERIAL DESIGN 3 - SYNTHETIC SISSY (SHEER NYLON)
+ * Integriert die Sissy/Bimbo Farbpalette exakt in die M3-Token-Struktur.
  */
 
 const m3Tokens = {
-  // PRIMARY: Prominenteste Aktionen (FAB, Filled Buttons)
-  // M3 nutzt in Dark Mode Pastelltöne (Tone 80), keine Neonfarben.
-  primary: '#FFAEE3',          // Edles Magenta / Fuchsia
-  onPrimary: '#5C114F',        // Dunkler Text auf Primary
-  primaryContainer: '#7E2A6F', // Container Hintergrund
-  onPrimaryContainer: '#FFD7F3', // Text/Icon im Container
+  // PRIMARY: Bimbo Pink / Hot Pink
+  primary: '#FF007F',          
+  onPrimary: '#000000',        // Maximaler Kontrast (Schwarz auf Pink)
+  primaryContainer: 'rgba(255, 0, 127, 0.2)', 
+  onPrimaryContainer: '#FFB6C1', 
 
-  // SECONDARY: Weniger dominante Elemente (Filter Chips, Toggles)
-  secondary: '#E6C1A4',        // Roségold / Champagner
-  onSecondary: '#432C17',
-  secondaryContainer: '#5E422C',
-  onSecondaryContainer: '#FFDCC1',
+  // SECONDARY: Synthetic Cyan
+  secondary: '#00E5FF',        
+  onSecondary: '#000000',
+  secondaryContainer: 'rgba(0, 229, 255, 0.2)',
+  onSecondaryContainer: '#CCFFFF',
 
-  // TERTIARY: Akzente (hier: für den Fetisch-Kontext / Warnungen)
-  tertiary: '#FFB2BA',         // Kühles Pink/Rot -> Dunkles Weinrot / Bordeaux Basis
-  onTertiary: '#670020',
-  tertiaryContainer: '#910031',
-  onTertiaryContainer: '#FFD9DC',
+  // TERTIARY: Submissive Lavender
+  tertiary: '#DDA0DD',         
+  onTertiary: '#000000',
+  tertiaryContainer: 'rgba(221, 160, 221, 0.2)',
+  onTertiaryContainer: '#F8E0F8',
 
-  error: '#FFB4AB',            // Karminrot (Crimson)
-  onError: '#690005',
-  errorContainer: '#93000A',
-  onErrorContainer: '#FFDAD6',
+  // ERROR: Vulgar Red
+  error: '#FF0040',            
+  onError: '#FFFFFF',
+  errorContainer: 'rgba(255, 0, 64, 0.2)',
+  onErrorContainer: '#FFB3C6',
 
-  // SURFACES: Die Hierarchie der Tiefe (Neutral)
-  // Android 16 Deep Dark: Fast Schwarz, aber leicht getönt.
-  background: '#0A050A',       // Extrem tiefes Aubergine/Pflaume
-  onBackground: '#EEDEEA',
-  surface: '#0A050A',
-  onSurface: '#EEDEEA',
-  onSurfaceVariant: '#D4C4CE',
+  // SURFACES: Denier Black (Nylon-Optik)
+  background: '#110D10',       // Tiefes, fast schwarzes Nylon
+  onBackground: '#FFFFFF',
+  surface: '#110D10',
+  onSurface: '#FFFFFF',
+  onSurfaceVariant: 'rgba(255, 182, 193, 0.8)', // Sissy Pink für Sekundärtexte
   
-  // SURFACE CONTAINER (Ersetzt die alte "Elevation" Logik)
-  surfaceContainerLow: '#140A14',   // Hintergrund für Listen
-  surfaceContainer: '#1B0E1B',      // Standard Cards (Warmes Dunkelgrau-Violett)
-  surfaceContainerHigh: '#241324',  // Dialoge, Navigation
-  surfaceContainerHighest: '#2F1A2F', // Input Fields
+  // SURFACE CONTAINER (Für Glassmorphismus vorbereitet)
+  surfaceContainerLow: 'rgba(17, 13, 16, 0.4)',   
+  surfaceContainer: 'rgba(17, 13, 16, 0.7)',      
+  surfaceContainerHigh: 'rgba(17, 13, 16, 0.85)',  
+  surfaceContainerHighest: 'rgba(255, 0, 127, 0.05)', // Zart rosa eingefärbt für Inputs
 
-  outline: '#8B728B',
-  outlineVariant: '#4A374A',
+  outline: 'rgba(255, 0, 127, 0.3)', // Pinkish seam
+  outlineVariant: 'rgba(255, 0, 127, 0.15)',
 };
 
 export const materialTheme = createTheme({
@@ -62,43 +60,59 @@ export const materialTheme = createTheme({
     },
     text: {
       primary: m3Tokens.onSurface,
-      secondary: m3Tokens.onSecondaryContainer, // M3 nutzt oft farbigen Text für Secondary
+      secondary: m3Tokens.onSurfaceVariant, 
     },
-    // Custom Token Zugriff
     m3: m3Tokens
   },
   typography: {
     fontFamily: '"Roboto", "Helvetica", "Arial", sans-serif',
-    // M3 Typography Scale
-    h4: { fontSize: '32px', lineHeight: '40px', fontWeight: 400 },
-    h5: { fontSize: '28px', lineHeight: '36px', fontWeight: 400 },
-    h6: { fontSize: '24px', lineHeight: '32px', fontWeight: 400 },
+    h4: { fontSize: '32px', lineHeight: '40px', fontWeight: 700 }, // Etwas dominanter im Sissy-Theme
+    h5: { fontSize: '28px', lineHeight: '36px', fontWeight: 700 },
+    h6: { fontSize: '24px', lineHeight: '32px', fontWeight: 700 },
     subtitle1: { fontSize: '16px', lineHeight: '24px', fontWeight: 500, letterSpacing: '0.15px' },
     subtitle2: { fontSize: '14px', lineHeight: '20px', fontWeight: 500, letterSpacing: '0.1px' },
     body1: { fontSize: '16px', lineHeight: '24px', letterSpacing: '0.5px' },
     body2: { fontSize: '14px', lineHeight: '20px', letterSpacing: '0.25px' },
-    button: { textTransform: 'none', fontWeight: 500, letterSpacing: '0.1px' },
+    button: { textTransform: 'uppercase', fontWeight: 700, letterSpacing: '1px' }, // Buttons lauter
   },
   shape: {
-    borderRadius: 16, // Globaler Basis-Radius
+    borderRadius: 16, 
   },
   components: {
-    // --- BUTTONS: PILL SHAPE (M3 Pflicht) ---
+    // --- GLOBAL: NYLON MESH (Maschenmuster) ---
+    MuiCssBaseline: {
+      styleOverrides: {
+        body: {
+          backgroundColor: m3Tokens.background,
+          // Der "Sheer Nylon" Maschen-Effekt via CSS Gradients
+          backgroundImage: `
+            linear-gradient(rgba(255, 0, 127, 0.03) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(255, 0, 127, 0.03) 1px, transparent 1px)
+          `,
+          backgroundSize: '3px 3px',
+          color: m3Tokens.onSurface,
+        }
+      }
+    },
+    // --- BUTTONS: PILL SHAPE & NEON GLOW ---
     MuiButton: {
       styleOverrides: {
         root: {
-          borderRadius: '9999px', // Erzwingt Pill-Shape (Kapsel)
+          borderRadius: '9999px', 
           padding: '10px 24px',
-          boxShadow: 'none', // Keine Schatten in M3
           fontSize: '14px',
-          '&:hover': { boxShadow: 'none' }, // Auch im Hover kein Schatten
+          textTransform: 'uppercase',
+          fontWeight: 'bold',
+          letterSpacing: '1px',
         },
         contained: {
           backgroundColor: m3Tokens.primary,
           color: m3Tokens.onPrimary,
+          boxShadow: `0 4px 14px rgba(255, 0, 127, 0.4)`, // Matte Neon Pink Glow
           '&:hover': { 
               backgroundColor: m3Tokens.primary,
-              backgroundImage: 'linear-gradient(rgba(255,255,255,0.08), rgba(255,255,255,0.08))' // State Layer
+              boxShadow: `0 6px 20px rgba(255, 0, 127, 0.6)`,
+              backgroundImage: 'linear-gradient(rgba(255,255,255,0.1), rgba(255,255,255,0.1))' 
           }
         },
         outlined: {
@@ -106,19 +120,20 @@ export const materialTheme = createTheme({
           color: m3Tokens.primary,
         },
         text: {
-            padding: '10px 16px', // Mehr Padding für Touch Targets
+            padding: '10px 16px', 
         }
       },
     },
-    // --- CARDS: MEDIUM SHAPE ---
+    // --- CARDS: GLASSMORPHISM ---
     MuiCard: {
       styleOverrides: {
         root: {
           backgroundColor: m3Tokens.surfaceContainer,
-          borderRadius: '16px', // M3 Card Radius (etwas runder)
+          backdropFilter: 'blur(12px)', // Sheer Nylon Effekt
+          borderRadius: '16px', 
           backgroundImage: 'none',
-          boxShadow: 'none',
-          border: 'none', 
+          boxShadow: '0 8px 32px rgba(255, 0, 127, 0.1)',
+          border: `1px solid ${m3Tokens.outlineVariant}`, 
         },
       },
     },
@@ -126,9 +141,12 @@ export const materialTheme = createTheme({
     MuiDialogPaper: {
         styleOverrides: {
             root: {
-                borderRadius: '28px', // Android 16 Standard für Dialoge
+                borderRadius: '28px', 
                 backgroundColor: m3Tokens.surfaceContainerHigh,
+                backdropFilter: 'blur(16px)', // Intensiver Blur für Dialoge
                 backgroundImage: 'none',
+                border: `1px solid ${m3Tokens.outline}`,
+                boxShadow: `0 0 40px rgba(255, 0, 127, 0.15)`,
             }
         }
     },
@@ -136,9 +154,11 @@ export const materialTheme = createTheme({
     MuiDrawer: {
         styleOverrides: {
             paper: {
-                backgroundColor: m3Tokens.surfaceContainer,
+                backgroundColor: 'rgba(17, 13, 16, 0.90)',
+                backdropFilter: 'blur(16px)',
                 borderTopLeftRadius: '28px',
                 borderTopRightRadius: '28px',
+                borderTop: `1px solid ${m3Tokens.outline}`,
             }
         }
     },
@@ -146,9 +166,9 @@ export const materialTheme = createTheme({
     MuiOutlinedInput: {
         styleOverrides: {
             root: {
-                borderRadius: '4px', // Inputs bleiben bei M3 eckiger (oder Pill für Search)
+                borderRadius: '8px', 
                 backgroundColor: m3Tokens.surfaceContainerHighest,
-                '& fieldset': { border: 'none' }, // Filled Style Simulation
+                '& fieldset': { border: `1px solid ${m3Tokens.outlineVariant}` }, 
                 '&.Mui-focused fieldset': { border: `2px solid ${m3Tokens.primary}` },
             },
             input: { padding: '16px' }
@@ -158,7 +178,6 @@ export const materialTheme = createTheme({
     MuiListItem: {
         styleOverrides: {
             root: {
-                // Keine Borders, sondern Abstände
                 paddingTop: 8,
                 paddingBottom: 8,
             }
@@ -168,10 +187,11 @@ export const materialTheme = createTheme({
     MuiChip: {
         styleOverrides: {
             root: {
-                borderRadius: '8px', // M3 Assist Chips (eckiger als Buttons)
+                borderRadius: '8px', 
                 height: '32px',
                 backgroundColor: m3Tokens.surfaceContainerHighest,
                 border: `1px solid ${m3Tokens.outlineVariant}`,
+                fontWeight: 700,
             },
             filled: {
                 border: 'none'
