@@ -1,15 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { doc, getDoc, addDoc, collection, serverTimestamp } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage } from '../firebase';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useItems } from '../contexts/ItemContext';
 import { useNFCGlobal } from '../contexts/NFCContext';
 import { safeDate } from '../utils/dateUtils'; 
 
 // COMPONENTS
-import ItemInfoGrid from '../components/item-detail/ItemInfoGrid'; 
+import AddItemDrawer from '../components/inventory/AddItemDrawer'; 
 
 // FRAMER MOTION
 import { motion } from 'framer-motion';
@@ -19,7 +18,7 @@ import {
   Grid, Card, CardMedia, CardContent, Typography, 
   Fab, Box, Rating, Chip, Stack, Drawer, TextField, 
   MenuItem, Button, IconButton, CardActionArea, CircularProgress, Tooltip,
-  Container, Divider
+  Container
 } from '@mui/material';
 
 // Icons
@@ -32,12 +31,9 @@ import Inventory2Icon from '@mui/icons-material/Inventory2';
 import CheckroomIcon from '@mui/icons-material/Checkroom'; 
 import FingerprintIcon from '@mui/icons-material/Fingerprint';
 import LocalLaundryServiceIcon from '@mui/icons-material/LocalLaundryService'; 
-import SaveIcon from '@mui/icons-material/Save';
-import CloudUploadIcon from '@mui/icons-material/CloudUpload'; 
-import DeleteIcon from '@mui/icons-material/Delete';
 
 // DESIGN SYSTEM
-import { DESIGN_TOKENS, PALETTE, getCategoryColor, MOTION } from '../theme/obsidianDesign';
+import { DESIGN_TOKENS, PALETTE, MOTION } from '../theme/obsidianDesign';
 
 // --- PERSISTENCE HELPER ---
 const usePersistentState = (key, defaultValue) => {
@@ -51,14 +47,6 @@ const usePersistentState = (key, defaultValue) => {
     }, [key, state]);
 
     return [state, setState];
-};
-
-// DEFAULT STATE
-const defaultNewItem = {
-    name: '', brand: '', model: '', mainCategory: 'Nylons', subCategory: '',
-    material: '', color: '', cost: '', condition: 5, suitablePeriod: 'Beide',
-    purchaseDate: new Date().toISOString().split('T')[0],
-    notes: '', location: '', imageUrl: '', customId: ''
 };
 
 export default function Inventory() {
@@ -79,12 +67,6 @@ export default function Inventory() {
   // UI States
   const [filterOpen, setFilterOpen] = useState(false);
   const [addItemOpen, setAddItemOpen] = useState(false); 
-  const [newItem, setNewItem] = useState(defaultNewItem);
-  const [isSaving, setIsSaving] = useState(false);
-
-  // Image Upload State
-  const [imageFile, setImageFile] = useState(null);
-  const [imagePreview, setImagePreview] = useState(null);
 
   // --- PERSISTENT FILTER VALUES ---
   const [filterStatus, setFilterStatus] = usePersistentState('inv_filterStatus', 'active');
@@ -135,73 +117,12 @@ export default function Inventory() {
       }
   }, [locationRouter]);
 
-  // Cleanup Preview URL
-  useEffect(() => {
-      return () => {
-          if (imagePreview) URL.revokeObjectURL(imagePreview);
-      }
-  }, [imagePreview]);
-
   // --- COMBINED LOCATIONS ---
   const availableLocations = useMemo(() => {
       const fromSettings = dropdowns.locations || [];
       const fromItems = items.map(i => i.location || i.storageLocation).filter(l => l && l.trim() !== '');
       return [...new Set([...fromSettings, ...fromItems])].sort();
   }, [dropdowns.locations, items]);
-
-  // --- IMAGE HANDLERS ---
-  const handleImageChange = (e) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      setImageFile(file);
-      setImagePreview(URL.createObjectURL(file));
-    }
-  };
-
-  const handleRemoveImage = () => {
-      setImageFile(null);
-      setImagePreview(null);
-  };
-
-  // --- SAVE NEW ITEM HANDLER ---
-  const handleSaveItem = async () => {
-      if (!newItem.brand || !newItem.mainCategory) {
-          alert("Bitte mindestens Marke und Kategorie angeben.");
-          return;
-      }
-      setIsSaving(true);
-      try {
-        let finalImageUrl = newItem.imageUrl; 
-
-        if (imageFile) {
-            const storageRef = ref(storage, `users/${currentUser.uid}/items/${Date.now()}_${imageFile.name}`);
-            const snapshot = await uploadBytes(storageRef, imageFile);
-            finalImageUrl = await getDownloadURL(snapshot.ref);
-        }
-
-        await addDoc(collection(db, `users/${currentUser.uid}/items`), {
-            ...newItem,
-            imageUrl: finalImageUrl,
-            cost: parseFloat(newItem.cost) || 0,
-            createdAt: serverTimestamp(),
-            status: 'active',
-            wearCount: 0,
-            totalMinutes: 0,
-            lastWorn: null
-        });
-
-        setAddItemOpen(false);
-        setNewItem(defaultNewItem);
-        setImageFile(null);
-        setImagePreview(null);
-
-      } catch (e) {
-          console.error(e);
-          alert("Fehler beim Speichern: " + e.message);
-      } finally {
-          setIsSaving(false);
-      }
-  };
 
   // --- FILTER LOGIC ---
   const getRecoveryInfo = (item) => {
@@ -422,68 +343,12 @@ export default function Inventory() {
           </Grid>
       </motion.div>
       
-      {/* --- ADD ITEM DRAWER --- */}
-      <Drawer 
-        anchor="bottom" 
-        open={addItemOpen} 
-        onClose={() => setAddItemOpen(false)}
-        PaperProps={DESIGN_TOKENS.bottomSheet}
-      >
-        <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-            <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255, 0, 127, 0.2)' }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <AddIcon sx={{ color: PALETTE.primary.main }} />
-                    <Typography variant="h6" sx={{ color: PALETTE.primary.main, textTransform: 'uppercase', fontWeight: 800 }}>Neues Item erfassen</Typography>
-                </Box>
-                <IconButton onClick={() => setAddItemOpen(false)} sx={{ color: PALETTE.text.primary }}><CloseIcon /></IconButton>
-            </Box>
-
-            <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 2 }}>
-                <Container maxWidth="sm" disableGutters>
-                    
-                    <Box sx={{ mb: 3, textAlign: 'center' }}>
-                        <input accept="image/*" style={{ display: 'none' }} id="raised-button-file" type="file" onChange={handleImageChange} />
-                        <label htmlFor="raised-button-file">
-                            <Box sx={{
-                                width: '100%', height: 200, borderRadius: 4,
-                                border: `2px dashed ${imagePreview ? PALETTE.accents.green : PALETTE.primary.main}`,
-                                display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
-                                overflow: 'hidden', position: 'relative', bgcolor: 'rgba(0,0,0,0.4)',
-                                transition: 'all 0.2s', '&:hover': { bgcolor: 'rgba(255,0,127,0.1)' }
-                            }}>
-                                {imagePreview ? (
-                                    <img src={imagePreview} alt="Preview" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-                                ) : (
-                                    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, p: 2 }}>
-                                            <CloudUploadIcon sx={{ fontSize: 40, color: PALETTE.primary.main }} />
-                                            <Typography variant="body2" sx={{ color: PALETTE.text.secondary, textTransform: 'uppercase' }}>Bild hochladen</Typography>
-                                    </Box>
-                                )}
-                            </Box>
-                        </label>
-                        {imagePreview && (
-                            <Button size="small" color="error" startIcon={<DeleteIcon />} onClick={handleRemoveImage} sx={{ mt: 1 }}>Bild entfernen</Button>
-                        )}
-                    </Box>
-
-                    <Divider sx={{ mb: 3, borderColor: 'rgba(255, 0, 127, 0.1)' }} />
-                    
-                    <ItemInfoGrid isEditing={true} formData={newItem} setFormData={setNewItem} dropdowns={dropdowns} item={{}} />
-                </Container>
-            </Box>
-
-            <Box sx={{ p: 2, borderTop: '1px solid rgba(255, 0, 127, 0.2)', bgcolor: 'rgba(0,0,0,0.6)' }}>
-                <Button 
-                    variant="contained" fullWidth size="large"
-                    startIcon={isSaving ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
-                    onClick={handleSaveItem} disabled={isSaving}
-                    sx={{ ...DESIGN_TOKENS.buttonGradient, height: 56, borderRadius: '9999px' }}
-                >
-                    {isSaving ? "Speichere..." : "Item Hinzufügen"}
-                </Button>
-            </Box>
-        </Box>
-      </Drawer>
+      {/* PERFORMANCE FIX: AddItemDrawer Kapselung verhindert Re-Rendering des gesamten Inventars beim Tippen */}
+      <AddItemDrawer 
+          open={addItemOpen} 
+          onClose={() => setAddItemOpen(false)} 
+          dropdowns={dropdowns} 
+      />
 
       {/* --- FILTER DRAWER --- */}
       <Drawer anchor="right" open={filterOpen} onClose={() => setFilterOpen(false)} PaperProps={{ sx: { bgcolor: 'rgba(17, 13, 16, 0.95)', backdropFilter: 'blur(16px)', borderLeft: `1px solid rgba(255,0,127,0.3)` } }}>

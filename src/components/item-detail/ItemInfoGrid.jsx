@@ -24,20 +24,45 @@ const UnifiedField = ({ label, value, icon, isEditing, onChange, type = "text", 
             {isEditing ? (
                 type === 'select' ? (
                     <Select 
+                        fullWidth // Hitbox-Sicherung
                         value={value || ''} 
                         onChange={onChange} 
                         variant="standard" 
                         disableUnderline 
                         displayEmpty 
-                        // WICHTIG: disablePortal wurde HIER GELÖSCHT! Das Menü darf aus dem Drawer ausbrechen, um nicht den Bildschirm einzufrieren.
-                        sx={{ color: '#fff', fontSize: '1rem', fontWeight: 500 }}
+                        sx={{ 
+                            bgcolor: 'rgba(0,0,0,0.3)', // Verhindert 0-Pixel-Kollaps durch visuelle Präsenz
+                            borderRadius: 1, 
+                            px: 1, 
+                            py: 0.5, 
+                            color: '#fff', 
+                            fontSize: '1rem', 
+                            fontWeight: 500 
+                        }}
                     >
                         {options.map(opt => <MenuItem key={opt} value={opt}>{opt}</MenuItem>)}
                     </Select>
                 ) : type === 'rating' ? (
                     <Rating value={parseInt(value) || 0} onChange={(e, v) => onChange({ target: { value: v } })} size="small" sx={{ color: PALETTE.primary.main }} />
                 ) : (
-                    <InputBase value={value || ''} onChange={onChange} type={type} multiline={multiline} rows={rows} fullWidth placeholder="-" sx={{ color: '#fff', fontSize: '1rem', fontWeight: 500 }} />
+                    <InputBase 
+                        fullWidth // Hitbox-Sicherung
+                        value={value || ''} 
+                        onChange={onChange} 
+                        type={type} 
+                        multiline={multiline} 
+                        rows={rows} 
+                        placeholder="-" 
+                        sx={{ 
+                            bgcolor: 'rgba(0,0,0,0.3)', // Verhindert 0-Pixel-Kollaps
+                            borderRadius: 1, 
+                            px: 1, 
+                            py: 0.5, 
+                            color: '#fff', 
+                            fontSize: '1rem', 
+                            fontWeight: 500 
+                        }} 
+                    />
                 )
             ) : (
                 type === 'rating' ? <Rating value={parseInt(value) || 0} readOnly size="small" sx={{ color: PALETTE.primary.main }} /> : <Typography variant="body1" sx={{ fontWeight: 700, color: '#fff', textShadow: '0 0 5px rgba(255,255,255,0.2)' }}>{type === 'date' && value ? new Date(value).toLocaleDateString() : (value || '-')}</Typography>
@@ -56,7 +81,14 @@ export default function ItemInfoGrid({ isEditing, formData, item, setFormData, d
         <>
             <Box sx={{ mb: 4, textAlign: 'center' }}>
                 {isEditing ? (
-                    <TextField label="Name" variant="outlined" fullWidth value={formData.name || ''} onChange={e => handleChange('name', e.target.value)} sx={{ '& .MuiInputBase-input': { fontSize: '1.2rem', textAlign: 'center' } }} />
+                    <TextField 
+                        label="Name" 
+                        variant="outlined" 
+                        fullWidth 
+                        value={formData.name || ''} 
+                        onChange={e => handleChange('name', e.target.value)} 
+                        sx={{ '& .MuiInputBase-input': { fontSize: '1.2rem', textAlign: 'center' } }} 
+                    />
                 ) : (
                     <>
                         <Typography variant="overline" sx={{ color: PALETTE.primary.main, letterSpacing: 3, fontWeight: 900 }}>{displayItem.brand ? displayItem.brand.toUpperCase() : 'NO BRAND'}</Typography>
