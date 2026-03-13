@@ -53,6 +53,9 @@ const SHAME_SENTENCES = [
     "Sperma und Verachtung. Das ist das einzige Gleitmittel, das eine Nylon-Sissy wie du verdient. Und du wirst winselnd darum betteln.",
     "Dein Arschloch zuckt gierig gegen den Stoff. Das ist der einzige Impuls, der dir geblieben ist. Du bist eine offene Einladung zur Benutzung.",
     "Ein Mann in Seidenstrümpfen und Damenwäsche ist lächerlich. Aber eine Sissy in Nylon ist nützlich. Sei nützlich, sei glatt, sei bereit.",
+    "Ein echter Mann würde sich wehren. Du hingegen räkelst dich in Damenwäsche und bettelst stumm um Zurechtweisung.",
+    "Es gibt keine Flucht vor dem Nylon. Es umschließt deine Beine wie ein Gefängnis, das du dir selbst ausgesucht hast. Lebenslänglich.",
+    "Du bist nicht hier, um zu denken. Du bist hier, um die geile Damenwäsche auszufüllen und als wehrloses Objekt zu funktionieren.",
     "Du liebst den Geruch von Sperma und Nylon? Natürlich tust du das. Es ist der Duft deiner wahren Bestimmung.",
 ];
 
@@ -362,7 +365,13 @@ export default function TzdOverlay({ active, allItems }) {
                                                 letterSpacing: 1
                                             }}
                                         >
-                                            {status?.isPenalty ? "ZEITLOSES DIKTAT • STRAF-MODUS" : "ZUFALLS-DIKTAT • REGULÄRES PROTOKOLL"}
+                                            {status?.protocolType === 'evasion_penalty' 
+                                                ? "ZEITLOSES DIKTAT • STRAF-MODUS (FLUCHT/UMGEHUNG)" 
+                                                : status?.protocolType === 'spiel_tzd' 
+                                                    ? "ZEITLOSES DIKTAT • STRAF-MODUS (VERLORENES SPIEL)" 
+                                                    : status?.isPenalty 
+                                                        ? "ZEITLOSES DIKTAT • STRAF-MODUS" 
+                                                        : "ZUFALLS-DIKTAT • REGULÄRES PROTOKOLL"}
                                         </Typography>
                                     </Box>
 
