@@ -2,8 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   collection, doc, updateDoc, serverTimestamp, 
-  addDoc, arrayUnion, writeBatch, getDoc, onSnapshot,
-  query, where, getDocs 
+  addDoc, getDoc, onSnapshot 
 } from 'firebase/firestore'; 
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
@@ -14,7 +13,7 @@ import { motion } from 'framer-motion';
 // Services
 import { checkActiveSuspension } from '../services/SuspensionService';
 import { isAuditDue, initializeAudit, confirmAuditItem } from '../services/AuditService';
-import { getActivePunishment, clearPunishment, findPunishmentItem, registerPunishment } from '../services/PunishmentService';
+import { getActivePunishment, clearPunishment, findPunishmentItem } from '../services/PunishmentService';
 import { loadMonthlyBudget } from '../services/BudgetService';
 import { stopSession as stopSessionService } from '../services/SessionService';
 import { isImmunityActive } from '../services/OfferService';
@@ -28,71 +27,23 @@ import useInstructionManager from '../hooks/dashboard/useInstructionManager';
 import useTZDAndGamble from '../hooks/dashboard/useTZDAndGamble';
 
 // Components
-import TzdOverlay from '../components/dashboard/TzdOverlay'; 
-import ForcedReleaseOverlay from '../components/dashboard/ForcedReleaseOverlay';
-import OfferDialog from '../components/dialogs/OfferDialog'; 
 import ProgressBar from '../components/dashboard/ProgressBar';
 import FemIndexBar from '../components/dashboard/FemIndexBar';
 import ActionButtons from '../components/dashboard/ActionButtons';
 import ActiveSessionsList from '../components/dashboard/ActiveSessionsList';
 import InfoTiles from '../components/dashboard/InfoTiles';
-import InstructionDialog from '../components/dialogs/InstructionDialog';
-import ReleaseProtocolDialog from '../components/dialogs/ReleaseProtocolDialog';
-import PunishmentDialog from '../components/dialogs/PunishmentDialog';
-import LaundryDialog from '../components/dialogs/LaundryDialog';
-import InflationOverlay from '../components/dashboard/InflationOverlay';
+import DashboardDialogManager from '../components/dashboard/DashboardDialogManager';
 
 import { DESIGN_TOKENS, PALETTE, MOTION } from '../theme/obsidianDesign';
 import { 
-    Box, Typography, Dialog, DialogTitle, DialogContent, DialogActions, 
-    Snackbar, Alert, TextField, 
-    Button, Container, Paper, Chip, LinearProgress, Divider 
+    Box, Typography, Button, Container, Paper, Chip, Divider 
 } from '@mui/material';
 import { Icons } from '../theme/appIcons';
 import LocalLaundryServiceIcon from '@mui/icons-material/LocalLaundryService';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
-import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
-import TimerIcon from '@mui/icons-material/Timer';
-import LinkOffIcon from '@mui/icons-material/LinkOff';
-import AnalyticsIcon from '@mui/icons-material/Analytics';
 import LockIcon from '@mui/icons-material/Lock'; 
 import ShieldIcon from '@mui/icons-material/Shield'; 
 import WaterDropIcon from '@mui/icons-material/WaterDrop';
-import TrendingUpIcon from '@mui/icons-material/TrendingUp'; 
-
-const formatTime = (totalMins) => {
-    const h = Math.floor(totalMins / 60);
-    const m = Math.floor(totalMins % 60);
-    return `${h}h ${m}m`;
-};
-
-// --- SUB-KOMPONENTE ---
-const IndexDetailDialog = ({ open, onClose, details }) => {
-    if (!details) return null;
-    const renderMetricRow = (label, value, color, icon) => (
-        <Box sx={{ mb: 2 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>{icon}<Typography variant="body2" color="text.secondary">{label}</Typography></Box>
-                <Typography variant="body2" sx={{ fontWeight: 'bold', color: color }}>{Math.round(value)}%</Typography>
-            </Box>
-            <LinearProgress variant="determinate" value={value} sx={{ height: 6, borderRadius: 3, bgcolor: 'rgba(255,255,255,0.05)', '& .MuiLinearProgress-bar': { bgcolor: color } }} />
-        </Box>
-    );
-    return (
-        <Dialog open={open} onClose={onClose} fullWidth maxWidth="xs" PaperProps={DESIGN_TOKENS.dialog.paper}>
-            <DialogTitle sx={DESIGN_TOKENS.dialog.title.sx}><AnalyticsIcon color="primary" /> Fem-Index 2.0</DialogTitle>
-            <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
-                <Box sx={{ textAlign: 'center', mb: 4 }}><Typography variant="h2" sx={{ ...DESIGN_TOKENS.textGradient, fontWeight: 'bold', fontSize: '3.5rem' }}>{details.score}</Typography><Typography variant="overline" color="text.secondary">COMPOSITE SCORE</Typography></Box>
-                <Box sx={{ px: 1 }}>
-                    {renderMetricRow("Physis (Körper)", details.subScores.physis, '#00e5ff', <CheckCircleOutlineIcon fontSize="small" sx={{color: '#00e5ff'}} />)}
-                    {renderMetricRow("Psyche (Wille)", details.subScores.psyche, '#ffeb3b', <TimerIcon fontSize="small" sx={{ color: '#ffeb3b' }} />)}
-                    {renderMetricRow("Infiltration (Alltag)", details.subScores.infiltration, '#f50057', <LinkOffIcon fontSize="small" sx={{ color: '#f50057' }} />)}
-                </Box>
-            </DialogContent>
-            <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}><Button onClick={onClose} fullWidth color="inherit">Schließen</Button></DialogActions>
-        </Dialog>
-    );
-};
 
 export default function Dashboard() {
   const { currentUser } = useAuth();
@@ -115,7 +66,6 @@ export default function Dashboard() {
   const [pendingAuditItems, setPendingAuditItems] = useState([]);
   const [currentAuditIndex, setCurrentAuditIndex] = useState(0);
   const [currentCondition, setCurrentCondition] = useState(5);
-  const [currentLocationCorrect, setCurrentLocationCorrect] = useState(true);
   const [punishmentStatus, setPunishmentStatus] = useState({ active: false, deferred: false, reason: null, durationMinutes: 0 });
   const [punishmentItem, setPunishmentItem] = useState(null);
   const [punishmentScanOpen, setPunishmentScanOpen] = useState(false);
@@ -241,7 +191,6 @@ export default function Dashboard() {
       if (items.length > 0) setPunishmentItem(findPunishmentItem(items));
   }, [items]);
 
-
   // HANDLERS
   const executeStartPunishment = async () => { 
       if(punishmentItem) { 
@@ -292,7 +241,7 @@ export default function Dashboard() {
   };
 
   const handleStartAudit = async () => { const auditItems = await initializeAudit(currentUser.uid, items); setPendingAuditItems(auditItems); setCurrentAuditIndex(0); setAuditOpen(true); };
-  const handleConfirmAuditItem = async () => { await confirmAuditItem(currentUser.uid, pendingAuditItems[currentAuditIndex].id, currentCondition, currentLocationCorrect); showToast(`${pendingAuditItems[currentAuditIndex].name} geprüft`, "success"); if(currentAuditIndex<pendingAuditItems.length-1) setCurrentAuditIndex(prev=>prev+1); else { setAuditOpen(false); setAuditDue(false); showToast("Audit abgeschlossen", "success"); } };
+  const handleConfirmAuditItem = async () => { await confirmAuditItem(currentUser.uid, pendingAuditItems[currentAuditIndex].id, currentCondition, true); showToast(`${pendingAuditItems[currentAuditIndex].name} geprüft`, "success"); if(currentAuditIndex<pendingAuditItems.length-1) setCurrentAuditIndex(prev=>prev+1); else { setAuditOpen(false); setAuditDue(false); showToast("Audit abgeschlossen", "success"); } };
 
   const handleOpenRelease = () => { setReleaseStep('confirm'); setReleaseTimer(600); setReleaseIntensity(3); setReleaseDialogOpen(true); };
   const handleStartReleaseTimer = () => { setReleaseStep('timer'); if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current); releaseTimerInterval.current = setInterval(() => { setReleaseTimer(prev => { if(prev <= 1) { clearInterval(releaseTimerInterval.current); setReleaseStep('decision'); return 0; } return prev - 1; }); }, 1000); };
@@ -340,31 +289,6 @@ export default function Dashboard() {
 
   return (
     <Box sx={DESIGN_TOKENS.bottomNavSpacer}>
-      <TzdOverlay active={tzdActive} allItems={items} />
-      
-      <ForcedReleaseOverlay 
-          open={forcedReleaseOpen}
-          method={forcedReleaseMethod}
-          onConfirm={handleConfirmForcedRelease}
-          onFail={handleFailForcedRelease}
-          onRefuse={handleRefuseForcedRelease}
-      />
-
-      <InflationOverlay 
-          open={!!timeBankData.pendingInflationNotice} 
-          noticeData={timeBankData.pendingInflationNotice} 
-          onAcknowledge={handleAcknowledgeInflation} 
-      />
-      
-      <OfferDialog 
-          open={offerOpen} 
-          stakeItems={gambleStake} 
-          onAccept={handleGambleAccept} 
-          onDecline={handleGambleDecline}
-          hasActiveSession={hasVoluntarySession} 
-          isForced={isForcedGamble}
-      />
-
       <Container maxWidth="md" sx={{ pt: 2, pb: 4 }}>
         <motion.div variants={MOTION.page} initial="initial" animate="animate" exit="exit">
             
@@ -510,69 +434,23 @@ export default function Dashboard() {
         </motion.div>
       </Container>
 
-      <Dialog open={!!weeklyReport} disableEscapeKeyDown PaperProps={{ sx: { ...DESIGN_TOKENS.dialog.paper.sx, border: `1px solid ${PALETTE.accents.gold}`, boxShadow: `0 0 20px ${PALETTE.accents.gold}40` } }}>
-          <DialogTitle sx={{ ...DESIGN_TOKENS.dialog.title.sx, color: PALETTE.accents.gold, justifyContent: 'center' }}>
-              <TrendingUpIcon sx={{ mr: 1 }} /> WOCHEN-EVALUIERUNG
-          </DialogTitle>
-          <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
-              <Box sx={{ textAlign: 'center', py: 2 }}>
-                  <Typography variant="body2" sx={{ mb: 4, color: 'text.secondary' }}>
-                      Das System hat deine Leistung in der vergangenen Woche protokolliert und die geforderte Tagestragezeit neu festgelegt.
-                  </Typography>
-                  
-                  <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 3, mb: 2 }}>
-                      <Box>
-                          <Typography variant="caption" color="text.secondary" display="block">Bisheriges Ziel</Typography>
-                          <Typography variant="h6" sx={{ color: 'text.disabled', textDecoration: 'line-through' }}>
-                              {weeklyReport ? formatTime(weeklyReport.previousGoal * 60) : ''}
-                          </Typography>
-                      </Box>
-                      <TrendingUpIcon sx={{ color: PALETTE.accents.gold, fontSize: 30 }} />
-                      <Box>
-                          <Typography variant="caption" sx={{ color: PALETTE.accents.gold, fontWeight: 'bold' }} display="block">Neues Ziel</Typography>
-                          <Typography variant="h4" sx={{ color: '#fff', fontWeight: 'bold' }}>
-                              {weeklyReport ? formatTime(weeklyReport.newGoal * 60) : ''}
-                          </Typography>
-                      </Box>
-                  </Box>
-                  
-                  <Typography variant="caption" sx={{ color: PALETTE.accents.gold, display: 'block', mt: 4, fontWeight: 'bold' }}>
-                      RÜCKSTUFUNGEN SIND UNTERSAGT. DEINE ZEIT IST EIGENTUM DES PROTOKOLLS.
-                  </Typography>
-              </Box>
-          </DialogContent>
-          <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}>
-              <Button fullWidth variant="contained" onClick={async () => {
-                  await updateDoc(doc(db, `users/${currentUser.uid}/settings/protocol`), {
-                      "weeklyReport.acknowledged": true
-                  });
-              }} sx={{ bgcolor: PALETTE.accents.gold, color: '#000', fontWeight: 'bold', '&:hover': { bgcolor: '#fff' } }}>
-                  KENNTNISNAHME BESTÄTIGEN
-              </Button>
-          </DialogActions>
-      </Dialog>
-
-      <InstructionDialog open={instructionOpen} onClose={() => setInstructionOpen(false)} instruction={currentInstruction} items={items} isHoldingOath={isHoldingOath} oathProgress={oathProgress} onStartOath={startOathPress} onCancelOath={cancelOathPress} onDeclineOath={handleDeclineOath} onStartRequest={handleStartRequest} onNavigateItem={(id) => { setInstructionOpen(false); navigate(`/item/${id}`); }} isFreeDay={isFreeDay} freeDayReason={freeDayReason} loadingStatus={instructionStatus === 'idle' ? 'loading' : instructionStatus} isNight={isNight} showToast={showToast} />
-      <PunishmentDialog open={punishmentScanOpen} onClose={() => setPunishmentScanOpen(false)} mode={punishmentScanMode} punishmentItem={punishmentItem} isScanning={isNfcScanning} onScan={handlePunishmentScanTrigger} />
-      <LaundryDialog open={laundryOpen} onClose={() => setLaundryOpen(false)} washingItems={items.filter(i => i.status === 'washing')} onWashItem={async (id) => { try { await updateDoc(doc(db, `users/${currentUser.uid}/items`, id), { status: 'active', cleanDate: serverTimestamp(), historyLog: arrayUnion({ type: 'wash', date: new Date().toISOString() }) }); if(kpis?.basics?.washing <= 1) setLaundryOpen(false); } catch(e){}} } onWashAll={async () => { try { const timestamp = new Date().toISOString(); const promises = items.filter(i=>i.status==='washing').map(i => updateDoc(doc(db, `users/${currentUser.uid}/items`, i.id), { status: 'active', cleanDate: serverTimestamp(), historyLog: arrayUnion({ type: 'wash', date: timestamp }) })); await Promise.all(promises); setLaundryOpen(false); } catch (e) {} }} />
-      <ReleaseProtocolDialog open={releaseDialogOpen} onClose={() => setReleaseDialogOpen(false)} step={releaseStep} timer={releaseTimer} intensity={releaseIntensity} setIntensity={setReleaseIntensity} onStartTimer={handleStartReleaseTimer} onSkipTimer={handleSkipTimer} onDecision={handleReleaseDecision} />
-      
-      <Dialog open={auditOpen} onClose={() => setAuditOpen(false)} fullWidth PaperProps={DESIGN_TOKENS.dialog.paper}>
-          <DialogTitle sx={DESIGN_TOKENS.dialog.title.sx}>Audit: {pendingAuditItems[currentAuditIndex]?.name}</DialogTitle>
-          <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
-              <TextField type="number" label="Zustand (1-5)" value={currentCondition} onChange={e => setCurrentCondition(parseInt(e.target.value))} fullWidth sx={{mt:2}} />
-          </DialogContent>
-          <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}>
-              <Button onClick={() => setAuditOpen(false)} color="inherit">Abbrechen</Button>
-              <Button onClick={handleConfirmAuditItem} variant="contained" color="warning">Bestätigen</Button>
-          </DialogActions>
-      </Dialog>
-
-      <IndexDetailDialog open={indexDialogOpen} onClose={() => setIndexDialogOpen(false)} details={indexDetails} />
-      
-      <Snackbar open={toast.open} autoHideDuration={3000} onClose={handleCloseToast}>
-          <Alert severity={toast.severity}>{toast.message}</Alert>
-      </Snackbar>
+      <DashboardDialogManager
+          tzdActive={tzdActive} items={items} forcedReleaseOpen={forcedReleaseOpen} forcedReleaseMethod={forcedReleaseMethod} 
+          handleConfirmForcedRelease={handleConfirmForcedRelease} handleFailForcedRelease={handleFailForcedRelease} handleRefuseForcedRelease={handleRefuseForcedRelease}
+          timeBankData={timeBankData} handleAcknowledgeInflation={handleAcknowledgeInflation} offerOpen={offerOpen} gambleStake={gambleStake} 
+          handleGambleAccept={handleGambleAccept} handleGambleDecline={handleGambleDecline} hasVoluntarySession={hasVoluntarySession} isForcedGamble={isForcedGamble}
+          weeklyReport={weeklyReport} currentUser={currentUser} instructionOpen={instructionOpen} setInstructionOpen={setInstructionOpen} 
+          currentInstruction={currentInstruction} isHoldingOath={isHoldingOath} oathProgress={oathProgress} startOathPress={startOathPress} cancelOathPress={cancelOathPress}
+          handleDeclineOath={handleDeclineOath} handleStartRequest={handleStartRequest} navigate={navigate} isFreeDay={isFreeDay} freeDayReason={freeDayReason} 
+          instructionStatus={instructionStatus} isNight={isNight} showToast={showToast} punishmentScanOpen={punishmentScanOpen} 
+          setPunishmentScanOpen={setPunishmentScanOpen} punishmentScanMode={punishmentScanMode} punishmentItem={punishmentItem} isNfcScanning={isNfcScanning} 
+          handlePunishmentScanTrigger={handlePunishmentScanTrigger} laundryOpen={laundryOpen} setLaundryOpen={setLaundryOpen} kpis={kpis} 
+          releaseDialogOpen={releaseDialogOpen} setReleaseDialogOpen={setReleaseDialogOpen} releaseStep={releaseStep} releaseTimer={releaseTimer} 
+          releaseIntensity={releaseIntensity} setReleaseIntensity={setReleaseIntensity} handleStartReleaseTimer={handleStartReleaseTimer} handleSkipTimer={handleSkipTimer} 
+          handleReleaseDecision={handleReleaseDecision} auditOpen={auditOpen} setAuditOpen={setAuditOpen} pendingAuditItems={pendingAuditItems} 
+          currentAuditIndex={currentAuditIndex} currentCondition={currentCondition} setCurrentCondition={setCurrentCondition} handleConfirmAuditItem={handleConfirmAuditItem} 
+          indexDialogOpen={indexDialogOpen} setIndexDialogOpen={setIndexDialogOpen} indexDetails={indexDetails} toast={toast} handleCloseToast={handleCloseToast}
+      />
     </Box>
   );
 }
