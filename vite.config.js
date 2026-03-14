@@ -11,9 +11,9 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         maximumFileSizeToCacheInBytes: 3000000,
-        cleanupOutdatedCaches: true, // WICHTIG: Löscht alte Chunks sofort
-        clientsClaim: true,          // WICHTIG: Übernimmt sofort die Kontrolle
-        skipWaiting: true            // WICHTIG: Wartet nicht auf Tab-Schließung
+        cleanupOutdatedCaches: false, // KORREKTUR: Verhindert das sofortige Löschen alter Chunks während der Nutzung
+        clientsClaim: false,          // KORREKTUR: Verhindert sofortige Übernahme, die aktive Sitzungen stört
+        skipWaiting: false            // KORREKTUR: Wartet auf Tab-Schließung vor dem Update
       },
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
       manifest: {

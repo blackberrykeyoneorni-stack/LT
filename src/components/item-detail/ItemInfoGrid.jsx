@@ -1,5 +1,5 @@
 import React from 'react';
-import { Grid, Box, Typography, TextField, Select, MenuItem, Rating, InputBase } from '@mui/material';
+import { Grid, Box, Typography, TextField, Select, Rating, InputBase } from '@mui/material';
 import LabelIcon from '@mui/icons-material/Label';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import BrandingWatermarkIcon from '@mui/icons-material/BrandingWatermark';
@@ -24,6 +24,7 @@ const UnifiedField = ({ label, value, icon, isEditing, onChange, type = "text", 
             {isEditing ? (
                 type === 'select' ? (
                     <Select 
+                        native
                         fullWidth // Hitbox-Sicherung
                         value={value || ''} 
                         onChange={onChange} 
@@ -37,13 +38,16 @@ const UnifiedField = ({ label, value, icon, isEditing, onChange, type = "text", 
                             py: 0.5, 
                             color: '#fff', 
                             fontSize: '1rem', 
-                            fontWeight: 500 
+                            fontWeight: 500,
+                            position: 'relative',
+                            zIndex: 1 
                         }}
                     >
-                        {options.map(opt => <MenuItem key={opt} value={opt}>{opt}</MenuItem>)}
+                        <option value="" style={{ background: '#111', color: '#fff' }}></option>
+                        {options.map(opt => <option key={opt} value={opt} style={{ background: '#111', color: '#fff' }}>{opt}</option>)}
                     </Select>
                 ) : type === 'rating' ? (
-                    <Rating value={parseInt(value) || 0} onChange={(e, v) => onChange({ target: { value: v } })} size="small" sx={{ color: PALETTE.primary.main }} />
+                    <Rating value={parseInt(value) || 0} onChange={(e, v) => onChange({ target: { value: v } })} size="small" sx={{ color: PALETTE.primary.main, position: 'relative', zIndex: 1 }} />
                 ) : (
                     <InputBase 
                         fullWidth // Hitbox-Sicherung
@@ -60,7 +64,9 @@ const UnifiedField = ({ label, value, icon, isEditing, onChange, type = "text", 
                             py: 0.5, 
                             color: '#fff', 
                             fontSize: '1rem', 
-                            fontWeight: 500 
+                            fontWeight: 500,
+                            position: 'relative',
+                            zIndex: 1
                         }} 
                     />
                 )
@@ -87,7 +93,11 @@ export default function ItemInfoGrid({ isEditing, formData, item, setFormData, d
                         fullWidth 
                         value={formData.name || ''} 
                         onChange={e => handleChange('name', e.target.value)} 
-                        sx={{ '& .MuiInputBase-input': { fontSize: '1.2rem', textAlign: 'center' } }} 
+                        sx={{ 
+                            position: 'relative', 
+                            zIndex: 1, 
+                            '& .MuiInputBase-input': { fontSize: '1.2rem', textAlign: 'center' } 
+                        }} 
                     />
                 ) : (
                     <>

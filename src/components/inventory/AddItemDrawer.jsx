@@ -93,6 +93,8 @@ export default function AddItemDrawer({ open, onClose, dropdowns }) {
             anchor="bottom" 
             open={open} 
             onClose={onClose}
+            disableEnforceFocus
+            disableScrollLock
             PaperProps={DESIGN_TOKENS.bottomSheet}
         >
             <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -109,22 +111,36 @@ export default function AddItemDrawer({ open, onClose, dropdowns }) {
                         
                         <Box sx={{ mb: 3, textAlign: 'center' }}>
                             {/* Verstecktes Input-Feld, angesteuert per useRef, umgeht den Focus-Trap */}
-                            <input accept="image/*" style={{ display: 'none' }} type="file" ref={fileInputRef} onChange={handleImageChange} />
-                            
                             <Box 
-                                onClick={() => fileInputRef.current.click()}
                                 sx={{
                                     width: '100%', height: 200, borderRadius: 4,
                                     border: `2px dashed ${imagePreview ? PALETTE.accents.green : PALETTE.primary.main}`,
-                                    display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
                                     overflow: 'hidden', position: 'relative', bgcolor: 'rgba(0,0,0,0.4)',
                                     transition: 'all 0.2s', '&:hover': { bgcolor: 'rgba(255,0,127,0.1)' }
                                 }}
                             >
+                                <input 
+                                    accept="image/*" 
+                                    type="file" 
+                                    ref={fileInputRef} 
+                                    onChange={handleImageChange} 
+                                    style={{ 
+                                        position: 'absolute', 
+                                        top: 0, 
+                                        left: 0, 
+                                        width: '100%', 
+                                        height: '100%', 
+                                        opacity: 0, 
+                                        zIndex: 2, 
+                                        cursor: 'pointer' 
+                                    }} 
+                                />
+                                
                                 {imagePreview ? (
-                                    <img src={imagePreview} alt="Preview" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                                    <img src={imagePreview} alt="Preview" style={{ width: '100%', height: '100%', objectFit: 'contain', position: 'relative', zIndex: 1 }} />
                                 ) : (
-                                    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, p: 2 }}>
+                                    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, p: 2, position: 'relative', zIndex: 1 }}>
                                         <CloudUploadIcon sx={{ fontSize: 40, color: PALETTE.primary.main }} />
                                         <Typography variant="body2" sx={{ color: PALETTE.text.secondary, textTransform: 'uppercase' }}>Bild hochladen</Typography>
                                     </Box>

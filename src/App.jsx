@@ -18,14 +18,23 @@ import SecurityLock from './components/SecurityLock';
 const lazyRetry = (importFn) => {
   return lazy(async () => {
     try {
-      return await importFn();
+      const component = await importFn();
+      sessionStorage.removeItem('pwa-chunk-retry');
+      return component;
     } catch (error) {
       // Prüfen, ob es sich um den Versions-Fehler handelt
       if (error.message && (error.message.includes('dynamically imported module') || error.message.includes('Importing a module script failed'))) {
-        // Seite neu laden, um die neue Version (neue Chunks) vom Server zu holen
-        window.location.reload();
+        const retries = parseInt(sessionStorage.getItem('pwa-chunk-retry') || '0', 10);
+        
+        if (retries < 2) {
+          sessionStorage.setItem('pwa-chunk-retry', String(retries + 1));
+          // Seite neu laden, um die neue Version (neue Chunks) vom Server zu holen
+          window.location.reload();
+          // Promise nicht auflösen, um React-Rendering während des Reloads zu blockieren
+          return new Promise(() => {});
+        }
       }
-      // Andere Fehler weiterwerfen, damit ErrorBoundary sie fängt
+      // Andere Fehler weiterwerfen, damit ErrorBoundary sie fängt (und Endlosschleife verhindert wird)
       throw error;
     }
   });
