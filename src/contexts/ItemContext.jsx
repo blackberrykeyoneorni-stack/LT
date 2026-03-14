@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import { db } from '../firebase';
 import { collection, query, onSnapshot, doc, setDoc, deleteDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { useAuth } from './AuthContext';
@@ -63,31 +63,31 @@ export function ItemProvider({ children }) {
   }, [currentUser]);
 
   // CRUD Operationen
-  const addItem = async (itemData, customId = null) => {
+  const addItem = useCallback(async (itemData, customId = null) => {
     if (!currentUser) return;
     
     // Delegation der kompletten Logik an den Service Layer
     await ItemService.addItem(currentUser.uid, itemData, customId);
-  };
+  }, [currentUser]);
 
-  const deleteItem = async (id) => {
+  const deleteItem = useCallback(async (id) => {
      if (!currentUser) return;
      await ItemService.deleteItem(currentUser.uid, id);
-  };
+  }, [currentUser]);
 
-  const updateItem = async (id, data) => {
+  const updateItem = useCallback(async (id, data) => {
       if (!currentUser) return;
       await ItemService.updateItem(currentUser.uid, id, data);
-  };
+  }, [currentUser]);
 
-  const value = {
+  const value = useMemo(() => ({
     items,
     loading,
     error,
     addItem,
     deleteItem,
     updateItem
-  };
+  }), [items, loading, error, addItem, deleteItem, updateItem]);
 
   return (
     <ItemContext.Provider value={value}>

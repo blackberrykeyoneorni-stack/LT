@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { 
     doc, getDoc, updateDoc, collection, query, where, getDocs, 
-    serverTimestamp, arrayUnion 
+    serverTimestamp, arrayUnion, limit, orderBy 
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../firebase';
@@ -13,58 +13,37 @@ import { startSession as startSessionService } from '../services/SessionService'
 import { safeDate } from '../utils/dateUtils';
 import { DEFAULT_ARCHIVE_REASONS, DEFAULT_RUN_LOCATIONS, DEFAULT_RUN_CAUSES } from '../utils/constants';
 
-export function useItemDetailLogic() {
-    const { id } = useParams();
-    const navigate = useNavigate();
-    const location = useLocation(); 
-    const { currentUser } = useAuth();
-    
-    const { writeTag } = useNFCGlobal();
-
-    // --- STATES ---
+// ==========================================
+// 1. DATA FETCHER HOOK
+// ==========================================
+function useItemFetcher(id, currentUser, navigate) {
     const [item, setItem] = useState(null);
     const [loading, setLoading] = useState(true);
-    const [isEditing, setIsEditing] = useState(false);
     const [isBusy, setIsBusy] = useState(false); 
     const [restingHoursSetting, setRestingHoursSetting] = useState(24);
-    
-    // IMAGE UPLOAD STATE
-    const [pendingFiles, setPendingFiles] = useState([]);
-
-    // Form Data
-    const [formData, setFormData] = useState({});
-
-    // Dropdown Data
-    const [dropdowns, setDropdowns] = useState({
-        brands: [],
-        categoryStructure: {}, 
-        materials: [],
-        locations: [],
-        archiveReasons: DEFAULT_ARCHIVE_REASONS,
-        runLocations: DEFAULT_RUN_LOCATIONS,
-        runCauses: DEFAULT_RUN_CAUSES
-    });
-
-    // Archive Dialog State
-    const [archiveDialog, setArchiveDialog] = useState({
-        open: false,
-        reason: '',
-        runLocation: '',
-        runCause: ''
-    });
-
     const [sessions, setSessions] = useState([]);
+    const [dropdowns, setDropdowns] = useState({
+        brands: [], categoryStructure: {}, materials: [], locations: [],
+        archiveReasons: DEFAULT_ARCHIVE_REASONS, runLocations: DEFAULT_RUN_LOCATIONS, runCauses: DEFAULT_RUN_CAUSES
+    });
 
-    // --- LOAD DATA ---
     useEffect(() => {
         if (!currentUser || !id) return;
         
         const fetchData = async () => {
             try {
-                // 1. Item & Settings
-                const [itemSnap, prefSnap] = await Promise.all([
+                // Waterfall Fix: Item, Settings & Global Dropdowns absolut parallel laden
+                const [
+                    itemSnap, prefSnap, brandSnap, catSnap, 
+                    matSnap, locSnap, archiveSnap
+                ] = await Promise.all([
                     getDoc(doc(db, `users/${currentUser.uid}/items`, id)),
-                    getDoc(doc(db, `users/${currentUser.uid}/settings/preferences`))
+                    getDoc(doc(db, `users/${currentUser.uid}/settings/preferences`)),
+                    getDoc(doc(db, `users/${currentUser.uid}/settings/brands`)),
+                    getDoc(doc(db, `users/${currentUser.uid}/settings/categories`)),
+                    getDoc(doc(db, `users/${currentUser.uid}/settings/materials`)),
+                    getDoc(doc(db, `users/${currentUser.uid}/settings/locations`)),
+                    getDoc(doc(db, `users/${currentUser.uid}/settings/archive`))
                 ]);
                 
                 if (!itemSnap.exists()) {
@@ -79,32 +58,7 @@ export function useItemDetailLogic() {
                     setRestingHoursSetting(prefSnap.data().nylonRestingHours || 24);
                 }
                 
-                // Form Init
-                setFormData({
-                    name: itemData.name || '',
-                    customId: itemData.customId || '', 
-                    brand: itemData.brand || '',
-                    model: itemData.model || '',
-                    mainCategory: itemData.mainCategory || 'Nylons',
-                    subCategory: itemData.subCategory || '',
-                    material: itemData.material || '',
-                    cost: itemData.cost || '',
-                    condition: itemData.condition || 5,
-                    location: itemData.location || '',
-                    suitablePeriod: itemData.suitablePeriod || 'Beide', 
-                    purchaseDate: itemData.purchaseDate ? new Date(itemData.purchaseDate).toISOString().split('T')[0] : '', 
-                    notes: itemData.notes || ''
-                });
-
-                // 2. Dropdowns
-                const [brandSnap, catSnap, matSnap, locSnap, archiveSnap] = await Promise.all([
-                    getDoc(doc(db, `users/${currentUser.uid}/settings/brands`)),
-                    getDoc(doc(db, `users/${currentUser.uid}/settings/categories`)),
-                    getDoc(doc(db, `users/${currentUser.uid}/settings/materials`)),
-                    getDoc(doc(db, `users/${currentUser.uid}/settings/locations`)),
-                    getDoc(doc(db, `users/${currentUser.uid}/settings/archive`))
-                ]);
-
+                // Dropdowns Init
                 let newDropdowns = {
                     brands: brandSnap.exists() ? (brandSnap.data().list || []) : [],
                     categoryStructure: catSnap.exists() ? (catSnap.data().structure || {}) : {},
@@ -123,27 +77,26 @@ export function useItemDetailLogic() {
                 }
                 setDropdowns(newDropdowns);
 
-                // 3. Sessions (Komplette Erfassung inkl. TZD/Array-Items)
+                // Tsunami Fix: Paginated + Time Ordered
                 const qLegacy = query(
                     collection(db, `users/${currentUser.uid}/sessions`),
-                    where('itemId', '==', id)
+                    where('itemId', '==', id),
+                    orderBy('startTime', 'desc'),
+                    limit(30)
                 );
                 const qNew = query(
                     collection(db, `users/${currentUser.uid}/sessions`),
-                    where('itemIds', 'array-contains', id)
+                    where('itemIds', 'array-contains', id),
+                    orderBy('startTime', 'desc'),
+                    limit(30)
                 );
 
-                const [snapLegacy, snapNew] = await Promise.all([
-                    getDocs(qLegacy),
-                    getDocs(qNew)
-                ]);
+                const [snapLegacy, snapNew] = await Promise.all([getDocs(qLegacy), getDocs(qNew)]);
 
-                // Map nutzen, um Duplikate (falls Item im Feld UND im Array steht) zu filtern
                 const sessionMap = new Map();
                 snapLegacy.docs.forEach(d => sessionMap.set(d.id, { id: d.id, ...d.data() }));
                 snapNew.docs.forEach(d => sessionMap.set(d.id, { id: d.id, ...d.data() }));
 
-                // Manuelle Sortierung (verhindert Index-Fehler bei Firebase)
                 const sessionList = Array.from(sessionMap.values()).sort((a, b) => {
                     const startA = a.startTime?.toDate ? a.startTime.toDate().getTime() : new Date(a.startTime || 0).getTime();
                     const startB = b.startTime?.toDate ? b.startTime.toDate().getTime() : new Date(b.startTime || 0).getTime();
@@ -152,7 +105,6 @@ export function useItemDetailLogic() {
                 
                 setSessions(sessionList);
 
-                // Busy Check
                 const runningSession = sessionList.find(s => !s.endTime);
                 setIsBusy(!!runningSession);
 
@@ -166,16 +118,15 @@ export function useItemDetailLogic() {
         fetchData();
     }, [currentUser, id, navigate]);
 
-    // --- COMPUTED VALUES ---
-
     const stats = useMemo(() => {
-        let totalMins = 0;
+        // Client-Side Aggregation Fix: Voraggregierte DB-Werte bevorzugen
+        const wearCount = item?.wearCount || 0;
+        const totalWearTime = item?.totalMinutes || 0; 
+
         let releaseCount = 0;
         let survivedCount = 0;
-        const wearCount = item?.wearCount || 0;
 
         sessions.forEach(s => { 
-            if (s.durationMinutes) totalMins += s.durationMinutes; 
             if (s.releases && Array.isArray(s.releases)) {
                 s.releases.forEach(r => {
                     releaseCount++;
@@ -185,7 +136,7 @@ export function useItemDetailLogic() {
         });
 
         return { 
-            totalWearTime: totalMins, 
+            totalWearTime, 
             wearCount,
             releaseCount,
             survivalRate: releaseCount > 0 ? Math.round((survivedCount / releaseCount) * 100) : 100,
@@ -211,13 +162,72 @@ export function useItemDetailLogic() {
         return events.sort((a, b) => (b.date || 0) - (a.date || 0));
     }, [sessions, item]);
 
+    return { item, setItem, loading, isBusy, dropdowns, stats, recoveryInfo, historyEvents };
+}
+
+// ==========================================
+// 2. FORM & UI STATE HOOK
+// ==========================================
+function useItemForm(item) {
+    const [isEditing, setIsEditing] = useState(false);
+    const [pendingFiles, setPendingFiles] = useState([]);
+    const [formData, setFormData] = useState({});
+    const [archiveDialog, setArchiveDialog] = useState({
+        open: false, reason: '', runLocation: '', runCause: ''
+    });
+
+    // Initialize form when item loads, aber NICHT überschreiben, wenn Nutzer gerade editiert
+    useEffect(() => {
+        if (item && !isEditing) {
+            setFormData({
+                name: item.name || '',
+                customId: item.customId || '', 
+                brand: item.brand || '',
+                model: item.model || '',
+                mainCategory: item.mainCategory || 'Nylons',
+                subCategory: item.subCategory || '',
+                material: item.material || '',
+                cost: item.cost || '',
+                condition: item.condition || 5,
+                location: item.location || '',
+                suitablePeriod: item.suitablePeriod || 'Beide', 
+                purchaseDate: item.purchaseDate ? new Date(item.purchaseDate).toISOString().split('T')[0] : '', 
+                notes: item.notes || ''
+            });
+        }
+    }, [item, isEditing]);
+
     const galleryImages = useMemo(() => {
         const existing = item?.images || (item?.imageUrl ? [item.imageUrl] : []);
         const pending = pendingFiles.map(p => p.preview);
         return [...existing, ...pending];
     }, [item, pendingFiles]);
 
-    // --- ACTIONS ---
+    const handleAddImages = (e) => {
+        if (e.target.files && e.target.files.length > 0) {
+            const files = Array.from(e.target.files);
+            const newPending = files.map(file => ({
+                file,
+                preview: URL.createObjectURL(file)
+            }));
+            setPendingFiles(prev => [...prev, ...newPending]);
+        }
+    };
+
+    return {
+        isEditing, setIsEditing, formData, setFormData, archiveDialog, setArchiveDialog,
+        pendingFiles, setPendingFiles, galleryImages, handleAddImages
+    };
+}
+
+// ==========================================
+// 3. ACTIONS HOOK
+// ==========================================
+function useItemActions(config) {
+    const {
+        id, currentUser, navigate, item, formData, pendingFiles, archiveDialog,
+        recoveryInfo, isBusy, writeTag, setItem, setIsEditing, setPendingFiles, setArchiveDialog
+    } = config;
 
     const handleStartSession = async (force = false, viaNFC = false) => {
         if (!currentUser || !id) return;
@@ -252,28 +262,19 @@ export function useItemDetailLogic() {
         } catch (e) { console.error(e); alert("Fehler beim Starten."); }
     };
 
-    const handleAddImages = (e) => {
-        if (e.target.files && e.target.files.length > 0) {
-            const files = Array.from(e.target.files);
-            const newPending = files.map(file => ({
-                file,
-                preview: URL.createObjectURL(file)
-            }));
-            setPendingFiles(prev => [...prev, ...newPending]);
-        }
-    };
-
     const handleSave = async () => {
         if (!currentUser || !id) return;
         try {
-            const uploadedUrls = [];
+            let uploadedUrls = [];
+            
+            // Upload Bottleneck Fix: Uploads parallelisieren
             if (pendingFiles.length > 0) {
-                for (const p of pendingFiles) {
+                const uploadPromises = pendingFiles.map(async (p) => {
                     const fileRef = ref(storage, `users/${currentUser.uid}/items/${Date.now()}_${p.file.name}`);
-                    await uploadBytes(fileRef, p.file);
-                    const url = await getDownloadURL(fileRef);
-                    uploadedUrls.push(url);
-                }
+                    const snapshot = await uploadBytes(fileRef, p.file);
+                    return await getDownloadURL(snapshot.ref);
+                });
+                uploadedUrls = await Promise.all(uploadPromises);
             }
 
             const existingImages = item.images || (item.imageUrl ? [item.imageUrl] : []);
@@ -340,27 +341,55 @@ export function useItemDetailLogic() {
         }
     };
 
+    return { handleStartSession, handleSave, handleWash, handleArchive, handleWriteNFC };
+}
+
+// ==========================================
+// MAIN COMPOSER HOOK (Exportiert)
+// ==========================================
+export function useItemDetailLogic() {
+    const { id } = useParams();
+    const navigate = useNavigate();
+    const location = useLocation(); 
+    const { currentUser } = useAuth();
+    const { writeTag } = useNFCGlobal();
+
+    // 1. Daten holen (Fetcher)
+    const { item, setItem, loading, isBusy, dropdowns, stats, recoveryInfo, historyEvents } = useItemFetcher(id, currentUser, navigate);
+    
+    // 2. Formular-Zustand verwalten (UI State)
+    const form = useItemForm(item);
+    
+    // 3. Aktionen bündeln (Mutations)
+    const actions = useItemActions({
+        id, currentUser, navigate, item, 
+        formData: form.formData, pendingFiles: form.pendingFiles, archiveDialog: form.archiveDialog,
+        recoveryInfo, isBusy, writeTag, setItem, 
+        setIsEditing: form.setIsEditing, setPendingFiles: form.setPendingFiles, setArchiveDialog: form.setArchiveDialog
+    });
+
+    // NFC Autostart Check
     useEffect(() => {
         if (!loading && item && location.state?.nfcAction === 'start_session') {
             navigate(location.pathname, { replace: true, state: {} });
             setTimeout(() => {
-                handleStartSession(false, true);
+                actions.handleStartSession(false, true);
             }, 100);
         }
-    }, [loading, item, location.state]);
+    }, [loading, item, location.state, navigate]);
 
     return {
-        item, loading, isEditing, isBusy, recoveryInfo, 
-        formData, dropdowns, stats, historyEvents, archiveDialog,
-        galleryImages,
-        setIsEditing, setFormData, setArchiveDialog,
+        item, loading, isEditing: form.isEditing, isBusy, recoveryInfo, 
+        formData: form.formData, dropdowns, stats, historyEvents, archiveDialog: form.archiveDialog,
+        galleryImages: form.galleryImages,
+        setIsEditing: form.setIsEditing, setFormData: form.setFormData, setArchiveDialog: form.setArchiveDialog,
         actions: {
-            startSession: handleStartSession,
-            save: handleSave,
-            wash: handleWash,
-            archive: handleArchive,
-            writeNFC: handleWriteNFC,
-            addImages: handleAddImages
+            startSession: actions.handleStartSession,
+            save: actions.handleSave,
+            wash: actions.handleWash,
+            archive: actions.handleArchive,
+            writeNFC: actions.handleWriteNFC,
+            addImages: form.handleAddImages
         }
     };
 }
