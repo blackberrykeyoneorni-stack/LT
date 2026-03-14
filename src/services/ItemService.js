@@ -5,6 +5,7 @@ import {
     updateDoc, 
     deleteDoc, 
     doc, 
+    setDoc,
     query, 
     orderBy, 
     onSnapshot, 
@@ -25,9 +26,19 @@ export const calculateItemRecoveryStatus = (item, sessions, restingHoursSetting 
     let lastWornDate = safeDate(item.lastWorn);
 
     if (sessions && Array.isArray(sessions) && sessions.length > 0) {
-        const lastSession = sessions.find(s => s.endTime);
-        if (lastSession) {
-            const sessionEnd = safeDate(lastSession.endTime);
+        // Robustes Ermitteln der absolut letzten beendeten Session (unabhängig von der Array-Sortierung)
+        const latestSession = sessions.reduce((latest, current) => {
+            if (!current.endTime) return latest;
+            const currentEnd = safeDate(current.endTime);
+            if (!currentEnd) return latest;
+            
+            if (!latest) return current;
+            const latestEnd = safeDate(latest.endTime);
+            return currentEnd > latestEnd ? current : latest;
+        }, null);
+
+        if (latestSession) {
+            const sessionEnd = safeDate(latestSession.endTime);
             if (sessionEnd && (!lastWornDate || sessionEnd > lastWornDate)) {
                 lastWornDate = sessionEnd;
             }
@@ -74,15 +85,23 @@ export const subscribeToItems = (userId, callback) => {
 /**
  * Fügt ein neues Item hinzu.
  */
-export const addItem = async (userId, itemData) => {
-    return await addDoc(collection(db, `users/${userId}/${COLLECTION_NAME}`), {
+export const addItem = async (userId, itemData, customId = null) => {
+    const payload = {
         ...itemData,
         createdAt: serverTimestamp(),
         wearCount: 0,
         totalMinutes: 0,
         status: 'active', // active, washing, archived, worn
         historyLog: []
-    });
+    };
+
+    if (customId) {
+        const itemRef = doc(db, `users/${userId}/${COLLECTION_NAME}`, customId);
+        await setDoc(itemRef, payload);
+        return itemRef;
+    } else {
+        return await addDoc(collection(db, `users/${userId}/${COLLECTION_NAME}`), payload);
+    }
 };
 
 /**

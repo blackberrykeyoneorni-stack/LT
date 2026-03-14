@@ -66,19 +66,8 @@ export function ItemProvider({ children }) {
   const addItem = async (itemData, customId = null) => {
     if (!currentUser) return;
     
-    if (customId) {
-        const itemsRef = collection(db, 'users', currentUser.uid, 'items');
-        await setDoc(doc(itemsRef, customId), {
-            ...itemData,
-            createdAt: serverTimestamp(),
-            wearCount: 0,
-            totalMinutes: 0,
-            status: 'active',
-            historyLog: []
-        });
-    } else {
-        await ItemService.addItem(currentUser.uid, itemData);
-    }
+    // Delegation der kompletten Logik an den Service Layer
+    await ItemService.addItem(currentUser.uid, itemData, customId);
   };
 
   const deleteItem = async (id) => {
