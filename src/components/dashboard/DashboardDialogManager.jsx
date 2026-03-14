@@ -63,6 +63,9 @@ export default function DashboardDialogManager(props) {
         currentCondition, setCurrentCondition, handleConfirmAuditItem, indexDialogOpen, setIndexDialogOpen, indexDetails, toast, handleCloseToast
     } = props;
 
+    const auditItem = pendingAuditItems[currentAuditIndex];
+    const auditImg = auditItem?.imageUrl || (auditItem?.images && auditItem.images.length > 0 ? auditItem.images[0] : null);
+
     return (
         <>
             <TzdOverlay active={tzdActive} allItems={items} />
@@ -122,8 +125,20 @@ export default function DashboardDialogManager(props) {
             <ReleaseProtocolDialog open={releaseDialogOpen} onClose={() => setReleaseDialogOpen(false)} step={releaseStep} timer={releaseTimer} intensity={releaseIntensity} setIntensity={setReleaseIntensity} onStartTimer={handleStartReleaseTimer} onSkipTimer={handleSkipTimer} onDecision={handleReleaseDecision} />
             
             <Dialog open={auditOpen} onClose={() => setAuditOpen(false)} fullWidth PaperProps={DESIGN_TOKENS.dialog.paper}>
-                <DialogTitle sx={DESIGN_TOKENS.dialog.title.sx}>Audit: {pendingAuditItems[currentAuditIndex]?.name}</DialogTitle>
+                <DialogTitle sx={DESIGN_TOKENS.dialog.title.sx}>Audit: {auditItem?.name}</DialogTitle>
                 <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
+                    {auditImg && (
+                        <Box sx={{ mt: 2, mb: 2, display: 'flex', justifyContent: 'center' }}>
+                            <img 
+                                src={auditImg} 
+                                alt="Item" 
+                                style={{ maxWidth: '100%', maxHeight: '200px', borderRadius: '8px', objectFit: 'contain' }} 
+                            />
+                        </Box>
+                    )}
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 1, textAlign: 'center' }}>
+                        ID: {auditItem?.customId || auditItem?.id || 'Keine ID'}
+                    </Typography>
                     <TextField type="number" label="Zustand (1-5)" value={currentCondition} onChange={e => setCurrentCondition(parseInt(e.target.value))} fullWidth sx={{mt:2}} />
                 </DialogContent>
                 <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}>

@@ -26,8 +26,6 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
 
   return (
     <Box sx={{ mb: 4 }}>
-      {/* Überschrift "Aktive Protokolle" entfernt, wie gewünscht */}
-      
       <AnimatePresence>
         {activeSessions.map((session) => {
             // Alle Items der Session laden
@@ -45,27 +43,34 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
             const isPunishment = session.type === 'punishment';
             const isTZD = session.type === 'tzd' || session.tzdExecuted; 
             
-            // Bestimmung von Label & Farbe basierend auf Session-Typ
+            // Bestimmung von Label & nuttiger Farbigkeit basierend auf Session-Typ
             let typeLabel = "FREIWILLIG";
-            let typeColor = "success";     
-            let borderColor = PALETTE.accents.green;
+            let borderColor = PALETTE.primary.main;
+            
+            // Nutzervorgabe: Farbe des Buttons als Rand/Text, Textfarbe des Buttons als Hintergrund
+            let chipColor = PALETTE.primary.main; 
+            let chipBg = '#000000'; // Primary button text is black
 
             if (session.isDebtSession) {
                 typeLabel = "SCHULDENABBAU";
-                typeColor = "error";       
                 borderColor = PALETTE.accents.red;
+                chipColor = PALETTE.accents.red;
+                chipBg = '#FFFFFF'; // Error button text is white
             } else if (isPunishment) {
                 typeLabel = "STRAFARBEIT";
-                typeColor = "error";
                 borderColor = PALETTE.accents.red;
+                chipColor = PALETTE.accents.red;
+                chipBg = '#FFFFFF';
             } else if (isTZD) {
                 typeLabel = "ZEITLOSES DIKTAT";
-                typeColor = "default";      
-                borderColor = "#555";
+                borderColor = PALETTE.accents.red;
+                chipColor = PALETTE.accents.red;
+                chipBg = '#FFFFFF';
             } else if (session.type === 'instruction') {
                 typeLabel = "INSTRUCTION";
-                typeColor = "warning";      
                 borderColor = PALETTE.accents.gold;
+                chipColor = PALETTE.accents.gold;
+                chipBg = '#000000'; // Warning button text is usually dark/black
             }
 
             return (
@@ -87,10 +92,16 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
                             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                                 <Chip 
                                     label={typeLabel} 
-                                    color={typeColor} 
-                                    size="small" 
-                                    variant="filled" 
-                                    sx={{ fontWeight: 'bold', fontSize: '0.75rem', height: '24px' }}
+                                    sx={{ 
+                                        fontWeight: 900, 
+                                        fontSize: '0.75rem', 
+                                        height: '24px',
+                                        color: chipColor,
+                                        bgcolor: chipBg,
+                                        border: `2px solid ${chipColor}`,
+                                        boxShadow: `0 0 10px ${chipColor}40`,
+                                        textShadow: chipBg === '#000000' ? `0 0 5px ${chipColor}` : 'none'
+                                    }}
                                 />
                                 {isDebtLocked && (
                                     <Chip 

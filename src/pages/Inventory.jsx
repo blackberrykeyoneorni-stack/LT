@@ -186,6 +186,8 @@ export default function Inventory() {
         case 'priceDesc': return (b.cost || 0) - (a.cost || 0);
         case 'priceAsc': return (a.cost || 0) - (b.cost || 0);
         case 'conditionDesc': return (b.condition || 0) - (a.condition || 0);
+        case 'wearCountDesc': return (b.wearCount || 0) - (a.wearCount || 0);
+        case 'wearCountAsc': return (a.wearCount || 0) - (b.wearCount || 0);
         case 'nameAsc': 
             const nameA = (a.brand || '') + (a.model || '') + (a.name || '');
             const nameB = (b.brand || '') + (b.model || '') + (b.name || '');
@@ -364,6 +366,8 @@ export default function Inventory() {
             <MenuItem value="priceDesc">Preis (Hoch {'>'} Niedrig)</MenuItem>
             <MenuItem value="priceAsc">Preis (Niedrig {'>'} Hoch)</MenuItem>
             <MenuItem value="conditionDesc">Zustand (Best)</MenuItem>
+            <MenuItem value="wearCountDesc">Am häufigsten getragen</MenuItem>
+            <MenuItem value="wearCountAsc">Am seltensten getragen</MenuItem>
             <MenuItem value="nameAsc">Name A-Z</MenuItem>
           </TextField>
 

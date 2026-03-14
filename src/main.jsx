@@ -36,7 +36,18 @@ class ErrorBoundary extends React.Component {
           </pre>
 
           <button 
-            onClick={() => { localStorage.clear(); window.location.reload(); }} 
+            onClick={async () => { 
+              sessionStorage.clear();
+              if ('caches' in window) {
+                try {
+                  const cacheNames = await caches.keys();
+                  await Promise.all(cacheNames.map(name => caches.delete(name)));
+                } catch (e) {
+                  console.error(e);
+                }
+              }
+              window.location.reload(); 
+            }} 
             style={{ 
               padding: '15px 30px', 
               marginTop: 20, 
