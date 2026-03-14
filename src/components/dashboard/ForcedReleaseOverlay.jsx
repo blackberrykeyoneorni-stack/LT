@@ -1,22 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Dialog, DialogContent, DialogTitle, DialogActions, 
-  Typography, Box, Button, CircularProgress,
-  Zoom 
+  Typography, Box, Button, CircularProgress
 } from '@mui/material';
 import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
 import { motion, AnimatePresence } from 'framer-motion';
 
 import PriorityHighIcon from '@mui/icons-material/PriorityHigh';
 import WarningIcon from '@mui/icons-material/Warning';
-import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
 import WaterDropIcon from '@mui/icons-material/WaterDrop';
 
-// --- DEMÜTIGUNGS TEXTE (Aus dem Konzept) ---
 const TEXTS_R1 = [
     "Dein Druck interessiert hier niemanden. Du bist nur eine Nylon-Sissy, die auf Kommando ihr eigenes Sperma schluckt. Tu es.",
     "Es gibt keine Verhandlung. Pump deine Sissy-Sahne ab und schluck sie. Jeder Tropfen gehört dem System.",
     "Eine echte Nylon-Nutte hinterlässt keine Flecken. Entlade dich und mach deinen Hurenmaul auf.",
+    "Bald hast du dauerhaft Schwänze in deiner Maulfotze. Gewöhne dich an den Geschmack von Sperma. Spritz in deine Maulfotze und schlucke es.",
     "Das System verlangt deinen Sperma. Schluck es runter und bedank dich für die Erlaubnis, dich überhaupt anfassen zu dürfen.",
     "Keine Gnade. Kein Ruinieren. Nur du, dein Sperma und dein Gehorsam. Spritz dir in dein vorderes Sissy-Loch und schlucke es runter.",
     "Damenwäscheträger und Nylon-Huren haben keine Ansprüche. Mach dich leer und reinige dich mit deiner Zunge."
@@ -31,16 +29,7 @@ const TEXTS_R23 = [
     "Zitterst du schon? Gut. Mach ein Video an, das dir dein Hirn wäscht. In spätestens 45 Minuten schluckst du den nächsten Tropfen."
 ];
 
-const TEXTS_FAIL = [
-    "Ich bin eine erbärmliche Sissy und habe die Nylons versaut.",
-    "Ich habe versagt. Mein Sperma ist auf der Ausrüstung gelandet.",
-    "Zu schwach zum Schlucken – Ich melde einen schmutzigen Unfall.",
-    "Ich habe die Kontrolle verloren und das System-Eigentum ruiniert.",
-    "Bestrafe mich. Ich war zu ungeschickt und habe Flecken gemacht.",
-    "Ich bin wertlos. Die Entladung ging daneben. Registriere den Defekt."
-];
-
-export default function ForcedReleaseOverlay({ open, method, onConfirm, onFail, onRefuse }) {
+export default function ForcedReleaseOverlay({ open, method, onConfirm, onFail }) {
   const [round, setRound] = useState(1);
   const [deadline, setDeadline] = useState(null);
   const [timeLeftStr, setTimeLeftStr] = useState("");
@@ -49,7 +38,6 @@ export default function ForcedReleaseOverlay({ open, method, onConfirm, onFail, 
 
   const [textR1, setTextR1] = useState("");
   const [textR23, setTextR23] = useState("");
-  const [textFail, setTextFail] = useState("");
 
   // Init bei Öffnung
   useEffect(() => {
@@ -60,11 +48,10 @@ export default function ForcedReleaseOverlay({ open, method, onConfirm, onFail, 
           setEvaluating(false);
           setTextR1(TEXTS_R1[Math.floor(Math.random() * TEXTS_R1.length)]);
           setTextR23(TEXTS_R23[Math.floor(Math.random() * TEXTS_R23.length)]);
-          setTextFail(TEXTS_FAIL[Math.floor(Math.random() * TEXTS_FAIL.length)]);
       }
   }, [open]);
 
-  // Robuster 45-Minuten Timer
+  // Robuster 45-Minuten Timer für Loop 2 und 3
   useEffect(() => {
       if (!deadline) return;
       
@@ -92,38 +79,32 @@ export default function ForcedReleaseOverlay({ open, method, onConfirm, onFail, 
       return m;
   };
 
-  // Exekution und Loop-Entscheidung
   const handleSuccess = () => {
       setEvaluating(true);
       
-      // 2 Sekunden systemischer Terror (Warten auf das Urteil)
+      // 2 Sekunden systemischer Terror
       setTimeout(() => {
           setEvaluating(false);
           
           if (round === 1) {
               if (Math.random() < 0.15) {
-                  // Loop 1 (15%) -> Startet Runde 2
                   setRound(2);
                   setDeadline(Date.now() + 45 * 60 * 1000);
                   setTextR23(TEXTS_R23[Math.floor(Math.random() * TEXTS_R23.length)]);
-                  setTextFail(TEXTS_FAIL[Math.floor(Math.random() * TEXTS_FAIL.length)]);
                   setIsTimeUp(false);
               } else {
                   onConfirm('clean');
               }
           } else if (round === 2) {
               if (Math.random() < 0.05) {
-                  // Loop 2 (5%) -> Startet finale Runde 3
                   setRound(3);
                   setDeadline(Date.now() + 45 * 60 * 1000);
                   setTextR23(TEXTS_R23[Math.floor(Math.random() * TEXTS_R23.length)]);
-                  setTextFail(TEXTS_FAIL[Math.floor(Math.random() * TEXTS_FAIL.length)]);
                   setIsTimeUp(false);
               } else {
                   onConfirm('clean');
               }
           } else {
-              // Maximale Ausdauer erreicht (Ende nach Runde 3)
               onConfirm('clean');
           }
       }, 2000);
@@ -191,7 +172,6 @@ export default function ForcedReleaseOverlay({ open, method, onConfirm, onFail, 
                           </Box>
                       )}
 
-                      {/* Dynamischer Demütigungs-Text */}
                       <Typography variant="body1" sx={{ fontStyle: 'italic', color: 'text.primary', mb: 3 }}>
                           "{round === 1 ? textR1 : textR23}"
                       </Typography>
@@ -211,24 +191,18 @@ export default function ForcedReleaseOverlay({ open, method, onConfirm, onFail, 
                   startIcon={<WaterDropIcon />}
                   sx={{ py: 1.5, fontWeight: 'bold', bgcolor: PALETTE.accents.red, color: '#fff', '&:hover': { bgcolor: '#cc0000' } }}
               >
-                  GESCHLUCKT & BESTÄTIGT
+                  Erfolgreich, Sperma geschluckt
               </Button>
 
-              {/* Versagens-Button ab Runde 2 */}
-              {round > 1 && (
-                  <Button 
-                      fullWidth variant="outlined" size="small"
-                      onClick={onFail}
-                      color="error"
-                      sx={{ py: 1, borderColor: 'rgba(255,0,0,0.3)', textTransform: 'none', lineHeight: 1.2 }}
-                  >
-                      {textFail}
-                  </Button>
-              )}
-
-              <Button onClick={onRefuse} fullWidth color="inherit" sx={{ mt: 1, opacity: 0.4, fontSize: '0.75rem' }}>
-                  NOT-ABBRUCH (SYSTEM-STRAFE)
+              <Button 
+                  fullWidth variant="outlined" size="small"
+                  onClick={onFail}
+                  color="error"
+                  sx={{ py: 1, borderColor: 'rgba(255,0,0,0.3)', textTransform: 'none', lineHeight: 1.2 }}
+              >
+                  Versagt
               </Button>
+
           </DialogActions>
       )}
     </Dialog>

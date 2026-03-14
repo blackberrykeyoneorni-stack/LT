@@ -1,185 +1,131 @@
+// src/services/SessionService.js
 import { db } from '../firebase';
 import { 
     collection, doc, writeBatch, serverTimestamp, getDoc, addDoc, updateDoc, increment 
 } from 'firebase/firestore';
 import { addCredits, getTimeBankBalance, calculateEarnedCredits } from './TimeBankService';
+import { registerPunishment } from './PunishmentService';
 
-/**
- * Zentraler Service zum Starten von Sessions.
- * Beinhaltet jetzt die DEBT PROTOCOL Logik (Währungstrennung + TZD-Zwang).
- */
-export const startSession = async (userId, params) => {
-    const { 
-        items,      
-        itemId,     
-        type = 'voluntary', 
-        periodId, 
-        acceptedAt, 
-        note = '', 
-        verifiedViaNfc = false,
-        instructionDurationMinutes 
-    } = params;
+export const startSession = async (userId, sessionData) => {
+    if (!userId || !sessionData) throw new Error("Parameter fehlen.");
 
-    if (!userId) throw new Error("User ID fehlt.");
-
-    // Items vorbereiten
-    let itemsToProcess = [];
-    if (items && Array.isArray(items) && items.length > 0) {
-        itemsToProcess = items;
-    } else if (itemId) {
-        itemsToProcess = [{ id: itemId }];
-    }
-
-    if (itemsToProcess.length === 0) return;
-
-    // --- NEU: TRANSIT PROTOCOL CHECK (Die Gnadenfrist) ---
-    let transitData = null;
-    let penaltyTriggered = false;
-
-    if (type === 'instruction') {
-        const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
-        const instrSnap = await getDoc(instrRef);
-
-        if (instrSnap.exists()) {
-            const iData = instrSnap.data();
-            if (iData.transitProtocol && iData.transitProtocol.active) {
-                const transit = iData.transitProtocol;
-                let isLate = false;
-
-                const nsSnap = await getDoc(doc(db, `users/${userId}/sessions`, transit.nightSessionId));
-                if (nsSnap.exists()) {
-                    const nsData = nsSnap.data();
-                    if (nsData.endTime) {
-                        const endT = nsData.endTime.toDate ? nsData.endTime.toDate().getTime() : new Date(nsData.endTime).getTime();
-                        if ((Date.now() - endT) / 60000 > 30) isLate = true;
-                    }
-                } else if (transit.nightSessionEndTime) {
-                    if ((Date.now() - new Date(transit.nightSessionEndTime).getTime()) / 60000 > 30) isLate = true;
-                }
-
-                if (isLate) {
-                    console.log("Transit Protocol: Grace Period verpasst! Strafe auslösen.");
-                    penaltyTriggered = true;
-                    
-                    // Backup-Item für den Rest der Funktion erzwingen
-                    itemsToProcess = itemsToProcess.map(it => 
-                        it.id === transit.primaryItemId ? { id: transit.backupItem.id } : it
-                    );
-
-                    // Instruction gnadenlos überschreiben und Zwangsentladung fordern
-                    await updateDoc(instrRef, {
-                        "forcedRelease.required": true,
-                        "forcedRelease.executed": false,
-                        "isPenalty": true,
-                        "transitPenaltyTriggered": true,
-                        "items": itemsToProcess.map(i => ({ id: i.id }))
-                    });
-                } else {
-                    console.log("Transit Protocol: Grace Period (30 Min) eingehalten.");
-                    transitData = { active: true, itemId: transit.primaryItemId };
-                }
-            }
-        }
-    }
-
-    const allItemIds = itemsToProcess.map(i => i.id);
-    const mainItem = itemsToProcess[0]; 
-
-    // --- DEBT PROTOCOL CHECK ---
-    const timeBank = await getTimeBankBalance(userId);
-    let debtType = null; 
-    let debtAmount = 0;
-
-    if (timeBank.nc < 0) {
-        debtType = 'nylon';
-        debtAmount = Math.abs(timeBank.nc);
-    } else if (timeBank.lc < 0) {
-        debtType = 'lingerie';
-        debtAmount = Math.abs(timeBank.lc);
-    }
-
-    let isDebtSession = false;
-    let enforcedMinDuration = 0;
-
-    if (debtType) {
-        const sub = (mainItem.subCategory || '').toLowerCase();
-        const cat = (mainItem.mainCategory || '').toLowerCase();
-        
-        const isNylonItem = sub.includes('strumpfhose') || sub.includes('tights') || 
-                            sub.includes('halterlose') || sub.includes('stockings') || 
-                            cat.includes('nylons');
-
-        if (debtType === 'nylon' && !isNylonItem) {
-            throw new Error("BLOCKIERT: Nylon-Schulden müssen mit Nylons getilgt werden.");
+    try {
+        const tbBalance = await getTimeBankBalance(userId);
+        if (tbBalance && tbBalance.isBankrupt && !sessionData.type.includes('debt') && !sessionData.type.includes('punishment')) {
+            throw new Error("TIME BANKRUPTCY. Freiwillige Sessions gesperrt.");
         }
 
-        if (debtType === 'lingerie' && isNylonItem) {
-             throw new Error("BLOCKIERT: Dessous-Schulden erfordern Lingerie.");
+        const items = sessionData.items || [];
+        const itemIds = items.map(i => i.id);
+
+        if (itemIds.length === 0 && sessionData.itemId) {
+            itemIds.push(sessionData.itemId);
+            items.push({ id: sessionData.itemId });
         }
 
-        isDebtSession = true;
-        enforcedMinDuration = debtAmount;
-        console.log(`DEBT PROTOCOL: Session enforced for ${debtAmount} mins (${debtType}).`);
-    }
+        if (itemIds.length === 0) throw new Error("Keine Items ausgewählt.");
 
-    let lagMinutes = 0;
-    if (type === 'instruction' && acceptedAt) {
-        const acceptDate = new Date(acceptedAt);
-        if (!isNaN(acceptDate.getTime())) {
-            const diffMs = Date.now() - acceptDate.getTime();
-            lagMinutes = Math.max(0, Math.floor(diffMs / 60000));
+        let isDebtSession = false;
+        let minDuration = 0;
+        if (tbBalance && tbBalance.debtLocked) {
+             isDebtSession = true;
+             minDuration = 60; 
         }
-    }
 
-    let finalNote = note;
-    if (penaltyTriggered) {
-        finalNote = (finalNote ? finalNote + ' | ' : '') + 'Transit-Frist (30 Min) verpasst. Ersatz erzwungen und Zwangsentladung gefordert.';
-    }
+        const payload = {
+            itemIds,
+            itemsDetails: items.map(i => ({
+                id: i.id,
+                name: i.name || i.subCategory || 'Unknown',
+                brand: i.brand || 'Unknown',
+                category: i.category || i.mainCategory || 'Nylons',
+                customId: i.customId || null, 
+                imageUrl: i.imageUrl || (i.images && i.images.length > 0 ? i.images[0] : null)
+            })),
+            type: sessionData.type || 'voluntary',
+            periodId: sessionData.periodId || null,
+            acceptedAt: sessionData.acceptedAt || null,
+            verifiedViaNfc: sessionData.verifiedViaNfc || false,
+            isDebtSession,
+            minDuration,
+            startTime: serverTimestamp(),
+            endTime: null,
+            durationMinutes: 0,
+            isActive: true,
+            isPornActive: false 
+        };
 
-    const sessionData = {
-        userId,
-        itemId: allItemIds[0], 
-        itemIds: allItemIds,   
-        type,
+        const batch = writeBatch(db);
+
+        const newSessionRef = doc(collection(db, `users/${userId}/sessions`));
+        batch.set(newSessionRef, payload);
+
+        for (const itemId of itemIds) {
+            const itemRef = doc(db, `users/${userId}/items`, itemId);
+            batch.update(itemRef, { status: 'worn' });
+        }
+
+        if (sessionData.type === 'instruction') {
+             const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
+             batch.update(instrRef, {
+                 isActive: true,
+                 activeSessionId: newSessionRef.id
+             });
+        }
+
+        if (sessionData.type === 'punishment') {
+             const punRef = doc(db, `users/${userId}/status/activePunishment`);
+             batch.update(punRef, {
+                 isActive: true,
+                 activeSessionId: newSessionRef.id
+             });
+        }
+
+        await batch.commit();
+        return newSessionRef.id;
+
+    } catch (e) {
+        console.error("Start Session Fehler:", e);
+        throw e;
+    }
+};
+
+export const startTransitProtocol = async (userId, itemId) => {
+    if (!userId || !itemId) throw new Error("Parameter fehlen.");
+    const batch = writeBatch(db);
+    
+    const newSessionRef = doc(collection(db, `users/${userId}/sessions`));
+    const payload = {
+        itemIds: [itemId],
+        itemsDetails: [{ id: itemId, name: 'Transit Protocol Item' }],
+        type: 'instruction',
+        transitProtocolActive: true, 
+        transitItemId: itemId,
         startTime: serverTimestamp(),
         endTime: null,
-        isActive: true,
-        note: finalNote,
-        targetDurationMinutes: instructionDurationMinutes ? Number(instructionDurationMinutes) : null,
-        complianceLagMinutes: lagMinutes,
-        
-        isDebtSession: isDebtSession,
-        minDuration: enforcedMinDuration,
-
-        // TRANSIT PROTOCOL FLAGS
-        transitProtocolActive: transitData ? true : false,
-        transitItemId: transitData ? transitData.itemId : null,
-        transitPenaltyTriggered: penaltyTriggered,
-        isPunitive: isDebtSession || penaltyTriggered
+        durationMinutes: 0,
+        isActive: true
     };
+    batch.set(newSessionRef, payload);
 
-    if (type === 'instruction') {
-        sessionData.periodId = periodId;
-    }
-    if (verifiedViaNfc) {
-        sessionData.verifiedViaNfc = true;
-    }
+    const itemRef = doc(db, `users/${userId}/items`, itemId);
+    batch.update(itemRef, { status: 'worn' });
 
-    const sessionRef = await addDoc(collection(db, `users/${userId}/sessions`), sessionData);
-    const batch = writeBatch(db);
-
-    allItemIds.forEach(id => {
-        batch.update(doc(db, `users/${userId}/items`, id), { status: 'wearing' });
+    const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
+    batch.update(instrRef, {
+        "transitProtocol.active": true,
+        "transitProtocol.sessionId": newSessionRef.id,
+        "transitProtocol.startTime": serverTimestamp(),
+        "forcedRelease.required": true,
+        "forcedRelease.executed": false,
+        isActive: true,
+        activeSessionId: newSessionRef.id
     });
 
     await batch.commit();
-
-    return { id: sessionRef.id, ...sessionData };
+    return newSessionRef.id;
 };
 
-/**
- * Beendet eine Session, aktualisiert Stats und berechnet Time Bank Credits.
- */
 export const stopSession = async (userId, sessionId, feedback = {}) => {
     if (!userId || !sessionId) throw new Error("Parameter fehlen.");
 
@@ -233,6 +179,23 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
     }
     batch.update(sessionRef, updateData);
 
+    // --- POST-NUT CLARITY EVALUATION (Retention Tracking) ---
+    if (sessionData.forcedReleaseAt) {
+        const releaseTime = sessionData.forcedReleaseAt?.toDate ? sessionData.forcedReleaseAt.toDate() : new Date(sessionData.forcedReleaseAt);
+        const retentionMinutes = Math.floor((endTime - releaseTime) / 60000);
+        const MIN_RETENTION_MINUTES = 60; // 60 Minuten Halte-Schwelle
+
+        if (retentionMinutes < MIN_RETENTION_MINUTES) {
+            // Versagt: Dem Drang nachgegeben und zu früh abgelegt
+            await registerPunishment(
+                userId, 
+                `Schwäche nach Entladung: Items nach ${retentionMinutes}m abgelegt (gefordert: ${MIN_RETENTION_MINUTES}m)`, 
+                120
+            );
+        }
+    }
+    // --------------------------------------------------------
+
     const itemIds = sessionData.itemIds || (sessionData.itemId ? [sessionData.itemId] : []);
     const itemDetails = [];
 
@@ -269,36 +232,70 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
                        (typeof earnedResult === 'number' && earnedResult > 0);
 
     if (isEligible) {
-        const hasNylon = itemDetails.some(item => {
-            const sub = (item.subCategory || '').toLowerCase();
-            const cat = (item.mainCategory || '').toLowerCase();
-            const name = (item.name || '').toLowerCase();
-            return sub.includes('strumpfhose') || sub.includes('tights') || 
-                   sub.includes('halterlose') || sub.includes('stockings') || sub.includes('strumpf') ||
-                   cat.includes('nylons') || cat.includes('nylon') || name.includes('strumpf');
-        });
-
-        const hasLingerie = itemDetails.some(item => {
-            const sub = (item.subCategory || '').toLowerCase();
-            const cat = (item.mainCategory || '').toLowerCase();
-            const name = (item.name || '').toLowerCase();
-            return sub.includes('höschen') ||
-                   cat.includes('dessous') || cat.includes('lingerie') || cat.includes('wäsche') ||
-                   name.includes('höschen');
-        });
-
-        if (hasNylon) {
-            await addCredits(userId, earnedResult, 'nylon');
+        try {
+            const resultValue = (typeof earnedResult === 'object') ? earnedResult.exactCredits : earnedResult;
+            
+            // Credits nach Hauptkategorie aufteilen (Heuristisch auf Basis des ersten Items, falls gemischt)
+            let cat = 'nylon';
+            if (itemDetails.length > 0) {
+                const mainCat = (itemDetails[0].category || '').toLowerCase();
+                if (mainCat.includes('dessous') || mainCat.includes('lingerie') || mainCat.includes('korsett')) {
+                    cat = 'lingerie';
+                }
+            }
+            
+            if (cat === 'nylon') {
+                await addCredits(userId, resultValue, 'nylon');
+            } else {
+                await addCredits(userId, resultValue, 'lingerie');
+            }
+            
             creditCalculated = true;
-        }
-
-        if (hasLingerie) {
-            await addCredits(userId, earnedResult, 'lingerie');
-            creditCalculated = true;
+            
+        } catch (e) {
+            console.error("Credit Buchung fehlgeschlagen:", e);
         }
     }
 
-    await batch.commit(); 
+    // Cleanup System-Status
+    if (sessionData.type === 'instruction') {
+        const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
+        batch.update(instrRef, { isActive: false, activeSessionId: null });
+        
+        // Falls das Transit-Protocol aktiv war, muss es sauber abgeschlossen werden
+        if (sessionData.transitProtocolActive) {
+            batch.update(instrRef, {
+                 "transitProtocol.active": false,
+                 "transitProtocol.sessionId": null,
+                 "transitProtocol.startTime": null
+            });
+        }
+    } else if (sessionData.type === 'punishment') {
+        const punRef = doc(db, `users/${userId}/status/activePunishment`);
+        batch.update(punRef, { isActive: false, activeSessionId: null });
+    }
 
-    return { id: sessionId, ...sessionData, endTime, durationMinutes, creditCalculated };
+    await batch.commit();
+    return { creditCalculated };
+};
+
+export const updateSessionPornStatus = async (userId, sessionId, isPornActive) => {
+    if (!userId || !sessionId) return;
+    try {
+        const sessionRef = doc(db, `users/${userId}/sessions`, sessionId);
+        await updateDoc(sessionRef, { isPornActive });
+    } catch (e) {
+        console.error("Fehler beim Update des Porn-Status", e);
+    }
+};
+
+export const registerInstructionRelease = async (userId) => {
+    try {
+        const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
+        await updateDoc(instrRef, {
+            "forcedRelease.executed": true
+        });
+    } catch (e) {
+        console.error("Fehler beim Registrieren des Instruction Release", e);
+    }
 };
