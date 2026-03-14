@@ -114,11 +114,11 @@ export default function Layout() {
           }}
           sx={{ bgcolor: 'transparent', height: 70 }}
         >
-          <BottomNavigationAction label="Home" icon={<DashboardIcon />} sx={{ '&.Mui-selected': { color: PALETTE.primary.main } }} />
-          <BottomNavigationAction label="Items" icon={<CheckroomIcon />} sx={{ '&.Mui-selected': { color: PALETTE.primary.main } }} />
-          <BottomNavigationAction label="Stats" icon={<EqualizerIcon />} sx={{ '&.Mui-selected': { color: PALETTE.primary.main } }} />
-          <BottomNavigationAction label="Kalender" icon={<CalendarMonthIcon />} sx={{ '&.Mui-selected': { color: PALETTE.primary.main } }} />
-          <BottomNavigationAction label="Optionen" icon={<SettingsIcon />} sx={{ '&.Mui-selected': { color: PALETTE.primary.main } }} />
+          <BottomNavigationAction label="Nutten-Status" icon={<DashboardIcon />} sx={{ '&.Mui-selected': { color: PALETTE.primary.main } }} />
+          <BottomNavigationAction label="Sissy-Fesseln" icon={<CheckroomIcon />} sx={{ '&.Mui-selected': { color: PALETTE.primary.main } }} />
+          <BottomNavigationAction label="Huren-Metriken" icon={<EqualizerIcon />} sx={{ '&.Mui-selected': { color: PALETTE.primary.main } }} />
+          <BottomNavigationAction label="Schand-Register" icon={<CalendarMonthIcon />} sx={{ '&.Mui-selected': { color: PALETTE.primary.main } }} />
+          <BottomNavigationAction label="Halsband-Parameter" icon={<SettingsIcon />} sx={{ '&.Mui-selected': { color: PALETTE.primary.main } }} />
         </BottomNavigation>
       </Paper>
     </Box>

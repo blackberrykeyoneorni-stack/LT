@@ -1,8 +1,7 @@
 // src/services/SessionService.js
 import { db } from '../firebase';
-import { 
-    collection, doc, writeBatch, serverTimestamp, getDoc, addDoc, updateDoc, increment 
-} from 'firebase/firestore';
+import { collection, doc, writeBatch, serverTimestamp, getDoc, addDoc, updateDoc, increment } from 'firebase/firestore';
+import { updateWearStats, addItemHistoryEntry, setItemStatus } from './ItemService';
 import { addCredits, getTimeBankBalance, calculateEarnedCredits } from './TimeBankService';
 import { registerPunishment } from './PunishmentService';
 
@@ -10,6 +9,7 @@ export const startSession = async (userId, sessionData) => {
     if (!userId || !sessionData) throw new Error("Parameter fehlen.");
 
     try {
+        // TIME BANKRUPTCY CHECK
         const tbBalance = await getTimeBankBalance(userId);
         if (tbBalance && tbBalance.isBankrupt && !sessionData.type.includes('debt') && !sessionData.type.includes('punishment')) {
             throw new Error("TIME BANKRUPTCY. Freiwillige Sessions gesperrt.");
@@ -29,7 +29,7 @@ export const startSession = async (userId, sessionData) => {
         let minDuration = 0;
         if (tbBalance && tbBalance.debtLocked) {
              isDebtSession = true;
-             minDuration = 60; 
+             minDuration = 60; // 1 Stunde Pflicht-Tilgung
         }
 
         const payload = {
@@ -52,7 +52,7 @@ export const startSession = async (userId, sessionData) => {
             endTime: null,
             durationMinutes: 0,
             isActive: true,
-            isPornActive: false 
+            isPornActive: false // Neu für TZD Porn-Detektion
         };
 
         const batch = writeBatch(db);
@@ -65,6 +65,7 @@ export const startSession = async (userId, sessionData) => {
             batch.update(itemRef, { status: 'worn' });
         }
 
+        // Aktualisiere Status Tracker
         if (sessionData.type === 'instruction') {
              const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
              batch.update(instrRef, {
@@ -94,6 +95,7 @@ export const startTransitProtocol = async (userId, itemId) => {
     if (!userId || !itemId) throw new Error("Parameter fehlen.");
     const batch = writeBatch(db);
     
+    // 1. Session anlegen (spezieller Typ)
     const newSessionRef = doc(collection(db, `users/${userId}/sessions`));
     const payload = {
         itemIds: [itemId],
@@ -108,9 +110,11 @@ export const startTransitProtocol = async (userId, itemId) => {
     };
     batch.set(newSessionRef, payload);
 
+    // 2. Item auf getragen setzen
     const itemRef = doc(db, `users/${userId}/items`, itemId);
     batch.update(itemRef, { status: 'worn' });
 
+    // 3. Instruction Status updaten (Transit ist aktiv, Forced Release scharfgestellt)
     const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
     batch.update(instrRef, {
         "transitProtocol.active": true,
@@ -276,9 +280,11 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
     }
 
     await batch.commit();
+
     return { creditCalculated };
 };
 
+// Hilfsfunktion: TZD Hook kann dies nutzen, um isPornActive zu loggen
 export const updateSessionPornStatus = async (userId, sessionId, isPornActive) => {
     if (!userId || !sessionId) return;
     try {
@@ -289,6 +295,7 @@ export const updateSessionPornStatus = async (userId, sessionId, isPornActive) =
     }
 };
 
+// Aktualisiert nur den Forced Release Status (wird evtl. für manuelle Overrides gebraucht)
 export const registerInstructionRelease = async (userId) => {
     try {
         const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
