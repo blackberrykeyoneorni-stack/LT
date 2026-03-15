@@ -1,6 +1,8 @@
 import React, { Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { ThemeProvider, CssBaseline, Box, CircularProgress } from '@mui/material';
+import { ThemeProvider, createTheme, CssBaseline, Box, CircularProgress, Container, Avatar, Typography, Button } from '@mui/material';
+import SystemUpdateAltIcon from '@mui/icons-material/SystemUpdateAlt';
+import { useRegisterSW } from 'virtual:pwa-register/react';
 import { materialTheme } from './theme/materialTheme';
 
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -12,6 +14,67 @@ import { NFCGlobalProvider } from './contexts/NFCContext';
 import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
 import SecurityLock from './components/SecurityLock';
+
+// Ein steriles, unauffälliges System-Theme für den Camouflage-Vorraum
+const camouflageTheme = createTheme({
+  palette: {
+    mode: 'light',
+    primary: { main: '#607D8B' }, // Neutrales Blau-Grau
+    background: { default: '#F3F4F6', paper: '#FFFFFF' },
+    text: { primary: '#333333', secondary: '#666666' }
+  },
+  typography: {
+    fontFamily: 'Roboto, Arial, sans-serif',
+  }
+});
+
+// ZWANGS-UPDATE KOMPONENTE (Konzept 3)
+function UpdateBlocker() {
+  const {
+    needRefresh: [needRefresh],
+    updateServiceWorker,
+  } = useRegisterSW({
+    onRegisterError(error) {
+      console.error('SW registration error', error);
+    },
+  });
+
+  // Zeige nichts an, solange kein Update bereitsteht
+  if (!needRefresh) return null;
+
+  // Sobald needRefresh true ist (Download fertig), sperre den kompletten Bildschirm
+  return (
+    <ThemeProvider theme={camouflageTheme}>
+      <Box sx={{
+        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+        bgcolor: 'background.default', zIndex: 999999, // Überlagert alles, auch den LockScreen
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        touchAction: 'none'
+      }}>
+        <Container maxWidth="xs" sx={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          <Box sx={{ position: 'relative', mb: 4, display: 'flex', justifyContent: 'center' }}>
+            <Avatar sx={{ width: 80, height: 80, bgcolor: '#E5E7EB', color: '#607D8B' }}>
+              <SystemUpdateAltIcon sx={{ fontSize: 40 }} />
+            </Avatar>
+          </Box>
+          <Typography variant="h5" gutterBottom sx={{ color: 'text.primary', fontWeight: 500, letterSpacing: 0.5 }}>
+            LT System Data
+          </Typography>
+          <Typography variant="body2" sx={{ mb: 6, color: 'text.secondary' }}>
+            Systemupdate erforderlich. Bitte bestätigen, um fortzufahren.
+          </Typography>
+          <Button
+            variant="contained" size="large" color="primary"
+            onClick={() => updateServiceWorker(true)}
+            sx={{ width: '100%', py: 1.5, mb: 3, fontSize: '1rem', borderRadius: 1, textTransform: 'none', boxShadow: 'none' }}
+          >
+            Update ausführen
+          </Button>
+        </Container>
+      </Box>
+    </ThemeProvider>
+  );
+}
 
 // --- HELPER FÜR STABILE LAZY LOADS ---
 // Fängt "Failed to fetch dynamically imported module" ab und erzwingt Reload
@@ -81,6 +144,7 @@ function PrivateRoute({ children }) {
 export default function App() {
   return (
     <ErrorBoundary>
+      <UpdateBlocker />
       <ThemeProvider theme={materialTheme}>
         <CssBaseline />
         <Router>

@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      registerType: 'prompt', // GEÄNDERT: Von 'autoUpdate' auf 'prompt', für das erzwungene Update-Routing
       // PWA-FIX: Caching-Strategie
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
