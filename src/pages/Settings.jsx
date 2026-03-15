@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
     doc, getDoc, setDoc, writeBatch, serverTimestamp, collection, getDocs, query, where 
 } from 'firebase/firestore';
@@ -6,7 +6,7 @@ import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useSecurity } from '../contexts/SecurityContext';
 import { useNFCGlobal } from '../contexts/NFCContext';
-import { generateBackup, downloadBackupFile } from '../services/BackupService';
+import { generateBackup, downloadBackupFile, restoreBackup } from '../services/BackupService';
 import { enableBiometrics, disableBiometrics, isBiometricSupported } from '../services/BiometricService';
 import { addSuspension, getSuspensions, terminateSuspension, deleteScheduledSuspension } from '../services/SuspensionService';
 import { DEFAULT_PROTOCOL_RULES } from '../config/defaultRules';
@@ -29,6 +29,7 @@ import ScienceIcon from '@mui/icons-material/Science';
 import TuneIcon from '@mui/icons-material/Tune'; 
 import SaveIcon from '@mui/icons-material/Save'; 
 import TravelExploreIcon from '@mui/icons-material/TravelExplore';
+import UploadIcon from '@mui/icons-material/Upload';
 
 export default function Settings() {
   const { currentUser, logout } = useAuth();
@@ -64,7 +65,7 @@ export default function Settings() {
   // Suspension & Stealth State
   const [suspensions, setSuspensions] = useState([]);
   const [suspensionDialog, setSuspensionDialog] = useState(false);
-  const [suspensionDialogMode, setSuspensionDialogMode] = useState('plan'); // 'plan' or 'pack'
+  const [suspensionDialogMode, setSuspensionDialogMode] = useState('plan'); 
   const [newSuspension, setNewSuspension] = useState({ type: 'medical', reason: '', startDate: '', endDate: '' });
   const [allItems, setAllItems] = useState([]);
   const [stealthItems, setStealthItems] = useState([]); 
@@ -75,6 +76,12 @@ export default function Settings() {
   const [isSavingAll, setIsSavingAll] = useState(false); 
   const [toast, setToast] = useState({ open: false, message: '', severity: 'success' });
   
+  // Restore State
+  const fileInputRef = useRef(null);
+  const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
+  const [restoreFile, setRestoreFile] = useState(null);
+  const [restoreLoading, setRestoreLoading] = useState(false);
+
   const showToast = (message, severity = 'success') => setToast({ open: true, message, severity });
   const handleCloseToast = () => setToast({ ...toast, open: false });
 
@@ -162,7 +169,6 @@ export default function Settings() {
           const batch = writeBatch(db);
           const uid = currentUser.uid;
 
-          // PREFERENCES FIX: Update statt Set mit merge: true, um Map-Deletion sauber zu verarbeiten
           const prefRef = doc(db, `users/${uid}/settings/preferences`);
           const prefSnap = await getDoc(prefRef);
           if (prefSnap.exists()) {
@@ -183,7 +189,6 @@ export default function Settings() {
           batch.set(doc(db, `users/${uid}/settings/runLocations`), { list: runLocations }, { merge: true });
           batch.set(doc(db, `users/${uid}/settings/runCauses`), { list: runCauses }, { merge: true });
 
-          // CATEGORIES FIX: Update statt Set mit merge: true
           const catRef = doc(db, `users/${uid}/settings/categories`);
           const catSnap = await getDoc(catRef);
           if (catSnap.exists()) {
@@ -192,7 +197,6 @@ export default function Settings() {
               batch.set(catRef, { structure: catStructure });
           }
 
-          // LOCATION INDEX FIX: Update statt Set mit merge: true
           const locIdxRef = doc(db, `users/${uid}/settings/locationIndex`);
           const locIdxSnap = await getDoc(locIdxRef);
           if (locIdxSnap.exists()) {
@@ -215,12 +219,10 @@ export default function Settings() {
   const handleAddSuspension = async () => {
       let currentReason = newSuspension.reason;
       
-      // Auto-Fill für Stealth-Travel, falls kein Grund angegeben wurde
       if (newSuspension.type === 'stealth_travel' && !currentReason) {
           currentReason = 'Operation: Infiltration';
       }
 
-      // Stilles Scheitern verhindern -> Visuelles Feedback geben
       if(!newSuspension.startDate || !newSuspension.endDate || !currentReason) {
           showToast("Bitte fülle alle notwendigen Felder aus.", "error");
           return;
@@ -232,10 +234,9 @@ export default function Settings() {
       const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; 
       
       if (newSuspension.type === 'stealth_travel') {
-          // Switch to packing mode
           setRequiredPackAmounts({ days: diffDays, nights: diffDays });
           setStealthItems([]);
-          setNewSuspension(prev => ({...prev, reason: currentReason})); // Sicherstellen, dass Reason für Speicherung existiert
+          setNewSuspension(prev => ({...prev, reason: currentReason}));
           setSuspensionDialogMode('pack');
           return;
       }
@@ -344,7 +345,6 @@ export default function Settings() {
       setList(l); 
   };
 
-  // UX-Verbesserung: Automatischer Abgleich des Sliders mit dem existierenden Gewicht
   const handleWeightTargetChange = (e) => {
       const cat = e.target.value;
       setWeightTarget(cat);
@@ -378,6 +378,35 @@ export default function Settings() {
       finally { setBackupLoading(false); }
   };
 
+  const handleFileChange = (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      setRestoreFile(file);
+      setRestoreDialogOpen(true);
+      e.target.value = null;
+  };
+
+  const executeRestore = async () => {
+      if (!restoreFile) return;
+      setRestoreLoading(true);
+      try {
+          const text = await restoreFile.text();
+          const backupData = JSON.parse(text);
+          
+          await restoreBackup(currentUser.uid, backupData);
+          
+          showToast("Backup erfolgreich eingespielt! System wird neu geladen...", "success");
+          setRestoreDialogOpen(false);
+          setRestoreFile(null);
+          
+          setTimeout(() => window.location.reload(), 2000);
+      } catch (e) {
+          showToast("Fehler beim Restore: " + e.message, "error");
+      } finally {
+          setRestoreLoading(false);
+      }
+  };
+
   const SectionHeader = ({ icon: Icon, title, color }) => (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1, color: color || 'text.primary' }}>
       <Avatar sx={{ bgcolor: `${color}22`, color: color, width: 32, height: 32 }}><Icon fontSize="small" /></Avatar>
@@ -408,7 +437,6 @@ export default function Settings() {
       if(catStructure[main]) catStructure[main].forEach(sub => allCategoryOptions.push({ label: `• ${sub}`, value: sub }));
   });
 
-  // Derived Stealth Stats
   const packedSocksCount = allItems.filter(i => stealthItems.includes(i.id) && i.subCategory === 'Kniestrümpfe').length;
   const packedTightsCount = allItems.filter(i => stealthItems.includes(i.id) && i.subCategory === 'Strumpfhose').length;
   const isPackValid = packedSocksCount >= requiredPackAmounts.days && packedTightsCount >= requiredPackAmounts.nights;
@@ -575,7 +603,19 @@ export default function Settings() {
         <AccordionSummary expandIcon={<Icons.Expand />}><SectionHeader icon={Icons.Settings} title="System & Backup" color="#fff" /></AccordionSummary>
         <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
             <FormControlLabel control={<Switch checked={isBiometricActive} onChange={handleToggleBiometrics} disabled={!biometricAvailable} />} label="Biometrische Authentifizierung (Fingerprint)" sx={{ mb: 2, display: 'block' }} />
-            <Button variant="outlined" fullWidth onClick={handleBackup} disabled={backupLoading} startIcon={backupLoading ? <CircularProgress size={20} /> : <Icons.Cloud />}>Backup herunterladen</Button>
+            
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 3, mb: 2 }}>
+                <Button variant="outlined" fullWidth onClick={handleBackup} disabled={backupLoading} startIcon={backupLoading ? <CircularProgress size={20} /> : <Icons.Cloud />}>
+                    Backup herunterladen
+                </Button>
+                
+                <input type="file" accept=".json" style={{ display: 'none' }} ref={fileInputRef} onChange={handleFileChange} />
+                
+                <Button variant="outlined" color="warning" fullWidth onClick={() => fileInputRef.current.click()} disabled={backupLoading || restoreLoading} startIcon={restoreLoading ? <CircularProgress size={20} /> : <UploadIcon />}>
+                    Backup einspielen
+                </Button>
+            </Box>
+
             <Box sx={{ mt: 4, textAlign: 'center' }}><Button color="error" onClick={logout} startIcon={<Icons.Logout />}>Abmelden</Button></Box>
             <Typography variant="caption" display="block" align="center" sx={{ mt: 2, color: 'text.secondary' }}>Version 2.4.2 • Build 20251206</Typography>
         </AccordionDetails>
@@ -601,6 +641,28 @@ export default function Settings() {
               {isSavingAll ? "Speichere..." : "Alle Änderungen speichern"}
           </Button>
       </Paper>
+
+      <Dialog open={restoreDialogOpen} onClose={() => !restoreLoading && setRestoreDialogOpen(false)} PaperProps={DESIGN_TOKENS.dialog.paper}>
+          <DialogTitle sx={{ ...DESIGN_TOKENS.dialog.title.sx, color: PALETTE.accents.red }}>
+              Backup Einspielen
+          </DialogTitle>
+          <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
+              <Alert severity="error" sx={{ mb: 3 }}>
+                  ACHTUNG: Dies überschreibt alle aktuellen Daten unwiderruflich mit dem Inhalt des ausgewählten Backups.
+              </Alert>
+              <Typography variant="body2" sx={{ textAlign: 'center' }}>
+                  Möchtest du das Backup <br /><strong>{restoreFile?.name}</strong><br /> wirklich einspielen?
+              </Typography>
+          </DialogContent>
+          <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}>
+              <Button onClick={() => setRestoreDialogOpen(false)} color="inherit" disabled={restoreLoading}>
+                  Abbrechen
+              </Button>
+              <Button onClick={executeRestore} variant="contained" color="error" disabled={restoreLoading}>
+                  {restoreLoading ? "Spiele ein..." : "Unwiderruflich einspielen"}
+              </Button>
+          </DialogActions>
+      </Dialog>
 
       <Dialog open={suspensionDialog} onClose={() => setSuspensionDialog(false)} PaperProps={DESIGN_TOKENS.dialog.paper}>
         {suspensionDialogMode === 'plan' ? (
