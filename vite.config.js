@@ -13,7 +13,23 @@ export default defineConfig({
         maximumFileSizeToCacheInBytes: 3000000,
         cleanupOutdatedCaches: false, // KORREKTUR: Verhindert das sofortige Löschen alter Chunks während der Nutzung
         clientsClaim: false,          // KORREKTUR: Verhindert sofortige Übernahme, die aktive Sitzungen stört
-        skipWaiting: false            // KORREKTUR: Wartet auf Tab-Schließung vor dem Update
+        skipWaiting: false,           // KORREKTUR: Wartet auf Tab-Schließung vor dem Update
+        runtimeCaching: [
+          {
+            urlPattern: /^https:\/\/firebasestorage\.googleapis\.com\/.*/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'firebase-images-cache',
+              expiration: {
+                maxEntries: 200,
+                maxAgeSeconds: 60 * 60 * 24 * 30 // 30 Tage
+              },
+              cacheableResponse: {
+                statuses: [0, 200]
+              }
+            }
+          }
+        ]
       },
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
       manifest: {
