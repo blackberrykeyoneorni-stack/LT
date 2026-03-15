@@ -2,9 +2,6 @@ import React from 'react';
 import { Box, Typography, Button, Container, Avatar } from '@mui/material';
 import { useSecurity } from '../contexts/SecurityContext';
 import { useAuth } from '../contexts/AuthContext';
-
-// Design Imports
-import { DESIGN_TOKENS, PALETTE } from '../theme/obsidianDesign';
 import { Icons } from '../theme/appIcons';
 
 export default function LockScreen() {
@@ -28,7 +25,7 @@ export default function LockScreen() {
       left: 0, 
       right: 0, 
       bottom: 0, 
-      bgcolor: PALETTE.background.default, // Deep Dark Background
+      bgcolor: 'background.default', // Bezieht sich auf das sterile Camouflage-Theme
       zIndex: 99999, // Muss über allem liegen
       display: 'flex', 
       alignItems: 'center', 
@@ -37,29 +34,28 @@ export default function LockScreen() {
     }}>
       <Container maxWidth="xs" sx={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
         
-        {/* Icon Circle mit Glow */}
+        {/* Langweiliges System-Icon statt aufreizendem Glow-Effekt */}
         <Box sx={{ 
           position: 'relative', 
-          mb: 4,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center'
+          mb: 4, 
+          display: 'flex', 
+          justifyContent: 'center' 
         }}>
-           <Avatar sx={{ 
-               width: 80, 
-               height: 80, 
-               bgcolor: 'rgba(76, 221, 174, 0.1)', // Primary Transparent
-               color: PALETTE.primary.main 
-           }}>
-               <Icons.Lock sx={{ fontSize: 40 }} />
-           </Avatar>
+          <Avatar sx={{ 
+            width: 80, 
+            height: 80, 
+            bgcolor: '#E5E7EB', // Steriles helles Grau
+            color: '#607D8B'    // Neutrales System-Blau-Grau
+          }}>
+            <Icons.Lock sx={{ fontSize: 40 }} />
+          </Avatar>
         </Box>
         
-        <Typography variant="h4" gutterBottom sx={{ color: PALETTE.text.primary, fontWeight: 400, letterSpacing: 1 }}>
-          GESPERRT
+        <Typography variant="h5" gutterBottom sx={{ color: 'text.primary', fontWeight: 500, letterSpacing: 0.5 }}>
+          LT System Data
         </Typography>
         
-        <Typography variant="body1" sx={{ mb: 6, color: PALETTE.text.secondary }}>
+        <Typography variant="body2" sx={{ mb: 6, color: 'text.secondary' }}>
           Authentifizierung erforderlich
         </Typography>
 
@@ -70,25 +66,28 @@ export default function LockScreen() {
             </Typography>
         )}
 
-        {/* Haupt-Button: Startet Biometrie/PIN Dialog vom System */}
+        {/* Haupt-Button: Steril und technisch */}
         <Button 
           variant="contained" 
           size="large" 
+          color="primary"
           startIcon={<Icons.Fingerprint />} 
           onClick={unlock}
           sx={{ 
-            ...DESIGN_TOKENS.buttonGradient, // Pill Shape
             width: '100%',
             py: 1.5,
             mb: 3,
-            fontSize: '1rem'
+            fontSize: '1rem',
+            borderRadius: 1, 
+            textTransform: 'none', 
+            boxShadow: 'none'
           }}
         >
-          Gerät entsperren
+          Systemzugriff freigeben
         </Button>
         
-        <Typography variant="caption" sx={{ color: PALETTE.text.muted, mb: 1 }}>
-            Nutzt Fingerabdruck, FaceID oder Geräte-PIN
+        <Typography variant="caption" sx={{ color: 'text.disabled', mb: 1 }}>
+            Biometrische Verifizierung oder System-PIN
         </Typography>
 
         {/* Notfall Login */}
@@ -96,11 +95,11 @@ export default function LockScreen() {
           variant="text" 
           size="small" 
           onClick={handleFallback}
-          sx={{ color: PALETTE.text.secondary, mt: 4 }}
+          sx={{ color: 'text.secondary', mt: 4, textTransform: 'none' }}
         >
-          Probleme? Mit Google Account öffnen
+          Admin-Fallback: Google Login
         </Button>
-
+        
       </Container>
     </Box>
   );
