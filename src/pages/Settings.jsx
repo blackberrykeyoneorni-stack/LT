@@ -162,10 +162,14 @@ export default function Settings() {
           const batch = writeBatch(db);
           const uid = currentUser.uid;
 
+          // PREFERENCES FIX: Update statt Set mit merge: true, um Map-Deletion sauber zu verarbeiten
           const prefRef = doc(db, `users/${uid}/settings/preferences`);
-          batch.set(prefRef, {
-              nylonRestingHours, maxInstructionItems, categoryWeights
-          }, { merge: true });
+          const prefSnap = await getDoc(prefRef);
+          if (prefSnap.exists()) {
+              batch.update(prefRef, { nylonRestingHours, maxInstructionItems, categoryWeights });
+          } else {
+              batch.set(prefRef, { nylonRestingHours, maxInstructionItems, categoryWeights });
+          }
 
           if (protocolRules) {
               const protRef = doc(db, `users/${uid}/settings/protocol`);
@@ -179,8 +183,23 @@ export default function Settings() {
           batch.set(doc(db, `users/${uid}/settings/runLocations`), { list: runLocations }, { merge: true });
           batch.set(doc(db, `users/${uid}/settings/runCauses`), { list: runCauses }, { merge: true });
 
-          batch.set(doc(db, `users/${uid}/settings/categories`), { structure: catStructure }, { merge: true });
-          batch.set(doc(db, `users/${uid}/settings/locationIndex`), { mapping: locationIndex }, { merge: true });
+          // CATEGORIES FIX: Update statt Set mit merge: true
+          const catRef = doc(db, `users/${uid}/settings/categories`);
+          const catSnap = await getDoc(catRef);
+          if (catSnap.exists()) {
+              batch.update(catRef, { structure: catStructure });
+          } else {
+              batch.set(catRef, { structure: catStructure });
+          }
+
+          // LOCATION INDEX FIX: Update statt Set mit merge: true
+          const locIdxRef = doc(db, `users/${uid}/settings/locationIndex`);
+          const locIdxSnap = await getDoc(locIdxRef);
+          if (locIdxSnap.exists()) {
+              batch.update(locIdxRef, { mapping: locationIndex });
+          } else {
+              batch.set(locIdxRef, { mapping: locationIndex });
+          }
 
           await batch.commit();
           showToast("Alle Einstellungen erfolgreich gespeichert.", "success");
@@ -325,12 +344,24 @@ export default function Settings() {
       setList(l); 
   };
 
+  // UX-Verbesserung: Automatischer Abgleich des Sliders mit dem existierenden Gewicht
+  const handleWeightTargetChange = (e) => {
+      const cat = e.target.value;
+      setWeightTarget(cat);
+      if (categoryWeights[cat]) {
+          setWeightValue(categoryWeights[cat]);
+      } else {
+          setWeightValue(2);
+      }
+  };
+
   const addWeight = () => {
       if (weightTarget) {
           setCategoryWeights(prev => ({ ...prev, [weightTarget]: weightValue }));
           setWeightTarget('');
       }
   };
+  
   const removeWeight = (cat) => {
       const next = { ...categoryWeights };
       delete next[cat];
@@ -498,7 +529,7 @@ export default function Settings() {
             <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-end', mb: 2 }}>
                 <FormControl fullWidth size="small">
                     <InputLabel>Kategorie</InputLabel>
-                    <Select value={weightTarget} label="Kategorie" onChange={e => setWeightTarget(e.target.value)}>
+                    <Select value={weightTarget} label="Kategorie" onChange={handleWeightTargetChange}>
                         {allCategoryOptions.map(opt => <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>)}
                     </Select>
                 </FormControl>

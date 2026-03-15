@@ -704,8 +704,8 @@ export default function InstructionDialog({
                         
                         <Avatar src={activeVoluntaryItem.imageUrl || activeVoluntaryItem.img || (activeVoluntaryItem.images && activeVoluntaryItem.images[0])} variant="rounded" sx={{ width: 150, height: 150, mx: 'auto', my: 3, border: `1px solid ${PALETTE.primary.main}`, boxShadow: '0 0 15px rgba(0,0,0,0.5)' }} />
 
-                        <Typography variant="body1" color="text.secondary" sx={{ mt: 2, px: 2, fontStyle: 'italic', fontWeight: 'bold' }}>
-                            Gut, dass du bereits eine Strumpfhose trägst. Du kleine Nylon-Hure kannst nicht mehr ohne Strumpfhose leben.
+                        <Typography variant="body1" color="text.secondary" sx={{ mt: 2, px: 2, fontStyle: 'italic' }}>
+                            Gut, dass du bereits eine Strumpfhose trägst. Die Nylon-Hure kann wohl nicht mehr ohne geile Nylonstrumpfhosen leben.
                         </Typography>
                         
                         <Box sx={{ mt: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
