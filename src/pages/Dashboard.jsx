@@ -450,6 +450,7 @@ export default function Dashboard() {
           handleReleaseDecision={handleReleaseDecision} auditOpen={auditOpen} setAuditOpen={setAuditOpen} pendingAuditItems={pendingAuditItems} 
           currentAuditIndex={currentAuditIndex} currentCondition={currentCondition} setCurrentCondition={setCurrentCondition} handleConfirmAuditItem={handleConfirmAuditItem} 
           indexDialogOpen={indexDialogOpen} setIndexDialogOpen={setIndexDialogOpen} indexDetails={indexDetails} toast={toast} handleCloseToast={handleCloseToast}
+          activeSessions={activeSessions} 
       />
     </Box>
   );

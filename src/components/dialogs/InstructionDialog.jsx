@@ -39,7 +39,8 @@ export default function InstructionDialog({
   isNight, isFreeDay, freeDayReason,
   onStartOath, onCancelOath, onDeclineOath, 
   onStartRequest, onNavigateItem,
-  oathProgress, isHoldingOath, showToast 
+  oathProgress, isHoldingOath, showToast,
+  activeSessions = [] 
 }) {
   const { startBindingScan, isScanning } = useNFCGlobal();
   const { currentUser } = useAuth();
@@ -675,7 +676,45 @@ export default function InstructionDialog({
     // Fall 1: Keine Instruction & Frei (Wochenende etc.)
     if (!instruction) {
         if (isFreeDay) {
-            // ... (unverändert) ...
+            
+            // NEU: Prüfung, ob bereits eine freiwillige Strumpfhosen-Session läuft
+            const activeVoluntarySession = activeSessions.find(s => s.type === 'voluntary' && !s.endTime);
+            let activeVoluntaryItem = null;
+            if (activeVoluntarySession) {
+                activeVoluntaryItem = items.find(i => i.id === activeVoluntarySession.itemId) || 
+                                      (activeVoluntarySession.items && activeVoluntarySession.items[0]);
+                
+                if (!activeVoluntaryItem && activeVoluntarySession.itemIds && activeVoluntarySession.itemIds.length > 0) {
+                     activeVoluntaryItem = items.find(i => activeVoluntarySession.itemIds.includes(i.id));
+                }
+            }
+            
+            const isWearingPantyhose = activeVoluntaryItem && 
+                ((activeVoluntaryItem.subCategory || '').toLowerCase().includes('strumpfhose') || 
+                 (activeVoluntaryItem.mainCategory || '').toLowerCase().includes('strumpfhose') ||
+                 (activeVoluntaryItem.name || '').toLowerCase().includes('strumpfhose'));
+
+            if (isWearingPantyhose) {
+                return (
+                    <Box sx={{ textAlign: 'center', py: 3 }}>
+                        <Box sx={{ mb: 2 }}>
+                            {freeDayReason === 'Holiday' ? <CelebrationIcon sx={{ fontSize: 50, color: PALETTE.accents.gold }} /> : <WeekendIcon sx={{ fontSize: 50, color: PALETTE.accents.green }} />}
+                        </Box>
+                        <Typography variant="h6" gutterBottom>{freeDayReason === 'Holiday' ? 'Feiertag' : 'Wochenende'}</Typography>
+                        
+                        <Avatar src={activeVoluntaryItem.imageUrl || activeVoluntaryItem.img || (activeVoluntaryItem.images && activeVoluntaryItem.images[0])} variant="rounded" sx={{ width: 150, height: 150, mx: 'auto', my: 3, border: `1px solid ${PALETTE.primary.main}`, boxShadow: '0 0 15px rgba(0,0,0,0.5)' }} />
+
+                        <Typography variant="body1" color="text.secondary" sx={{ mt: 2, px: 2, fontStyle: 'italic', fontWeight: 'bold' }}>
+                            Gut, dass du bereits eine Strumpfhose trägst. Du kleine Nylon-Hure kannst nicht mehr ohne Strumpfhose leben.
+                        </Typography>
+                        
+                        <Box sx={{ mt: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                            <Button color="inherit" onClick={onClose}>Schließen</Button>
+                        </Box>
+                    </Box>
+                );
+            }
+
             if (suggestedItem) {
                 return (
                     <Box sx={{ textAlign: 'center', py: 2 }}>
@@ -709,7 +748,10 @@ export default function InstructionDialog({
                 <Box sx={{ bgcolor: 'rgba(255,255,255,0.05)', width: 60, height: 60, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', mx: 'auto', mb: 2 }}>
                    {isNight ? <NightlightRoundIcon sx={{ color: PALETTE.accents.purple, fontSize: 30 }} /> : <WbSunnyIcon sx={{ color: PALETTE.accents.gold, fontSize: 30 }} />}
                 </Box>
-                <Typography variant="h6">Keine Anweisung</Typography>
+                <Typography variant="h6" sx={{ mb: 3 }}>Keine Anweisung</Typography>
+                <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <Button color="inherit" onClick={onClose} fullWidth>Schließen</Button>
+                </Box>
             </Box>
         );
     }
@@ -743,12 +785,6 @@ export default function InstructionDialog({
                 {renderContent()}
             </motion.div>
         </DialogContent>
-        
-        {!instruction && canClose && (
-            <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}>
-                <Button onClick={onClose} fullWidth color="inherit">Schließen</Button>
-            </DialogActions>
-        )}
       </Dialog>
 
       <Dialog 

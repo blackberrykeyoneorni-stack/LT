@@ -60,7 +60,8 @@ export default function DashboardDialogManager(props) {
         punishmentScanOpen, setPunishmentScanOpen, punishmentScanMode, punishmentItem, isNfcScanning, handlePunishmentScanTrigger,
         laundryOpen, setLaundryOpen, kpis, releaseDialogOpen, setReleaseDialogOpen, releaseStep, releaseTimer, releaseIntensity, setReleaseIntensity,
         handleStartReleaseTimer, handleSkipTimer, handleReleaseDecision, auditOpen, setAuditOpen, pendingAuditItems, currentAuditIndex,
-        currentCondition, setCurrentCondition, handleConfirmAuditItem, indexDialogOpen, setIndexDialogOpen, indexDetails, toast, handleCloseToast
+        currentCondition, setCurrentCondition, handleConfirmAuditItem, indexDialogOpen, setIndexDialogOpen, indexDetails, toast, handleCloseToast,
+        activeSessions
     } = props;
 
     const auditItem = pendingAuditItems[currentAuditIndex];
@@ -99,7 +100,7 @@ export default function DashboardDialogManager(props) {
                 </DialogActions>
             </Dialog>
 
-            <InstructionDialog open={instructionOpen} onClose={() => setInstructionOpen(false)} instruction={currentInstruction} items={items} isHoldingOath={isHoldingOath} oathProgress={oathProgress} onStartOath={startOathPress} onCancelOath={cancelOathPress} onDeclineOath={handleDeclineOath} onStartRequest={handleStartRequest} onNavigateItem={(id) => { setInstructionOpen(false); navigate(`/item/${id}`); }} isFreeDay={isFreeDay} freeDayReason={freeDayReason} loadingStatus={instructionStatus === 'idle' ? 'loading' : instructionStatus} isNight={isNight} showToast={showToast} />
+            <InstructionDialog open={instructionOpen} onClose={() => setInstructionOpen(false)} instruction={currentInstruction} items={items} isHoldingOath={isHoldingOath} oathProgress={oathProgress} onStartOath={startOathPress} onCancelOath={cancelOathPress} onDeclineOath={handleDeclineOath} onStartRequest={handleStartRequest} onNavigateItem={(id) => { setInstructionOpen(false); navigate(`/item/${id}`); }} isFreeDay={isFreeDay} freeDayReason={freeDayReason} loadingStatus={instructionStatus === 'idle' ? 'loading' : instructionStatus} isNight={isNight} showToast={showToast} activeSessions={activeSessions} />
             <PunishmentDialog open={punishmentScanOpen} onClose={() => setPunishmentScanOpen(false)} mode={punishmentScanMode} punishmentItem={punishmentItem} isScanning={isNfcScanning} onScan={handlePunishmentScanTrigger} />
             
             <LaundryDialog 
