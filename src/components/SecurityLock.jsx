@@ -21,18 +21,58 @@ export default function SecurityLock({ children }) {
   const { isLocked, isBiometricActive, lockNow } = useSecurity();
   const { currentUser } = useAuth();
 
-  // TASK-SWITCHER-SICHERHEIT (Privacy Screen)
-  // Überwacht, ob die App in den Hintergrund geschoben wird
+  // VANILLA JS PRIVACY SHIELD UM REACT ZU UMGEHEN
   useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden' && currentUser && isBiometricActive) {
-        lockNow(); // App sofort und unwiderruflich sperren
-      }
+    if (!currentUser || !isBiometricActive) return;
+
+    // Erstelle ein pures DOM-Element außerhalb des React-Lifecycles
+    const shield = document.createElement('div');
+    shield.id = 'lt-vanilla-privacy-shield';
+    shield.style.position = 'fixed';
+    shield.style.top = '0';
+    shield.style.left = '0';
+    shield.style.width = '100vw';
+    shield.style.height = '100vh';
+    shield.style.backgroundColor = '#F3F4F6'; // Camouflage Grau
+    shield.style.zIndex = '9999999'; // Absolutes Maximum, überdeckt alles
+    shield.style.display = 'none'; // Initial versteckt
+    shield.style.justifyContent = 'center';
+    shield.style.alignItems = 'center';
+    shield.style.color = '#607D8B';
+    shield.style.fontFamily = 'Roboto, Arial, sans-serif';
+    shield.style.fontSize = '1.2rem';
+    shield.style.fontWeight = '500';
+    shield.innerText = 'LT System Data';
+
+    document.body.appendChild(shield);
+
+    // Synchrone Ausführung stoppt den Android-Screenshot
+    const protect = () => {
+      shield.style.display = 'flex';
+      lockNow(); // Trigger für React, um den echten LockScreen im Hintergrund zu laden
     };
 
-    document.addEventListener('visibilitychange', handleVisibilityChange);
+    const unprotect = () => {
+      shield.style.display = 'none';
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') protect();
+    };
+
+    // 'blur' feuert sofort beim Start der Task-Switcher-Geste
+    window.addEventListener('blur', protect);
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', unprotect);
+
+    // Cleanup bei Unmount
     return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('blur', protect);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', unprotect);
+      if (document.body.contains(shield)) {
+        document.body.removeChild(shield);
+      }
     };
   }, [currentUser, isBiometricActive, lockNow]);
 
@@ -49,6 +89,6 @@ export default function SecurityLock({ children }) {
     );
   }
 
-  // Wenn nicht gesperrt, zeige die App in ihrer vollen, feminisierten Pracht
+  // Wenn nicht gesperrt, zeige die App
   return <>{children}</>;
 }
