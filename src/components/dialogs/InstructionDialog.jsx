@@ -709,7 +709,9 @@ export default function InstructionDialog({
                         </Typography>
                         
                         <Box sx={{ mt: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                            <Button color="inherit" onClick={onClose}>Schließen</Button>
+                            <Button variant="contained" size="large" fullWidth onClick={onClose} sx={{ ...DESIGN_TOKENS.buttonGradient }}>
+                                Ich bin eine Nylon-Fotze.
+                            </Button>
                         </Box>
                     </Box>
                 );
