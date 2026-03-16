@@ -23,55 +23,82 @@ export default function ItemHistory({ historyEvents }) {
                     let icon = null;
                     let durationLabel = '';
 
+                    // KORREKTUR: Robuste Timestamp-Decodierung für IndexedDB Cache-Objekte
+                    const parseFirebaseDate = (val) => {
+                        if (!val) return null;
+                        if (val instanceof Date && !isNaN(val)) return val;
+                        if (typeof val.toDate === 'function') {
+                            const d = val.toDate();
+                            return isNaN(d) ? null : d;
+                        }
+                        if (val.seconds) return new Date(val.seconds * 1000);
+                        const parsed = new Date(val);
+                        return isNaN(parsed) ? null : parsed;
+                    };
+
+                    const safeEventDate = parseFirebaseDate(event.date);
+                    const dateStr = safeEventDate ? safeEventDate.toLocaleDateString() : 'Unbekannt';
+
                     if (event.type === 'session') {
                         const s = event.data;
-                        const typeLabel = s.type === 'instruction' ? 'Anweisung' : (s.type === 'voluntary' ? 'Freiwillig' : 'Session');
+                        
+                        // KORREKTUR: Berücksichtigung der neuen Session-Kategorien
+                        let typeLabel = 'Session';
+                        if (s.type === 'instruction') typeLabel = 'Anweisung';
+                        else if (s.type === 'voluntary') typeLabel = 'Freiwillig';
+                        else if (s.type === 'punishment') typeLabel = 'Strafarbeit';
+                        else if (s.type === 'tzd') typeLabel = 'Zeitloses Diktat';
+                        else if (s.isDebtSession || s.type === 'debt') typeLabel = 'Schuldenabbau';
+
                         label = `${typeLabel}${s.subtype ? ` (${s.subtype})` : ''}`;
-                        color = s.type === 'instruction' ? 'secondary' : 'default';
+                        color = s.type === 'instruction' ? 'secondary' : (s.type === 'punishment' ? 'error' : 'default');
                         icon = <AccessTimeIcon style={{ fontSize: 16 }} />;
                         
-                        const startTime = event.date;
-                        const endTime = s.endTime ? (s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime)) : null;
+                        const startTime = safeEventDate || parseFirebaseDate(s.startTime);
+                        const endTime = parseFirebaseDate(s.endTime);
 
                         if (endTime && startTime) {
                             sub = `${startTime.toLocaleDateString()}, ${startTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} - ${endTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`;
                             const diffMs = endTime.getTime() - startTime.getTime();
                             const diffMins = Math.floor(diffMs / 60000);
                             durationLabel = formatDuration(diffMins);
-                        } else {
-                            sub = `${event.date.toLocaleDateString()} - Laufend`;
+                        } else if (startTime) {
+                            sub = `${startTime.toLocaleDateString()} - Laufend`;
                             durationLabel = 'Laufend';
+                        } else {
+                            sub = 'Datum unlesbar';
+                            durationLabel = '-';
                         }
                     } else if (event.type === 'release') {
                         const r = event.data;
                         label = "Release Protocol";
-                        sub = `${event.date.toLocaleDateString()} • Intensität ${r.intensity || '?'}`;
+                        sub = `${dateStr} • Intensität ${r.intensity || '?'}`;
                         color = "info";
                         icon = <WaterDropIcon style={{ fontSize: 16 }} />;
                         durationLabel = r.outcome === 'maintained' ? 'Maintained' : 'Removed';
                     } else if (event.type === 'wash') {
                         label = "Reinigung";
-                        sub = `${event.date.toLocaleDateString()} • Gewaschen`;
+                        sub = `${dateStr} • Gewaschen`;
                         color = "success";
                         icon = <LocalLaundryServiceIcon style={{ fontSize: 16 }} />;
                         durationLabel = 'Sauber';
                     } else if (event.type === 'archived') {
                         label = "Archiviert";
-                        sub = `${event.date.toLocaleDateString()} • ${event.data.reason || 'Kein Grund'}`;
+                        sub = `${dateStr} • ${event.data.reason || 'Kein Grund'}`;
                         color = "error";
                         icon = <DeleteIcon style={{ fontSize: 16 }} />;
                         durationLabel = 'End of Life';
                     } 
                     else if (event.type && event.type.startsWith('tzd_')) {
                         label = "Zeitloses Diktat";
-                        sub = event.data?.message || `${event.date.toLocaleDateString()} • Systemeingriff`;
+                        sub = event.data?.message || `${dateStr} • Systemeingriff`;
                         color = event.data?.isPenalty ? "error" : "warning";
                         icon = <GavelIcon style={{ fontSize: 16 }} />;
                         durationLabel = 'TZD';
                     } 
                     else {
                         label = event.type ? event.type.toUpperCase() : "Protokoll-Ereignis";
-                        sub = event.data?.message || `${event.date.toLocaleDateString()} • Status Update`;
+                        sub = event.data?.message || `${dateStr} • Status Update`;
                         color = "default";
                         icon = <InfoIcon style={{ fontSize: 16 }} />;
                         durationLabel = 'Info';

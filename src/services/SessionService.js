@@ -75,9 +75,9 @@ export const startSession = async (userId, sessionData) => {
         }
 
         if (sessionData.type === 'punishment') {
-             const punRef = doc(db, `users/${userId}/status/activePunishment`);
+             // KORREKTUR: Falscher Pfad 'activePunishment' in 'punishment' geändert
+             const punRef = doc(db, `users/${userId}/status/punishment`);
              batch.update(punRef, {
-                 isActive: true,
                  activeSessionId: newSessionRef.id
              });
         }
@@ -275,8 +275,9 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
             });
         }
     } else if (sessionData.type === 'punishment') {
-        const punRef = doc(db, `users/${userId}/status/activePunishment`);
-        batch.update(punRef, { isActive: false, activeSessionId: null });
+        // KORREKTUR: Falscher Pfad 'activePunishment' in 'punishment' geändert
+        const punRef = doc(db, `users/${userId}/status/punishment`);
+        batch.update(punRef, { activeSessionId: null });
     }
 
     await batch.commit();
