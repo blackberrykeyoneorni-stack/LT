@@ -25,6 +25,7 @@ import useFemIndex from '../hooks/dashboard/useFemIndex';
 import useKPIs from '../hooks/useKPIs'; 
 import useInstructionManager from '../hooks/dashboard/useInstructionManager';
 import useTZDAndGamble from '../hooks/dashboard/useTZDAndGamble';
+import useUIStore from '../store/uiStore';
 
 // Components
 import ProgressBar from '../components/dashboard/ProgressBar';
@@ -52,42 +53,27 @@ export default function Dashboard() {
   const { startBindingScan, isScanning: isNfcScanning } = useNFCGlobal();
   
   const { activeSessions, progress, loading: sessionsLoading, dailyTargetHours, registerRelease: hookRegisterRelease } = useSessionProgress(currentUser, items);
-  
   const kpis = useKPIs(items, activeSessions); 
   const { femIndex, femIndexLoading, indexDetails, phase, subScores } = useFemIndex(kpis); 
+
+  // Store Connections
+  const showToast = useUIStore(s => s.showToast);
+  const isHoldingOath = useUIStore(s => s.isHoldingOath);
 
   const [activeSuspension, setActiveSuspension] = useState(null);
   const [loadingSuspension, setLoadingSuspension] = useState(true);
   
-  // UI States
-  const [laundryOpen, setLaundryOpen] = useState(false);
+  // Verbleibende lokale Logic-States
   const [auditDue, setAuditDue] = useState(false);
-  const [auditOpen, setAuditOpen] = useState(false);
-  const [pendingAuditItems, setPendingAuditItems] = useState([]);
-  const [currentAuditIndex, setCurrentAuditIndex] = useState(0);
-  const [currentCondition, setCurrentCondition] = useState(5);
   const [punishmentStatus, setPunishmentStatus] = useState({ active: false, deferred: false, reason: null, durationMinutes: 0 });
   const [punishmentItem, setPunishmentItem] = useState(null);
-  const [punishmentScanOpen, setPunishmentScanOpen] = useState(false);
-  const [punishmentScanMode, setPunishmentScanMode] = useState(null);
   const [monthlyBudget, setMonthlyBudget] = useState(0);
   const [currentSpent, setCurrentSpent] = useState(0); 
   const [maxInstructionItems, setMaxInstructionItems] = useState(1);
-  
-  const [releaseDialogOpen, setReleaseDialogOpen] = useState(false);
-  const [releaseStep, setReleaseStep] = useState('confirm');
-  const [releaseTimer, setReleaseTimer] = useState(600);
-  const [releaseIntensity, setReleaseIntensity] = useState(3);
   const releaseTimerInterval = useRef(null);
-  
-  const [indexDialogOpen, setIndexDialogOpen] = useState(false);
-  const [toast, setToast] = useState({ open: false, message: '', severity: 'success' });
   
   const [timeBankData, setTimeBankData] = useState({ nc: 0, lc: 0 });
   const [weeklyReport, setWeeklyReport] = useState(null);
-
-  const showToast = (message, severity = 'success') => setToast({ open: true, message, severity });
-  const handleCloseToast = () => setToast({ ...toast, open: false });
 
   // Derived State
   const isPunishmentRunning = activeSessions.some(s => s.type === 'punishment');
@@ -110,8 +96,7 @@ export default function Dashboard() {
   // --- HOOK INTEGRATION: INSTRUCTION MANAGER ---
   const {
       currentPeriod, isNight, isFreeDay, freeDayReason,
-      instructionOpen, setInstructionOpen, currentInstruction, instructionStatus, isInstructionActive,
-      oathProgress, isHoldingOath, forcedReleaseOpen, forcedReleaseMethod,
+      currentInstruction, instructionStatus, isInstructionActive,
       handleStartRequest, startOathPress, cancelOathPress, handleDeclineOath,
       handleConfirmForcedRelease, handleFailForcedRelease, handleRefuseForcedRelease
   } = useInstructionManager({
@@ -198,7 +183,7 @@ export default function Dashboard() {
           await updateDoc(doc(db,`users/${currentUser.uid}/status/punishment`),{active:true,deferred:false}); 
           const newStatus = await getActivePunishment(currentUser.uid);
           setPunishmentStatus(newStatus || { active: false }); 
-          setPunishmentScanOpen(false); 
+          useUIStore.getState().setPunishmentScanOpen(false); 
       } 
   };
   
@@ -225,28 +210,81 @@ export default function Dashboard() {
   const handlePunishmentScanTrigger = () => { 
       startBindingScan((scannedId) => { 
           if (punishmentItem && (scannedId === punishmentItem.nfcTagId || scannedId === punishmentItem.customId || scannedId === punishmentItem.id)) { 
-              if (punishmentScanMode === 'start') {
+              const scanMode = useUIStore.getState().punishmentScanMode;
+              if (scanMode === 'start') {
                   executeStartPunishment(); 
-              } else if (punishmentScanMode === 'stop') { 
-                  setPunishmentScanOpen(false); 
+              } else if (scanMode === 'stop') { 
+                  useUIStore.getState().setPunishmentScanOpen(false); 
                   const pSession = activeSessions.find(s => s.type === 'punishment');
                   if (pSession) {
                       handleRequestStopSession(pSession); 
                   }
               } 
           } else { 
-              showToast("Falscher Tag!", "error"); 
+              useUIStore.getState().showToast("Falscher Tag!", "error"); 
           } 
       }); 
   };
 
-  const handleStartAudit = async () => { const auditItems = await initializeAudit(currentUser.uid, items); setPendingAuditItems(auditItems); setCurrentAuditIndex(0); setAuditOpen(true); };
-  const handleConfirmAuditItem = async () => { await confirmAuditItem(currentUser.uid, pendingAuditItems[currentAuditIndex].id, currentCondition, true); showToast(`${pendingAuditItems[currentAuditIndex].name} geprüft`, "success"); if(currentAuditIndex<pendingAuditItems.length-1) setCurrentAuditIndex(prev=>prev+1); else { setAuditOpen(false); setAuditDue(false); showToast("Audit abgeschlossen", "success"); } };
+  const handleStartAudit = async () => { 
+      const auditItems = await initializeAudit(currentUser.uid, items); 
+      useUIStore.getState().setPendingAuditItems(auditItems); 
+      useUIStore.getState().setCurrentAuditIndex(0); 
+      useUIStore.getState().setAuditOpen(true); 
+  };
 
-  const handleOpenRelease = () => { setReleaseStep('confirm'); setReleaseTimer(600); setReleaseIntensity(3); setReleaseDialogOpen(true); };
-  const handleStartReleaseTimer = () => { setReleaseStep('timer'); if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current); releaseTimerInterval.current = setInterval(() => { setReleaseTimer(prev => { if(prev <= 1) { clearInterval(releaseTimerInterval.current); setReleaseStep('decision'); return 0; } return prev - 1; }); }, 1000); };
-  const handleSkipTimer = () => { if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current); setReleaseStep('decision'); };
-  const handleReleaseDecision = async (outcome) => { try { await hookRegisterRelease(outcome, releaseIntensity); if (outcome === 'maintained') showToast("Disziplin bewiesen.", "success"); else showToast("Sessions beendet.", "warning"); } catch (e) { showToast("Fehler beim Release", "error"); } finally { setReleaseDialogOpen(false); if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current); } };
+  const handleConfirmAuditItem = async () => { 
+      const { pendingAuditItems, currentAuditIndex, currentCondition, setAuditOpen, showToast, setCurrentAuditIndex } = useUIStore.getState();
+      await confirmAuditItem(currentUser.uid, pendingAuditItems[currentAuditIndex].id, currentCondition, true); 
+      showToast(`${pendingAuditItems[currentAuditIndex].name} geprüft`, "success"); 
+      if(currentAuditIndex < pendingAuditItems.length - 1) {
+          setCurrentAuditIndex(prev => prev + 1); 
+      } else { 
+          setAuditOpen(false); 
+          setAuditDue(false); 
+          showToast("Audit abgeschlossen", "success"); 
+      } 
+  };
+
+  const handleOpenRelease = () => { 
+      useUIStore.getState().setReleaseStep('confirm'); 
+      useUIStore.getState().setReleaseTimer(600); 
+      useUIStore.getState().setReleaseIntensity(3); 
+      useUIStore.getState().setReleaseDialogOpen(true); 
+  };
+
+  const handleStartReleaseTimer = () => { 
+      useUIStore.getState().setReleaseStep('timer'); 
+      if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current); 
+      releaseTimerInterval.current = setInterval(() => { 
+          useUIStore.getState().setReleaseTimer(prev => { 
+              if(prev <= 1) { 
+                  clearInterval(releaseTimerInterval.current); 
+                  useUIStore.getState().setReleaseStep('decision'); 
+                  return 0; 
+              } 
+              return prev - 1; 
+          }); 
+      }, 1000); 
+  };
+
+  const handleSkipTimer = () => { 
+      if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current); 
+      useUIStore.getState().setReleaseStep('decision'); 
+  };
+
+  const handleReleaseDecision = async (outcome) => { 
+      try { 
+          await hookRegisterRelease(outcome, useUIStore.getState().releaseIntensity); 
+          if (outcome === 'maintained') useUIStore.getState().showToast("Disziplin bewiesen.", "success"); 
+          else useUIStore.getState().showToast("Sessions beendet.", "warning"); 
+      } catch (e) { 
+          useUIStore.getState().showToast("Fehler beim Release", "error"); 
+      } finally { 
+          useUIStore.getState().setReleaseDialogOpen(false); 
+          if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current); 
+      } 
+  };
 
   if (loadingSuspension) return <Box sx={{ p: 4, textAlign: 'center' }}>System Check...</Box>;
 
@@ -339,9 +377,12 @@ export default function Dashboard() {
                 isHoldingOath={isHoldingOath}
                 isInstructionActive={isInstructionActive}
                 isDailyGoalMet={isDailyGoalMet}
-                onOpenInstruction={() => setInstructionOpen(true)}
+                onOpenInstruction={() => useUIStore.getState().setInstructionOpen(true)}
                 onStartPunishment={() => {
-                    if (punishmentItem?.nfcTagId) { setPunishmentScanMode('start'); setPunishmentScanOpen(true); } 
+                    if (punishmentItem?.nfcTagId) { 
+                        useUIStore.getState().setPunishmentScanMode('start'); 
+                        useUIStore.getState().setPunishmentScanOpen(true); 
+                    } 
                     else executeStartPunishment(); 
                 }}
                 onStartAudit={handleStartAudit}
@@ -400,7 +441,7 @@ export default function Dashboard() {
             <InfoTiles kpis={kpis} timeBank={timeBankData} />
 
             <Button
-              variant="contained" fullWidth size="large" onClick={() => setLaundryOpen(true)}
+              variant="contained" fullWidth size="large" onClick={() => useUIStore.getState().setLaundryOpen(true)}
               sx={{ 
                   mb: 2, mt: 3, py: 2, bgcolor: 'rgba(255,255,255,0.05)', color: 'text.primary', boxShadow: 'none', justifyContent: 'space-between', px: 3,
                   '&:hover': { bgcolor: 'rgba(255,255,255,0.1)', boxShadow: 'none' }
@@ -435,22 +476,20 @@ export default function Dashboard() {
       </Container>
 
       <DashboardDialogManager
-          tzdActive={tzdActive} items={items} forcedReleaseOpen={forcedReleaseOpen} forcedReleaseMethod={forcedReleaseMethod} 
+          tzdActive={tzdActive} items={items} 
           handleConfirmForcedRelease={handleConfirmForcedRelease} handleFailForcedRelease={handleFailForcedRelease} handleRefuseForcedRelease={handleRefuseForcedRelease}
           timeBankData={timeBankData} handleAcknowledgeInflation={handleAcknowledgeInflation} offerOpen={offerOpen} gambleStake={gambleStake} 
           handleGambleAccept={handleGambleAccept} handleGambleDecline={handleGambleDecline} hasVoluntarySession={hasVoluntarySession} isForcedGamble={isForcedGamble}
-          weeklyReport={weeklyReport} currentUser={currentUser} instructionOpen={instructionOpen} setInstructionOpen={setInstructionOpen} 
-          currentInstruction={currentInstruction} isHoldingOath={isHoldingOath} oathProgress={oathProgress} startOathPress={startOathPress} cancelOathPress={cancelOathPress}
+          weeklyReport={weeklyReport} currentUser={currentUser} 
+          currentInstruction={currentInstruction} startOathPress={startOathPress} cancelOathPress={cancelOathPress}
           handleDeclineOath={handleDeclineOath} handleStartRequest={handleStartRequest} navigate={navigate} isFreeDay={isFreeDay} freeDayReason={freeDayReason} 
-          instructionStatus={instructionStatus} isNight={isNight} showToast={showToast} punishmentScanOpen={punishmentScanOpen} 
-          setPunishmentScanOpen={setPunishmentScanOpen} punishmentScanMode={punishmentScanMode} punishmentItem={punishmentItem} isNfcScanning={isNfcScanning} 
-          handlePunishmentScanTrigger={handlePunishmentScanTrigger} laundryOpen={laundryOpen} setLaundryOpen={setLaundryOpen} kpis={kpis} 
-          releaseDialogOpen={releaseDialogOpen} setReleaseDialogOpen={setReleaseDialogOpen} releaseStep={releaseStep} releaseTimer={releaseTimer} 
-          releaseIntensity={releaseIntensity} setReleaseIntensity={setReleaseIntensity} handleStartReleaseTimer={handleStartReleaseTimer} handleSkipTimer={handleSkipTimer} 
-          handleReleaseDecision={handleReleaseDecision} auditOpen={auditOpen} setAuditOpen={setAuditOpen} pendingAuditItems={pendingAuditItems} 
-          currentAuditIndex={currentAuditIndex} currentCondition={currentCondition} setCurrentCondition={setCurrentCondition} handleConfirmAuditItem={handleConfirmAuditItem} 
-          indexDialogOpen={indexDialogOpen} setIndexDialogOpen={setIndexDialogOpen} indexDetails={indexDetails} toast={toast} handleCloseToast={handleCloseToast}
-          activeSessions={activeSessions} 
+          instructionStatus={instructionStatus} isNight={isNight} showToast={showToast} 
+          punishmentItem={punishmentItem} isNfcScanning={isNfcScanning} 
+          handlePunishmentScanTrigger={handlePunishmentScanTrigger} kpis={kpis} 
+          handleStartReleaseTimer={handleStartReleaseTimer} handleSkipTimer={handleSkipTimer} 
+          handleReleaseDecision={handleReleaseDecision} 
+          handleConfirmAuditItem={handleConfirmAuditItem} 
+          indexDetails={indexDetails} activeSessions={activeSessions} 
       />
     </Box>
   );

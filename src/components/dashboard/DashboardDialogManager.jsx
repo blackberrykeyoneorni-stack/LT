@@ -8,6 +8,7 @@ import TimerIcon from '@mui/icons-material/Timer';
 import LinkOffIcon from '@mui/icons-material/LinkOff';
 import { doc, updateDoc, serverTimestamp, arrayUnion } from 'firebase/firestore';
 import { db } from '../../firebase';
+import useUIStore from '../../store/uiStore';
 
 import TzdOverlay from './TzdOverlay';
 import ForcedReleaseOverlay from './ForcedReleaseOverlay';
@@ -52,16 +53,27 @@ const IndexDetailDialog = ({ open, onClose, details }) => {
 };
 
 export default function DashboardDialogManager(props) {
+    // 1. Daten direkt aus dem UI-Store (Kein Prop-Drilling mehr!)
     const {
-        tzdActive, items, forcedReleaseOpen, forcedReleaseMethod, handleConfirmForcedRelease, handleFailForcedRelease, handleRefuseForcedRelease,
+        toast, handleCloseToast,
+        laundryOpen, setLaundryOpen,
+        auditOpen, setAuditOpen, pendingAuditItems, currentAuditIndex, currentCondition, setCurrentCondition,
+        indexDialogOpen, setIndexDialogOpen,
+        punishmentScanOpen, setPunishmentScanOpen, punishmentScanMode,
+        releaseDialogOpen, setReleaseDialogOpen, releaseStep, releaseTimer, releaseIntensity, setReleaseIntensity,
+        instructionOpen, setInstructionOpen, forcedReleaseOpen, forcedReleaseMethod,
+        oathProgress, isHoldingOath
+    } = useUIStore();
+
+    // 2. Komplexe Firebase-Logik oder statische Objekte kommen weiterhin aus Dashboard
+    const {
+        tzdActive, items, handleConfirmForcedRelease, handleFailForcedRelease, handleRefuseForcedRelease,
         timeBankData, handleAcknowledgeInflation, offerOpen, gambleStake, handleGambleAccept, handleGambleDecline, hasVoluntarySession, isForcedGamble,
-        weeklyReport, currentUser, instructionOpen, setInstructionOpen, currentInstruction, isHoldingOath, oathProgress, startOathPress, cancelOathPress,
+        weeklyReport, currentUser, currentInstruction, startOathPress, cancelOathPress,
         handleDeclineOath, handleStartRequest, navigate, isFreeDay, freeDayReason, instructionStatus, isNight, showToast,
-        punishmentScanOpen, setPunishmentScanOpen, punishmentScanMode, punishmentItem, isNfcScanning, handlePunishmentScanTrigger,
-        laundryOpen, setLaundryOpen, kpis, releaseDialogOpen, setReleaseDialogOpen, releaseStep, releaseTimer, releaseIntensity, setReleaseIntensity,
-        handleStartReleaseTimer, handleSkipTimer, handleReleaseDecision, auditOpen, setAuditOpen, pendingAuditItems, currentAuditIndex,
-        currentCondition, setCurrentCondition, handleConfirmAuditItem, indexDialogOpen, setIndexDialogOpen, indexDetails, toast, handleCloseToast,
-        activeSessions
+        punishmentItem, isNfcScanning, handlePunishmentScanTrigger,
+        kpis, handleStartReleaseTimer, handleSkipTimer, handleReleaseDecision,
+        handleConfirmAuditItem, indexDetails, activeSessions
     } = props;
 
     const auditItem = pendingAuditItems[currentAuditIndex];

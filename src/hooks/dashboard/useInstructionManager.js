@@ -1,4 +1,3 @@
-// src/hooks/dashboard/useInstructionManager.js
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { collection, doc, updateDoc, writeBatch, query, where, getDocs, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../firebase';
@@ -7,6 +6,7 @@ import { triggerEvasionPenalty } from '../../services/TZDService';
 import { startSession as startSessionService } from '../../services/SessionService';
 import { registerRelease as apiRegisterRelease } from '../../services/ReleaseService';
 import { registerOathRefusal, registerPunishment, getActivePunishment } from '../../services/PunishmentService';
+import useUIStore from '../../store/uiStore';
 
 // --- HILFSFUNKTIONEN ---
 const getLocalISODate = (date) => { 
@@ -44,20 +44,22 @@ export default function useInstructionManager({
     showToast,
     setPunishmentStatus
 }) {
+    // UI Store Einbindung
+    const setInstructionOpen = useUIStore(state => state.setInstructionOpen);
+    const setOathProgress = useUIStore(state => state.setOathProgress);
+    const setIsHoldingOath = useUIStore(state => state.setIsHoldingOath);
+    const setForcedReleaseOpen = useUIStore(state => state.setForcedReleaseOpen);
+    const setForcedReleaseMethod = useUIStore(state => state.setForcedReleaseMethod);
+    const forcedReleaseOpen = useUIStore(state => state.forcedReleaseOpen);
+
     // --- LOKALE STATES ---
     const [now, setNow] = useState(Date.now());
     const [currentPeriod, setCurrentPeriod] = useState(calculatePeriodId());
     const [isFreeDay, setIsFreeDay] = useState(false);
     const [freeDayReason, setFreeDayReason] = useState('');
     
-    const [instructionOpen, setInstructionOpen] = useState(false);
     const [currentInstruction, setCurrentInstruction] = useState(null);
     const [instructionStatus, setInstructionStatus] = useState('idle');
-    
-    const [oathProgress, setOathProgress] = useState(0);
-    const [isHoldingOath, setIsHoldingOath] = useState(false);
-    const [forcedReleaseOpen, setForcedReleaseOpen] = useState(false);
-    const [forcedReleaseMethod, setForcedReleaseMethod] = useState(null);
 
     // --- REFS FÜR TIMER UND LOGIK ---
     const oathTimerRef = useRef(null);
@@ -136,13 +138,12 @@ export default function useInstructionManager({
             };
             check();
         }
-    }, [currentUser, items.length, sessionsLoading, currentPeriod, currentInstruction, instructionStatus, isFreeDay, activeSessions, isStealthActive, setTzdActive]);
+    }, [currentUser, items.length, sessionsLoading, currentPeriod, currentInstruction, instructionStatus, isFreeDay, activeSessions, isStealthActive, setTzdActive, setInstructionOpen]);
 
     // --- EFFECT 3: LIVE-WATCHER (Post-Oath Flucht) ---
     useEffect(() => {
         if (!currentUser || !currentInstruction || !currentInstruction.isAccepted || currentInstruction.evasionPenaltyTriggered) return;
         
-        // KORREKTUR: Nur blockieren, wenn EXAKT die Session zur aktuellen Anweisung läuft.
         const isThisInstructionRunning = activeSessions.some(s => s.type === 'instruction' && s.periodId === currentInstruction.periodId);
         if (isThisInstructionRunning) return; 
 
@@ -178,13 +179,11 @@ export default function useInstructionManager({
         }, 60000); 
 
         return () => clearInterval(timer);
-    }, [currentUser, currentInstruction, activeSessions, setTzdActive, showToast]);
+    }, [currentUser, currentInstruction, activeSessions, setTzdActive, showToast, setInstructionOpen]);
 
     // --- EFFECT 4: FORCED RELEASE VERZÖGERUNGS-TRIGGER ---
     useEffect(() => {
         if (currentInstruction) {
-            // KORREKTUR: Finde EXAKT die Session, die zu DIESER Anweisung gehört (gleiche periodId).
-            // Das verhindert, dass alte Day-Sessions den Timer vorzeitig auslösen.
             const activeInstSession = activeSessions.find(s => 
                 s.type === 'instruction' && 
                 s.periodId === currentInstruction.periodId
@@ -194,7 +193,6 @@ export default function useInstructionManager({
             
             if (activeInstSession && fr && fr.required === true && fr.executed === false && activeInstSession.startTime) {
                 if (!forcedReleaseOpen) {
-                    // Reale Berechnung auf Basis der DB-Zeit, robuster 5-Sekunden-Trigger
                     const startMs = activeInstSession.startTime?.toDate ? activeInstSession.startTime.toDate().getTime() : new Date(activeInstSession.startTime).getTime();
                     const nowMs = Date.now();
                     const elapsed = nowMs - startMs;
@@ -209,7 +207,7 @@ export default function useInstructionManager({
                 }
             }
         }
-    }, [currentInstruction, forcedReleaseOpen, activeSessions]);
+    }, [currentInstruction, forcedReleaseOpen, activeSessions, setForcedReleaseMethod, setForcedReleaseOpen]);
 
     // --- HANDLER: SESSION START ---
     const handleStartRequest = useCallback(async (itemsToStart) => { 
@@ -232,7 +230,7 @@ export default function useInstructionManager({
             setInstructionOpen(false); 
             if (showToast) showToast(`${targetItems.length} Sessions gestartet.`, "success");
         }
-    }, [currentUser, tzdActive, currentInstruction, showToast]);
+    }, [currentUser, tzdActive, currentInstruction, showToast, setInstructionOpen]);
 
     // --- HANDLER: OATH (EID) LOGIK ---
     const handleAcceptOath = useCallback(async () => { 
@@ -243,7 +241,7 @@ export default function useInstructionManager({
         await batch.commit(); 
         setCurrentInstruction(prev => ({ ...prev, isAccepted: true, acceptedAt: nowISO })); 
         setIsHoldingOath(false); 
-    }, [currentUser]);
+    }, [currentUser, setIsHoldingOath]);
 
     const startOathPress = useCallback(() => { 
         setIsHoldingOath(true); 
@@ -258,13 +256,13 @@ export default function useInstructionManager({
                 return prev + 0.4; 
             }); 
         }, 20); 
-    }, [handleAcceptOath]);
+    }, [handleAcceptOath, setIsHoldingOath, setOathProgress]);
     
     const cancelOathPress = useCallback(() => { 
         clearInterval(oathTimerRef.current); 
         setIsHoldingOath(false); 
         setOathProgress(0); 
-    }, []);
+    }, [setIsHoldingOath, setOathProgress]);
 
     const handleDeclineOath = useCallback(async () => { 
         if (!currentUser) return;
@@ -273,7 +271,7 @@ export default function useInstructionManager({
         if (setPunishmentStatus) setPunishmentStatus(newPunishment || { active: false }); 
         setInstructionOpen(false); 
         setIsHoldingOath(false); 
-    }, [currentUser, setPunishmentStatus]);
+    }, [currentUser, setPunishmentStatus, setInstructionOpen, setIsHoldingOath]);
 
     // --- HANDLER: FORCED RELEASE ---
     const handleConfirmForcedRelease = useCallback(async (outcome) => {
@@ -285,7 +283,6 @@ export default function useInstructionManager({
             const batch = writeBatch(db);
             batch.update(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), { "forcedRelease.executed": true });
             
-            // POST-NUT CLARITY: Injektion des Entladungs-Zeitpunkts in die Session
             if (activeInstSession) {
                 batch.update(doc(db, `users/${currentUser.uid}/sessions`, activeInstSession.id), { 
                     forcedReleaseAt: serverTimestamp() 
@@ -301,7 +298,7 @@ export default function useInstructionManager({
             console.error("Error confirming forced release:", e);
             if (showToast) showToast("Fehler beim Speichern.", "error");
         }
-    }, [currentUser, activeSessions, showToast]);
+    }, [currentUser, activeSessions, showToast, setForcedReleaseOpen]);
 
     const handleFailForcedRelease = useCallback(async () => {
         if (!currentUser) return;
@@ -326,7 +323,7 @@ export default function useInstructionManager({
         } catch (e) {
             console.error("Error failing forced release:", e);
         }
-    }, [currentUser, currentInstruction, setPunishmentStatus, showToast]);
+    }, [currentUser, currentInstruction, setPunishmentStatus, showToast, setForcedReleaseOpen]);
   
     const handleRefuseForcedRelease = useCallback(async () => {
         if (!currentUser) return;
@@ -342,29 +339,23 @@ export default function useInstructionManager({
         } catch (e) {
             console.error("Error refusing forced release:", e);
         }
-    }, [currentUser, setPunishmentStatus, showToast]);
+    }, [currentUser, setPunishmentStatus, showToast, setForcedReleaseOpen]);
 
-    // --- RÜCKGABE DES VERTRAGS ---
+    // Rückgabe OHNE die UI-States, um Re-Renders im Dashboard zu unterbinden
     return {
         currentPeriod,
         isNight,
         isFreeDay,
         freeDayReason,
-        instructionOpen,
-        setInstructionOpen,
         currentInstruction,
         instructionStatus,
         isInstructionActive,
-        oathProgress,
-        isHoldingOath,
-        forcedReleaseOpen,
-        forcedReleaseMethod,
         handleStartRequest,
         startOathPress,
         cancelOathPress,
         handleDeclineOath,
         handleConfirmForcedRelease,
         handleFailForcedRelease,
-        handleRefuseForcedRelease: handleFailForcedRelease // Redirection auf Versagen nach Anforderung
+        handleRefuseForcedRelease 
     };
 }
