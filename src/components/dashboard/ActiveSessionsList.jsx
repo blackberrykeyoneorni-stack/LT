@@ -16,7 +16,6 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
 
   if (!activeSessions || activeSessions.length === 0) return null;
 
-  // Hilfsfunktion zur Formatierung der Dauer
   const formatDuration = (totalMinutes) => {
       const h = Math.floor(totalMinutes / 60);
       const m = totalMinutes % 60;
@@ -28,7 +27,6 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
     <Box sx={{ mb: 4 }}>
       <AnimatePresence>
         {activeSessions.map((session) => {
-            // Alle Items der Session laden
             const sessionItems = session.itemIds 
                 ? session.itemIds.map(id => items.find(i => i.id === id)).filter(Boolean)
                 : [items.find(i => i.id === session.itemId)].filter(Boolean);
@@ -36,26 +34,26 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
             const startTime = session.startTime?.toDate ? session.startTime.toDate() : new Date(session.startTime);
             const durationMinutes = Math.floor((new Date() - startTime) / 60000);
             
-            // Logik-Check
+            // KORREKTUR: Dynamische minDuration anstelle von fixierten 30 Minuten
             const minDuration = session.minDuration || 0;
-            const isDebtLocked = durationMinutes < minDuration;
-            const remainingDebt = Math.max(0, minDuration - durationMinutes);
             const isPunishment = session.type === 'punishment';
             const isTZD = session.type === 'tzd' || session.tzdExecuted; 
             
-            // Bestimmung von Label & nuttiger Farbigkeit basierend auf Session-Typ
+            const isDebtLocked = session.isDebtSession && durationMinutes < minDuration;
+            const isPunishmentLocked = isPunishment && durationMinutes < minDuration;
+            const isLocked = isDebtLocked || isPunishmentLocked;
+            const remainingTime = Math.max(0, minDuration - durationMinutes);
+            
             let typeLabel = "FREIWILLIG";
             let borderColor = PALETTE.primary.main;
-            
-            // Nutzervorgabe: Farbe des Buttons als Rand/Text, Textfarbe des Buttons als Hintergrund
             let chipColor = PALETTE.primary.main; 
-            let chipBg = '#000000'; // Primary button text is black
+            let chipBg = '#000000'; 
 
             if (session.isDebtSession) {
                 typeLabel = "SCHULDENABBAU";
                 borderColor = PALETTE.accents.red;
                 chipColor = PALETTE.accents.red;
-                chipBg = '#FFFFFF'; // Error button text is white
+                chipBg = '#FFFFFF'; 
             } else if (isPunishment) {
                 typeLabel = "STRAFARBEIT";
                 borderColor = PALETTE.accents.red;
@@ -70,7 +68,7 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
                 typeLabel = "INSTRUCTION";
                 borderColor = PALETTE.accents.gold;
                 chipColor = PALETTE.accents.gold;
-                chipBg = '#000000'; // Warning button text is usually dark/black
+                chipBg = '#000000'; 
             }
 
             return (
@@ -88,7 +86,6 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
                     }}>
                         <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
                             
-                            {/* HEADER: Typ-Chip */}
                             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                                 <Chip 
                                     label={typeLabel} 
@@ -103,7 +100,7 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
                                         textShadow: chipBg === '#000000' ? `0 0 5px ${chipColor}` : 'none'
                                     }}
                                 />
-                                {isDebtLocked && (
+                                {isLocked && (
                                     <Chip 
                                         label="LOCKED" 
                                         size="small" 
@@ -116,57 +113,60 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
                             </Box>
 
                             {/* ITEM LISTE */}
-                            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 2 }}>
-                                {sessionItems.map((item, idx) => (
-                                    <Box 
-                                        key={item.id || idx} 
-                                        onClick={() => onNavigateItem(item.id)}
-                                        sx={{ 
-                                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                                            p: 1, borderRadius: 1, 
-                                            bgcolor: 'rgba(255,255,255,0.05)',
-                                            cursor: 'pointer',
-                                            transition: 'background 0.2s',
-                                            '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' }
-                                        }}
-                                    >
-                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                                            <Avatar 
-                                                src={item.imageUrl || item.image} 
-                                                variant="rounded" 
-                                                sx={{ width: 40, height: 40, border: `1px solid ${PALETTE.primary.main}` }}
-                                            />
-                                            <Box>
-                                                <Typography variant="body2" sx={{ fontWeight: 'bold', color: 'text.primary' }}>
-                                                    {item.name}
-                                                </Typography>
-                                                <Typography variant="caption" color="text.secondary">
-                                                    {item.brand}
-                                                </Typography>
-                                            </Box>
-                                        </Box>
-
-                                        {/* Zeit-Chip: Jetzt formatiert in h/min */}
-                                        <Chip 
-                                            label={formatDuration(durationMinutes)} 
-                                            size="small" 
-                                            variant="outlined"
+                            {sessionItems.length > 0 && (
+                                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 2 }}>
+                                    {sessionItems.map((item, idx) => (
+                                        <Box 
+                                            key={item.id || idx} 
+                                            onClick={() => onNavigateItem(item.id)}
                                             sx={{ 
-                                                height: '20px', 
-                                                fontSize: '0.7rem', 
-                                                borderColor: 'rgba(255,255,255,0.2)', 
-                                                color: 'text.secondary' 
+                                                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                                p: 1, borderRadius: 1, 
+                                                bgcolor: 'rgba(255,255,255,0.05)',
+                                                cursor: 'pointer',
+                                                transition: 'background 0.2s',
+                                                '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' }
                                             }}
-                                        />
-                                    </Box>
-                                ))}
-                            </Box>
+                                        >
+                                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                                                <Avatar 
+                                                    src={item.imageUrl || item.image} 
+                                                    variant="rounded" 
+                                                    sx={{ width: 40, height: 40, border: `1px solid ${PALETTE.primary.main}` }}
+                                                />
+                                                <Box>
+                                                    <Typography variant="body2" sx={{ fontWeight: 'bold', color: 'text.primary' }}>
+                                                        {item.name}
+                                                    </Typography>
+                                                    <Typography variant="caption" color="text.secondary">
+                                                        {item.brand}
+                                                    </Typography>
+                                                </Box>
+                                            </Box>
 
-                            {/* DEBT PROGRESS */}
-                            {session.isDebtSession && (
+                                            <Chip 
+                                                label={formatDuration(durationMinutes)} 
+                                                size="small" 
+                                                variant="outlined"
+                                                sx={{ 
+                                                    height: '20px', 
+                                                    fontSize: '0.7rem', 
+                                                    borderColor: 'rgba(255,255,255,0.2)', 
+                                                    color: 'text.secondary' 
+                                                }}
+                                            />
+                                        </Box>
+                                    ))}
+                                </Box>
+                            )}
+
+                            {/* PROGRESS BAR - Nun auch für Strafen visualisiert */}
+                            {(session.isDebtSession || isPunishment) && minDuration > 0 && (
                                 <Box sx={{ mt: 1, mb: 2 }}>
                                     <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                                        <Typography variant="caption" color="error">Pflicht-Tilgung</Typography>
+                                        <Typography variant="caption" color="error">
+                                            {isPunishment ? "Strafzeit" : "Pflicht-Tilgung"}
+                                        </Typography>
                                         <Typography variant="caption" color="text.secondary">{durationMinutes} / {minDuration} min</Typography>
                                     </Box>
                                     <LinearProgress 
@@ -178,23 +178,26 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
                                 </Box>
                             )}
 
-                            {/* ACTIONS */}
+                            {/* ACTIONS - Korrigierte Button Farbigkeit & Sperrung */}
                             <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
                                 {(isTZD || isPunishment || session.isDebtSession) ? (
                                     <Button 
-                                        variant="outlined" 
-                                        color="error" 
+                                        variant={isLocked ? "outlined" : "contained"} 
                                         size="small"
                                         fullWidth
-                                        disabled={isDebtLocked || (isPunishment && durationMinutes < 30)}
+                                        disabled={isLocked}
                                         onClick={() => onStopSession(session)}
-                                        startIcon={isDebtLocked ? <LockIcon /> : <StopIcon />}
-                                        sx={{ 
-                                            borderColor: isDebtLocked ? 'rgba(255,255,255,0.1)' : PALETTE.accents.red,
-                                            color: isDebtLocked ? 'text.disabled' : PALETTE.accents.red
+                                        startIcon={isLocked ? <LockIcon /> : <StopIcon />}
+                                        sx={isLocked ? { 
+                                            borderColor: 'rgba(255,255,255,0.1)',
+                                            color: 'text.disabled'
+                                        } : {
+                                            bgcolor: PALETTE.primary.main,
+                                            color: '#000',
+                                            '&:hover': { bgcolor: PALETTE.primary.dark }
                                         }}
                                     >
-                                        {isDebtLocked ? `GESPERRT (${remainingDebt}m)` : "BEENDEN"}
+                                        {isLocked ? `GESPERRT (${remainingTime}m)` : "BEENDEN"}
                                     </Button>
                                 ) : (
                                     <Button 

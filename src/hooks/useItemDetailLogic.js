@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { 
     doc, getDoc, updateDoc, collection, query, where, getDocs, 
-    serverTimestamp, arrayUnion, limit, orderBy 
+    serverTimestamp, arrayUnion, orderBy 
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../firebase';
@@ -77,18 +77,17 @@ function useItemFetcher(id, currentUser, navigate) {
                 }
                 setDropdowns(newDropdowns);
 
-                // Tsunami Fix: Paginated + Time Ordered
+                // Tsunami Fix: KORREKTUR - Die Drosselung (limit) wurde restlos entfernt, 
+                // um die Offline-Datenbank zu zwingen, die vollständige Historie zu laden und zu synchronisieren.
                 const qLegacy = query(
                     collection(db, `users/${currentUser.uid}/sessions`),
                     where('itemId', '==', id),
-                    orderBy('startTime', 'desc'),
-                    limit(30)
+                    orderBy('startTime', 'desc')
                 );
                 const qNew = query(
                     collection(db, `users/${currentUser.uid}/sessions`),
                     where('itemIds', 'array-contains', id),
-                    orderBy('startTime', 'desc'),
-                    limit(30)
+                    orderBy('startTime', 'desc')
                 );
 
                 const [snapLegacy, snapNew] = await Promise.all([getDocs(qLegacy), getDocs(qNew)]);
