@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { 
     doc, getDoc, updateDoc, collection, query, where, getDocs, 
-    serverTimestamp, arrayUnion, orderBy 
+    serverTimestamp, arrayUnion 
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../firebase';
@@ -77,20 +77,28 @@ function useItemFetcher(id, currentUser, navigate) {
                 }
                 setDropdowns(newDropdowns);
 
-                // Tsunami Fix: KORREKTUR - Die Drosselung (limit) wurde restlos entfernt, 
-                // um die Offline-Datenbank zu zwingen, die vollständige Historie zu laden und zu synchronisieren.
-                const qLegacy = query(
-                    collection(db, `users/${currentUser.uid}/sessions`),
-                    where('itemId', '==', id),
-                    orderBy('startTime', 'desc')
-                );
-                const qNew = query(
-                    collection(db, `users/${currentUser.uid}/sessions`),
-                    where('itemIds', 'array-contains', id),
-                    orderBy('startTime', 'desc')
-                );
-
-                const [snapLegacy, snapNew] = await Promise.all([getDocs(qLegacy), getDocs(qNew)]);
+                // KORREKTUR: Umgehung des Firebase Composite Index Fehlers.
+                // orderBy wurde hier entfernt, da ansonsten die Abfrage in Firestore scheitert, 
+                // wenn der Index (itemId + startTime) fehlt. Die Sortierung erfolgt ohnehin sicher lokal.
+                let snapLegacy = { docs: [] };
+                let snapNew = { docs: [] };
+                
+                try {
+                    const qLegacy = query(
+                        collection(db, `users/${currentUser.uid}/sessions`),
+                        where('itemId', '==', id)
+                    );
+                    const qNew = query(
+                        collection(db, `users/${currentUser.uid}/sessions`),
+                        where('itemIds', 'array-contains', id)
+                    );
+                    
+                    const [resLegacy, resNew] = await Promise.all([getDocs(qLegacy), getDocs(qNew)]);
+                    snapLegacy = resLegacy;
+                    snapNew = resNew;
+                } catch (sessionErr) {
+                    console.error("Fehler beim Abrufen der Sessions (möglicherweise blockiert durch Firebase):", sessionErr);
+                }
 
                 const sessionMap = new Map();
                 snapLegacy.docs.forEach(d => sessionMap.set(d.id, { id: d.id, ...d.data() }));
@@ -155,10 +163,20 @@ function useItemFetcher(id, currentUser, navigate) {
                 s.releases.forEach(r => events.push({ type: 'release', date: safeDate(r.timestamp), data: { ...r, sessionId: s.id } }));
             }
         });
-        if (item?.historyLog) item.historyLog.forEach(log => events.push({ type: log.type, date: new Date(log.date), data: log }));
-        else if (item?.cleanDate) events.push({ type: 'wash', date: safeDate(item.cleanDate), data: { legacy: true } });
+        if (item?.historyLog) {
+            item.historyLog.forEach(log => {
+                events.push({ type: log.type, date: new Date(log.date), data: log });
+            });
+        } else if (item?.cleanDate) {
+            events.push({ type: 'wash', date: safeDate(item.cleanDate), data: { legacy: true } });
+        }
 
-        return events.sort((a, b) => (b.date || 0) - (a.date || 0));
+        // KORREKTUR: Robuste Sortierung absteigend anhand exakter Zeitstempel
+        return events.sort((a, b) => {
+            const timeA = a.date instanceof Date && !isNaN(a.date) ? a.date.getTime() : 0;
+            const timeB = b.date instanceof Date && !isNaN(b.date) ? b.date.getTime() : 0;
+            return timeB - timeA;
+        });
     }, [sessions, item]);
 
     return { item, setItem, loading, isBusy, dropdowns, stats, recoveryInfo, historyEvents };

@@ -42,15 +42,22 @@ export default function ItemHistory({ historyEvents }) {
                     if (event.type === 'session') {
                         const s = event.data;
                         
-                        // KORREKTUR: Berücksichtigung der neuen Session-Kategorien
+                        // KORREKTUR: Präzise Aufschlüsselung der Session-Kategorien (Tag/Nacht, TZD Subtypen)
                         let typeLabel = 'Session';
-                        if (s.type === 'instruction') typeLabel = 'Anweisung';
+                        if (s.type === 'instruction') {
+                            typeLabel = s.periodId === 'night' ? 'Anweisung (Nacht)' : 'Anweisung (Tag)';
+                        }
                         else if (s.type === 'voluntary') typeLabel = 'Freiwillig';
                         else if (s.type === 'punishment') typeLabel = 'Strafarbeit';
-                        else if (s.type === 'tzd') typeLabel = 'Zeitloses Diktat';
+                        else if (s.type === 'tzd') {
+                            typeLabel = 'Zeitloses Diktat';
+                            if (s.subtype) {
+                                typeLabel += ` (${s.subtype.charAt(0).toUpperCase() + s.subtype.slice(1)})`;
+                            }
+                        }
                         else if (s.isDebtSession || s.type === 'debt') typeLabel = 'Schuldenabbau';
 
-                        label = `${typeLabel}${s.subtype ? ` (${s.subtype})` : ''}`;
+                        label = typeLabel;
                         color = s.type === 'instruction' ? 'secondary' : (s.type === 'punishment' ? 'error' : 'default');
                         icon = <AccessTimeIcon style={{ fontSize: 16 }} />;
                         
@@ -76,6 +83,13 @@ export default function ItemHistory({ historyEvents }) {
                         color = "info";
                         icon = <WaterDropIcon style={{ fontSize: 16 }} />;
                         durationLabel = r.outcome === 'maintained' ? 'Maintained' : 'Removed';
+                    } else if (event.type === 'wash_pending') {
+                        // KORREKTUR: Explizites Erfassen, wann ein Item in den Wäschekorb gelegt wurde
+                        label = "Wäschekorb";
+                        sub = `${dateStr} • Zur Reinigung hinzugefügt`;
+                        color = "warning";
+                        icon = <LocalLaundryServiceIcon style={{ fontSize: 16 }} />;
+                        durationLabel = 'Wartend';
                     } else if (event.type === 'wash') {
                         label = "Reinigung";
                         sub = `${dateStr} • Gewaschen`;
