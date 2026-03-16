@@ -8,8 +8,8 @@ import {
     Container, Dialog, DialogTitle, DialogContent, IconButton, Chip, Divider 
 } from '@mui/material';
 import { 
-    AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, 
-    ResponsiveContainer, PieChart, Pie, Cell, Legend, BarChart, Bar 
+    ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, 
+    ResponsiveContainer, PieChart, Pie, Cell, BarChart 
 } from 'recharts';
 import { motion } from 'framer-motion';
 
@@ -166,128 +166,179 @@ export default function Statistics() {
 
     const { coreMetrics, basics } = useKPIs(items, [], sessions);
 
+    // KORREKTUR: Umbau auf 6-Monats-Schnitt mit linearer Regression
     const calculateTrend = (metricId) => {
-        const displayDays = 30;
-        const windowSize = 5;
-        const totalDaysNeeded = displayDays + windowSize - 1;
         const rawData = [];
         const today = new Date();
-        
-        for (let i = 0; i < totalDaysNeeded; i++) {
-            const d = new Date(today);
-            d.setDate(today.getDate() - (totalDaysNeeded - 1 - i));
-            const dateStr = d.toISOString().split('T')[0];
+        const currentMonth = today.getMonth();
+        const currentYear = today.getFullYear();
 
-            const daySessions = sessions.filter(s => {
-                if (!s.startTime) return false;
-                const sDate = s.startTime.toISOString().split('T')[0];
-                return sDate === dateStr;
-            });
-
-            let val = 0;
+        for (let i = 5; i >= 0; i--) {
+            let m = currentMonth - i;
+            let y = currentYear;
+            if (m < 0) {
+                m += 12;
+                y -= 1;
+            }
             
-            if (metricId === 'coverage') {
-                const activeMins = calculateDailyActiveMinutes(d, sessions);
-                val = (activeMins / 1440) * 100;
-            } 
-            else if (metricId === 'nocturnal') {
-                const checkTime = new Date(d);
-                checkTime.setHours(2, 0, 0, 0); 
-                const checkTs = checkTime.getTime();
-                const isWorn = sessions.some(s => {
-                     const start = s.startTime; 
-                     const end = s.endTime; 
-                     if (!start) return false;
-                     if (checkTs >= start.getTime() && (!end || checkTs <= end.getTime())) {
-                         const sItemIds = s.itemIds || (s.itemId ? [s.itemId] : []);
-                         return sItemIds.some(id => {
-                             const item = items.find(i => i.id === id);
-                             if (!item) return false;
-                             const sub = (item.subCategory || '').toLowerCase();
-                             return sub.includes('strumpfhose');
-                         });
-                     }
-                     return false;
+            const startOfMonth = new Date(y, m, 1);
+            const endOfMonth = new Date(y, m + 1, 0);
+            const actualEnd = endOfMonth > today ? today : endOfMonth;
+            const daysInMonth = actualEnd.getDate();
+            
+            let monthlySum = 0;
+            
+            if (metricId === 'cpnh') {
+                // CPNH benötigt eine kumulative Berechnung bis zum Ende des jeweiligen Monats
+                const validItems = items.filter(it => {
+                    const pd = safeDate(it.purchaseDate) || new Date(0);
+                    const cat = (it.mainCategory || '').toLowerCase();
+                    const sub = (it.subCategory || '').toLowerCase();
+                    const isNylon = cat.includes('nylon') || sub.includes('strumpfhose') || sub.includes('stockings');
+                    return isNylon && pd <= actualEnd && it.status !== 'archived';
                 });
-                val = isWorn ? 100 : 0;
+                
+                let totalCost = validItems.reduce((sum, it) => sum + (Number(it.cost) || 0), 0);
+                
+                let totalNylonMs = 0;
+                sessions.forEach(s => {
+                    const sStart = safeDate(s.startTime);
+                    const sEnd = safeDate(s.endTime) || new Date();
+                    if (sStart && sStart <= actualEnd) {
+                        const sItemIds = s.itemIds || (s.itemId ? [s.itemId] : []);
+                        const hasNylon = sItemIds.some(id => validItems.find(vi => vi.id === id));
+                        if (hasNylon) {
+                            const clampEnd = sEnd > actualEnd ? actualEnd : sEnd;
+                            totalNylonMs += Math.max(0, clampEnd - sStart);
+                        }
+                    }
+                });
+                
+                const totalHours = totalNylonMs / 3600000;
+                let val = totalHours > 0 ? totalCost / totalHours : 0;
+                
+                const monthName = startOfMonth.toLocaleDateString('de-DE', { month: 'short', year: '2-digit' });
+                rawData.push({ name: monthName, value: val });
+                continue;
             }
-            else if (metricId === 'nylonGap') { 
-                const wornMins = calculateDailyNylonWearMinutes(d, sessions, items);
-                const gapMins = 1440 - wornMins;
-                val = Math.max(0, gapMins) / 60;
-            }
-            else if (metricId === 'resistance') {
-                val = daySessions.filter(s => s.type === 'punishment').length;
-            }
-            else if (metricId === 'compliance') {
-                const relevant = daySessions.filter(s => typeof s.complianceLagMinutes === 'number');
-                if (relevant.length > 0) {
-                    const sum = relevant.reduce((acc, s) => acc + s.complianceLagMinutes, 0);
-                    val = sum / relevant.length;
+
+            // Für alle anderen Metriken: Tägliche Analyse innerhalb des Monats und dann Durchschnitt
+            for (let d = 1; d <= daysInMonth; d++) {
+                const currentDate = new Date(y, m, d);
+                const startOfDay = new Date(currentDate); startOfDay.setHours(0,0,0,0);
+                const endOfDay = new Date(currentDate); endOfDay.setHours(23,59,59,999);
+                
+                const daySessions = sessions.filter(s => {
+                    const sStart = safeDate(s.startTime);
+                    const sEnd = safeDate(s.endTime) || new Date();
+                    if (!sStart) return false;
+                    return (sStart <= endOfDay && sEnd >= startOfDay);
+                });
+
+                let val = 0;
+                if (metricId === 'coverage') {
+                    const activeMins = calculateDailyActiveMinutes(currentDate, sessions);
+                    val = (activeMins / 1440) * 100;
+                } 
+                else if (metricId === 'nocturnal') {
+                    const checkTime = new Date(currentDate);
+                    checkTime.setHours(2, 0, 0, 0); 
+                    const checkTs = checkTime.getTime();
+                    const isWorn = sessions.some(s => {
+                         const start = safeDate(s.startTime); 
+                         const end = safeDate(s.endTime) || new Date(); 
+                         if (!start) return false;
+                         if (checkTs >= start.getTime() && checkTs <= end.getTime()) {
+                             const sItemIds = s.itemIds || (s.itemId ? [s.itemId] : []);
+                             return sItemIds.some(id => {
+                                 const item = items.find(i => i.id === id);
+                                 if (!item) return false;
+                                 const sub = (item.subCategory || '').toLowerCase();
+                                 return sub.includes('strumpfhose');
+                             });
+                         }
+                         return false;
+                    });
+                    val = isWorn ? 100 : 0;
                 }
+                else if (metricId === 'nylonGap') { 
+                    const wornMins = calculateDailyNylonWearMinutes(currentDate, sessions, items);
+                    val = Math.max(0, 1440 - wornMins) / 60;
+                }
+                else if (metricId === 'resistance') {
+                    val = daySessions.length > 0 ? (daySessions.filter(s => s.type === 'punishment').length / daySessions.length) * 100 : 0;
+                }
+                else if (metricId === 'compliance') {
+                    const relevant = daySessions.filter(s => typeof s.complianceLagMinutes === 'number');
+                    if (relevant.length > 0) {
+                        const sum = relevant.reduce((acc, s) => acc + s.complianceLagMinutes, 0);
+                        val = sum / relevant.length;
+                    }
+                }
+                else if (metricId === 'voluntarism') {
+                    let totalMs = 0;
+                    let volMs = 0;
+                    daySessions.forEach(s => {
+                        const start = safeDate(s.startTime) < startOfDay ? startOfDay : safeDate(s.startTime);
+                        const end = (safeDate(s.endTime) || new Date()) > endOfDay ? endOfDay : (safeDate(s.endTime) || new Date());
+                        const dur = Math.max(0, end - start);
+                        totalMs += dur;
+                        if(s.type === 'voluntary') volMs += dur;
+                    });
+                    val = totalMs > 0 ? (volMs / totalMs) * 100 : 0;
+                }
+                else if (metricId === 'endurance') {
+                    let dMins = 0;
+                    let dCount = 0;
+                    daySessions.forEach(s => {
+                        const start = safeDate(s.startTime) < startOfDay ? startOfDay : safeDate(s.startTime);
+                        const end = (safeDate(s.endTime) || new Date()) > endOfDay ? endOfDay : (safeDate(s.endTime) || new Date());
+                        dMins += Math.max(0, end - start) / 60000;
+                        dCount++;
+                    });
+                    val = dCount > 0 ? (dMins / dCount / 60) : 0;
+                }
+                else if (metricId === 'nylonEnclosure') {
+                     const wornMins = calculateDailyNylonWearMinutes(currentDate, sessions, items);
+                     val = (wornMins / 1440) * 100;
+                }
+                else {
+                    val = daySessions.length;
+                }
+                monthlySum += val;
             }
-            else if (metricId === 'voluntarism') {
-                let totalMs = 0;
-                let volMs = 0;
-                daySessions.forEach(s => {
-                    const end = s.endTime || new Date();
-                    totalMs += (end - s.startTime);
-                    if(s.type === 'voluntary') volMs += (end - s.startTime);
-                });
-                val = totalMs > 0 ? (volMs / totalMs) * 100 : 0;
-            }
-            else if (metricId === 'endurance') {
-                let dMins = 0;
-                let dCount = 0;
-                daySessions.forEach(s => {
-                    const end = s.endTime || new Date();
-                    dMins += (end - s.startTime) / 60000;
-                    dCount++;
-                });
-                val = dCount > 0 ? (dMins / dCount / 60) : 0;
-            }
-            else if (metricId === 'nylonEnclosure') {
-                 let globalMs = 0;
-                 let nylonMs = 0;
-                 daySessions.forEach(s => {
-                     const end = s.endTime || new Date();
-                     const dur = end - s.startTime;
-                     globalMs += dur;
-                     const sItemIds = s.itemIds || (s.itemId ? [s.itemId] : []);
-                     const hasNylon = sItemIds.some(id => {
-                        const item = items.find(i => i.id === id);
-                        if (!item) return false;
-                        const cat = (item.mainCategory || '').toLowerCase();
-                        const sub = (item.subCategory || '').toLowerCase();
-                        return cat.includes('nylon') || sub.includes('strumpfhose') || sub.includes('stockings');
-                     });
-                     if(hasNylon) nylonMs += dur;
-                 });
-                 val = globalMs > 0 ? (nylonMs / globalMs) * 100 : 0;
-            }
-            else {
-                val = daySessions.length;
-            }
-            rawData.push({ date: dateStr, val });
+            
+            const monthlyAvg = daysInMonth > 0 ? monthlySum / daysInMonth : 0;
+            const monthName = startOfMonth.toLocaleDateString('de-DE', { month: 'short', year: '2-digit' });
+            rawData.push({ name: monthName, value: monthlyAvg });
         }
 
-        const smoothedData = [];
-        for (let i = windowSize - 1; i < rawData.length; i++) {
-            const windowSlice = rawData.slice(i - windowSize + 1, i + 1);
-            const sum = windowSlice.reduce((acc, curr) => acc + curr.val, 0);
-            const avg = sum / windowSize;
-            const currentDay = rawData[i];
-            smoothedData.push({
-                name: currentDay.date.split('-').slice(2).join('.'),
-                fullDate: currentDay.date,
-                value: parseFloat(avg.toFixed(2))
-            });
-        }
-        setTrendData(smoothedData);
+        // Lineare Regression (y = mx + b)
+        const n = rawData.length;
+        let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+        rawData.forEach((d, idx) => {
+            sumX += idx;
+            sumY += d.value;
+            sumXY += (idx * d.value);
+            sumX2 += (idx * idx);
+        });
+        
+        const denominator = (n * sumX2 - sumX * sumX);
+        const m_slope = denominator === 0 ? 0 : (n * sumXY - sumX * sumY) / denominator;
+        const b_intercept = denominator === 0 ? sumY / n : (sumY - m_slope * sumX) / n;
+
+        const finalData = rawData.map((d, idx) => ({
+            name: d.name,
+            value: parseFloat(d.value.toFixed(2)),
+            trend: Math.max(0, parseFloat((m_slope * idx + b_intercept).toFixed(2)))
+        }));
+
+        setTrendData(finalData);
     };
 
     const handleCardClick = (metricId, title) => { 
-        if (['coverage', 'nocturnal', 'nylonGap', 'resistance', 'nylonEnclosure', 'compliance', 'voluntarism', 'endurance'].includes(metricId)) {
+        // KORREKTUR: Alle Detail-Graphen freigeschaltet (inkl. CPNH)
+        if (['coverage', 'nocturnal', 'nylonGap', 'resistance', 'nylonEnclosure', 'compliance', 'voluntarism', 'endurance', 'cpnh'].includes(metricId)) {
             calculateTrend(metricId);
             setSelectedMetric({id: metricId, title}); 
         } else {
@@ -326,7 +377,7 @@ export default function Statistics() {
 
         forensics.lossValueData = Object.keys(reasonValues).map((key, idx) => ({
             name: key, value: reasonValues[key], color: CHART_THEME.colors[idx % CHART_THEME.colors.length]
-        })).sort((a,b) => b.value - a.value); // Sortiert nach Verlusthöhe
+        })).sort((a,b) => b.value - a.value); 
     }
 
     const getUnit = (metricId) => {
@@ -337,6 +388,7 @@ export default function Statistics() {
         if (metricId === 'nylonEnclosure') return ' %';
         if (metricId === 'voluntarism') return ' %';
         if (metricId === 'compliance') return ' m';
+        if (metricId === 'cpnh') return ' €';
         return '';
     };
 
@@ -374,9 +426,9 @@ export default function Statistics() {
                                         height: '100%', 
                                         ...DESIGN_TOKENS.glassCard,
                                         borderColor: `1px solid ${m.color}40`,
-                                        cursor: m.id !== 'cpnh' ? 'pointer' : 'default',
+                                        cursor: 'pointer',
                                         transition: 'transform 0.2s',
-                                        '&:hover': { transform: m.id !== 'cpnh' ? 'translateY(-2px)' : 'none', borderColor: m.color }
+                                        '&:hover': { transform: 'translateY(-2px)', borderColor: m.color }
                                     }}
                                 >
                                     <CardContent sx={{ p: 2, textAlign: 'center' }}>
@@ -400,7 +452,6 @@ export default function Statistics() {
                 </motion.div>
 
                 <Grid container spacing={3}>
-                    {/* GLOBAL CPW CARD */}
                     <Grid item xs={12} sm={4}>
                          <motion.div variants={MOTION.listItem} style={{ height: '100%' }}>
                             <Paper sx={{ p: 2, height: '100%', border: `1px solid ${PALETTE.accents.crimson}`, bgcolor: `${PALETTE.accents.crimson}10`, textAlign: 'center', display: 'flex', flexDirection: 'column', justifyContent: 'center', borderRadius: '12px' }}>
@@ -411,12 +462,10 @@ export default function Statistics() {
                         </motion.div>
                     </Grid>
                     
-                    {/* CHARTS: PIE & BAR */}
                     <Grid item xs={12} sm={8}>
                         <motion.div variants={MOTION.listItem} style={{ height: '100%' }}>
                             <Paper sx={{ p: 2, ...DESIGN_TOKENS.glassCard }}>
                                 <Grid container spacing={2}>
-                                    {/* Pie Chart: Anzahl */}
                                     <Grid item xs={6}>
                                         <Typography variant="subtitle2" align="center" gutterBottom>Nach Anzahl</Typography>
                                         <Box sx={{height: 200, width: '100%'}}>
@@ -431,7 +480,6 @@ export default function Statistics() {
                                         </Box>
                                     </Grid>
                                     
-                                    {/* Bar Chart: Wertverlust */}
                                     <Grid item xs={6}>
                                         <Typography variant="subtitle2" align="center" gutterBottom>Verlustwert (€)</Typography>
                                         <Box sx={{height: 200, width: '100%'}}>
@@ -454,7 +502,7 @@ export default function Statistics() {
                 </Grid>
             </motion.div>
 
-            {/* TREND DIALOG (unverändert) */}
+            {/* KORREKTUR: ComposedChart (Balken für Werte + Linie für Regression) */}
             <Dialog open={!!selectedMetric} onClose={() => setSelectedMetric(null)} fullWidth maxWidth="sm" PaperProps={DESIGN_TOKENS.dialog.paper}>
                 <DialogTitle sx={DESIGN_TOKENS.dialog.title.sx}>
                     <Box><Typography variant="h6">{selectedMetric?.title} Trend</Typography></Box>
@@ -463,23 +511,22 @@ export default function Statistics() {
                 <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
                     <Box sx={{ height: 300, mt: 2 }}>
                         <ResponsiveContainer width="100%" height="100%">
-                            <AreaChart data={trendData}>
-                                <defs>
-                                    <linearGradient id="colorVal" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor={selectedMetric?.id === 'nylonGap' ? '#00e5ff' : PALETTE.accents.pink} stopOpacity={0.8}/>
-                                        <stop offset="95%" stopColor={selectedMetric?.id === 'nylonGap' ? '#00e5ff' : PALETTE.accents.pink} stopOpacity={0}/>
-                                    </linearGradient>
-                                </defs>
+                            <ComposedChart data={trendData}>
                                 <CartesianGrid strokeDasharray="3 3" stroke={CHART_THEME.grid.line.stroke} vertical={false} />
-                                <XAxis dataKey="name" stroke={CHART_THEME.textColor} tick={{fontSize: 10}} interval={4} axisLine={false} tickLine={false} />
+                                <XAxis dataKey="name" stroke={CHART_THEME.textColor} tick={{fontSize: 10}} axisLine={false} tickLine={false} />
                                 <YAxis stroke={CHART_THEME.textColor} tick={{fontSize: 10}} unit={getUnit(selectedMetric?.id)} width={35} axisLine={false} tickLine={false} />
-                                <RechartsTooltip contentStyle={CHART_THEME.tooltip.container} formatter={(value) => [value + getUnit(selectedMetric?.id), "Ø 5 Tage"]} labelFormatter={(label) => `Tag: ${label}`} cursor={{ stroke: PALETTE.primary.main, strokeWidth: 1 }} />
-                                <Area type="monotone" dataKey="value" stroke={selectedMetric?.id === 'nylonGap' ? '#00e5ff' : PALETTE.accents.pink} fillOpacity={1} fill="url(#colorVal)" animationDuration={1000} strokeWidth={2} />
-                            </AreaChart>
+                                <RechartsTooltip 
+                                    contentStyle={CHART_THEME.tooltip.container} 
+                                    formatter={(value, name) => [value + getUnit(selectedMetric?.id), name === 'value' ? 'Ø Monatswert' : 'Trend (Regression)']} 
+                                    cursor={{ fill: 'rgba(255,255,255,0.05)' }} 
+                                />
+                                <Bar dataKey="value" fill={selectedMetric?.id === 'nylonGap' ? '#00e5ff' : PALETTE.accents.pink} radius={[4, 4, 0, 0]} maxBarSize={40} />
+                                <Line dataKey="trend" type="linear" stroke={PALETTE.accents.gold} strokeWidth={2} dot={false} strokeDasharray="5 5" />
+                            </ComposedChart>
                         </ResponsiveContainer>
                     </Box>
                     <Typography variant="caption" color="text.secondary" align="center" display="block" sx={{mt:2}}>
-                        Gleitender Durchschnitt (5 Tage) • Letzte 30 Tage
+                        Monatlicher Durchschnitt (letzte 6 Monate) • Lineare Regression
                     </Typography>
                 </DialogContent>
             </Dialog>

@@ -400,43 +400,51 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
         return { coverageVal, nocturnalVal, avgGapVal, nylonEnclosureVal, voluntarismVal, resistanceVal, avgLagVal, enduranceVal, enduranceNylonVal, enduranceDessousVal };
     }, [items, allSessions, historySessions]);
 
-    // 6. MEMO: Chart Data
+    // 6. MEMO: Chart Data (KORRIGIERT AUF 6 MONATE LINEARE REGRESSION)
     const chartData = useMemo(() => {
-        const now = new Date();
-        const data = [];
-        const startDate = new Date(now);
-        startDate.setDate(now.getDate() - 59);
-        startDate.setHours(0,0,0,0);
+        const rawData = [];
+        const today = new Date();
+        const currentMonth = today.getMonth();
+        const currentYear = today.getFullYear();
 
-        const preStartDate = new Date(startDate);
-        preStartDate.setDate(preStartDate.getDate() - 4);
-        
-        const dailyMinutes = [];
-        const loopDate = new Date(preStartDate);
-        while (loopDate <= now) {
-            const mins = calculateDailyNylonMinutes(loopDate, allSessions, items);
-            dailyMinutes.push({
-                date: new Date(loopDate),
-                mins: mins
-            });
-            loopDate.setDate(loopDate.getDate() + 1);
-        }
-
-        for (let i = 4; i < dailyMinutes.length; i++) {
-            const currentMins = dailyMinutes[i].mins;
-            let sum = 0;
-            for (let j = 0; j < 5; j++) {
-                sum += dailyMinutes[i - j].mins;
-            }
-            const ma = sum / 5;
+        for (let i = 5; i >= 0; i--) {
+            let m = currentMonth - i;
+            let y = currentYear;
+            if (m < 0) { m += 12; y -= 1; }
             
-            data.push({
-                dateStr: dailyMinutes[i].date.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }),
-                Stunden: Number((currentMins / 60).toFixed(2)),
-                Trend: Number((ma / 60).toFixed(2)) 
-            });
+            const startOfMonth = new Date(y, m, 1);
+            const endOfMonth = new Date(y, m + 1, 0);
+            const actualEnd = endOfMonth > today ? today : endOfMonth;
+            const daysInMonth = actualEnd.getDate();
+            
+            let monthlySumMins = 0;
+            for (let d = 1; d <= daysInMonth; d++) {
+                const currentDate = new Date(y, m, d);
+                monthlySumMins += calculateDailyNylonMinutes(currentDate, allSessions, items);
+            }
+            
+            const avgDailyMins = daysInMonth > 0 ? monthlySumMins / daysInMonth : 0;
+            const avgDailyHours = avgDailyMins / 60;
+            
+            const monthName = startOfMonth.toLocaleDateString('de-DE', { month: 'short', year: '2-digit' });
+            rawData.push({ dateStr: monthName, val: avgDailyHours });
         }
-        return data;
+
+        const n = rawData.length;
+        let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+        rawData.forEach((d, idx) => {
+            sumX += idx; sumY += d.val; sumXY += (idx * d.val); sumX2 += (idx * idx);
+        });
+        
+        const denominator = (n * sumX2 - sumX * sumX);
+        const m_slope = denominator === 0 ? 0 : (n * sumXY - sumX * sumY) / denominator;
+        const b_intercept = denominator === 0 ? sumY / n : (sumY - m_slope * sumX) / n;
+
+        return rawData.map((d, idx) => ({
+            dateStr: d.dateStr,
+            Stunden: Number(d.val.toFixed(2)),
+            Trend: Math.max(0, Number((m_slope * idx + b_intercept).toFixed(2)))
+        }));
     }, [items, allSessions]);
 
     // 7. MEMO: Fem Index Math

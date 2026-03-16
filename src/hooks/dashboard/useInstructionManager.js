@@ -24,6 +24,7 @@ const calculatePeriodId = (d = new Date()) => {
     }
     return `${dateStr}-${isDay ? 'day' : 'night'}`;
 };
+
 const checkIsHoliday = (date) => {
     const d = date.getDate(); const m = date.getMonth() + 1;
     if (m === 12 && (d === 24 || d === 25 || d === 26)) return true;
@@ -57,10 +58,12 @@ export default function useInstructionManager({
     const [isHoldingOath, setIsHoldingOath] = useState(false);
     const [forcedReleaseOpen, setForcedReleaseOpen] = useState(false);
     const [forcedReleaseMethod, setForcedReleaseMethod] = useState(null);
-// --- REFS FÜR TIMER UND LOGIK ---
+
+    // --- REFS FÜR TIMER UND LOGIK ---
     const oathTimerRef = useRef(null);
     const isJustStartedRef = useRef(false);
-// --- ABGELEITETE STATES ---
+
+    // --- ABGELEITETE STATES ---
     const isInstructionActive = activeSessions.some(s => s.type === 'instruction');
     const isNight = currentPeriod ? currentPeriod.includes('night') : false;
 
@@ -77,8 +80,7 @@ export default function useInstructionManager({
         const isWeekend = (day === 0 || day === 6);
         const isHoliday = checkIsHoliday(d);
         setIsFreeDay(isWeekend || isHoliday);
-        setFreeDayReason(isHoliday ? 'Holiday' : (isWeekend ? 
-'Weekend' : ''));
+        setFreeDayReason(isHoliday ? 'Holiday' : (isWeekend ? 'Weekend' : ''));
     }, [now, currentPeriod]);
 
     // --- EFFECT 2: INSTRUCTION LADEN ODER GENERIEREN ---
@@ -89,73 +91,71 @@ export default function useInstructionManager({
         const wrongPeriod = currentInstruction && currentInstruction.periodId !== currentPeriod;
         
         if ((isIdle || wrongPeriod) && instructionStatus !== 'loading') { 
-      
-       const check = async () => {
+            const check = async () => {
                 setInstructionStatus('loading');
                 try {
                     let instr = await getLastInstruction(currentUser.uid);
                     
-           
-         if (instr && instr.periodId === currentPeriod) {
+                    if (instr && instr.periodId === currentPeriod) {
                         if (instr.isAccepted && !instr.evasionPenaltyTriggered) {
                             const acceptedDate = instr.acceptedAt?.toDate ? instr.acceptedAt.toDate() : new Date(instr.acceptedAt);
-                     
-       const ageInMinutes = (new Date() - acceptedDate) / 60000;
+                            const ageInMinutes = (new Date() - acceptedDate) / 60000;
                             
                             const qSession = query(
-                          
-       collection(db, `users/${currentUser.uid}/sessions`),
+                                collection(db, `users/${currentUser.uid}/sessions`),
                                 where('periodId', '==', instr.periodId),
                                 where('type', '==', 'instruction')
-                         
-    );
+                            );
                             const sessionSnap = await getDocs(qSession);
                             const hasEverStarted = !sessionSnap.empty;
-if (ageInMinutes > 30 && !hasEverStarted) {
+
+                            if (ageInMinutes > 30 && !hasEverStarted) {
                                 console.log("Flucht erkannt (Initial Check - Post Oath)! Trigger 150% TZD.");
-await triggerEvasionPenalty(currentUser.uid, instr.items);
+                                await triggerEvasionPenalty(currentUser.uid, instr.items);
                                 
                                 await updateDoc(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), { 
                                     evasionPenaltyTriggered: true 
                                 });
-setTzdActive(true); 
+                                setTzdActive(true); 
                                 setInstructionOpen(false); 
                                 instr = null;
                             }
                         }
                         if (instr) setCurrentInstruction(instr);
-} else if (!isFreeDay || currentPeriod.includes('night') || isStealthActive) {
+                    } else if (!isFreeDay || currentPeriod.includes('night') || isStealthActive) {
                         const newInstr = await generateAndSaveInstruction(currentUser.uid, items, activeSessions, currentPeriod);
-setCurrentInstruction(newInstr);
+                        setCurrentInstruction(newInstr);
                     } else {
                         setCurrentInstruction(null);
-}
+                    }
                 } catch(e) { 
                     console.error("Instruction Load Error", e);
-} finally { 
+                } finally { 
                     setInstructionStatus('ready');
-}
+                }
             };
             check();
-}
+        }
     }, [currentUser, items.length, sessionsLoading, currentPeriod, currentInstruction, instructionStatus, isFreeDay, activeSessions, isStealthActive, setTzdActive]);
-// --- EFFECT 3: LIVE-WATCHER (Post-Oath Flucht) ---
+
+    // --- EFFECT 3: LIVE-WATCHER (Post-Oath Flucht) ---
     useEffect(() => {
         if (!currentUser || !currentInstruction || !currentInstruction.isAccepted || currentInstruction.evasionPenaltyTriggered) return;
-        if (isInstructionActive) return; 
+        
+        // KORREKTUR: Nur blockieren, wenn EXAKT die Session zur aktuellen Anweisung läuft.
+        const isThisInstructionRunning = activeSessions.some(s => s.type === 'instruction' && s.periodId === currentInstruction.periodId);
+        if (isThisInstructionRunning) return; 
 
         const timer = setInterval(async () => {
             const acceptedDate = currentInstruction.acceptedAt?.toDate ? currentInstruction.acceptedAt.toDate() : new Date(currentInstruction.acceptedAt);
             const ageInMinutes = (Date.now() - acceptedDate) / 60000;
 
-       
-     if (ageInMinutes > 30) {
+            if (ageInMinutes > 30) {
                 const qSession = query(
                     collection(db, `users/${currentUser.uid}/sessions`),
                     where('periodId', '==', currentInstruction.periodId),
                     where('type', '==', 'instruction')
-       
-         );
+                );
                 const sessionSnap = await getDocs(qSession);
 
                 if (sessionSnap.empty) {
@@ -166,30 +166,33 @@ setCurrentInstruction(newInstr);
 
                     await triggerEvasionPenalty(currentUser.uid, currentInstruction.items);
           
-          
                     await updateDoc(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), { 
                         evasionPenaltyTriggered: true
                     });
                     
- 
                     setTzdActive(true); 
                     if (showToast) showToast("Zeitüberschreitung nach Eid: Strafe eingeleitet.", "error");
                 }
                 clearInterval(timer);
             }
-        }, 
-60000); 
+        }, 60000); 
 
         return () => clearInterval(timer);
-    }, [currentUser, currentInstruction, isInstructionActive, setTzdActive, showToast]);
+    }, [currentUser, currentInstruction, activeSessions, setTzdActive, showToast]);
 
-// --- EFFECT 4: FORCED RELEASE VERZÖGERUNGS-TRIGGER ---
+    // --- EFFECT 4: FORCED RELEASE VERZÖGERUNGS-TRIGGER ---
     useEffect(() => {
-        if (isInstructionActive && currentInstruction) {
-            const activeInstSession = activeSessions.find(s => s.type === 'instruction');
+        if (currentInstruction) {
+            // KORREKTUR: Finde EXAKT die Session, die zu DIESER Anweisung gehört (gleiche periodId).
+            // Das verhindert, dass alte Day-Sessions den Timer vorzeitig auslösen.
+            const activeInstSession = activeSessions.find(s => 
+                s.type === 'instruction' && 
+                s.periodId === currentInstruction.periodId
+            );
+            
             const fr = currentInstruction.forcedRelease;
             
-            if (fr && fr.required === true && fr.executed === false && activeInstSession?.startTime) {
+            if (activeInstSession && fr && fr.required === true && fr.executed === false && activeInstSession.startTime) {
                 if (!forcedReleaseOpen) {
                     // Reale Berechnung auf Basis der DB-Zeit, robuster 5-Sekunden-Trigger
                     const startMs = activeInstSession.startTime?.toDate ? activeInstSession.startTime.toDate().getTime() : new Date(activeInstSession.startTime).getTime();
@@ -206,8 +209,9 @@ setCurrentInstruction(newInstr);
                 }
             }
         }
-    }, [isInstructionActive, currentInstruction, forcedReleaseOpen, activeSessions]);
-// --- HANDLER: SESSION START ---
+    }, [currentInstruction, forcedReleaseOpen, activeSessions]);
+
+    // --- HANDLER: SESSION START ---
     const handleStartRequest = useCallback(async (itemsToStart) => { 
         if (!currentUser) return;
         if (tzdActive) { 
@@ -215,23 +219,22 @@ setCurrentInstruction(newInstr);
             return; 
         }
         const targetItems = itemsToStart || currentInstruction?.items;
-        if 
-(targetItems && targetItems.length > 0) { 
+        if (targetItems && targetItems.length > 0) { 
             isJustStartedRef.current = true;
             
             await startSessionService(currentUser.uid, {
-              items: targetItems,
-              type: 'instruction',
-              periodId: currentInstruction.periodId,
-         
-     acceptedAt: currentInstruction.acceptedAt
+                items: targetItems,
+                type: 'instruction',
+                periodId: currentInstruction.periodId,
+                acceptedAt: currentInstruction.acceptedAt
             });
             
             setInstructionOpen(false); 
             if (showToast) showToast(`${targetItems.length} Sessions gestartet.`, "success");
         }
     }, [currentUser, tzdActive, currentInstruction, showToast]);
-// --- HANDLER: OATH (EID) LOGIK ---
+
+    // --- HANDLER: OATH (EID) LOGIK ---
     const handleAcceptOath = useCallback(async () => { 
         if (!currentUser) return;
         const nowISO = new Date().toISOString(); 
@@ -239,32 +242,31 @@ setCurrentInstruction(newInstr);
         batch.update(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), { isAccepted: true, acceptedAt: nowISO }); 
         await batch.commit(); 
         setCurrentInstruction(prev => ({ ...prev, isAccepted: true, acceptedAt: nowISO })); 
-     
-   setIsHoldingOath(false); 
+        setIsHoldingOath(false); 
     }, [currentUser]);
-const startOathPress = useCallback(() => { 
+
+    const startOathPress = useCallback(() => { 
         setIsHoldingOath(true); 
         setOathProgress(0); 
         oathTimerRef.current = setInterval(() => { 
             setOathProgress(prev => { 
                 if (prev >= 100) { 
                     clearInterval(oathTimerRef.current); 
-      
-              handleAcceptOath(); 
+                    handleAcceptOath(); 
                     return 100; 
                 } 
                 return prev + 0.4; 
             }); 
         }, 20); 
-   
- }, [handleAcceptOath]);
+    }, [handleAcceptOath]);
     
     const cancelOathPress = useCallback(() => { 
         clearInterval(oathTimerRef.current); 
         setIsHoldingOath(false); 
         setOathProgress(0); 
     }, []);
-const handleDeclineOath = useCallback(async () => { 
+
+    const handleDeclineOath = useCallback(async () => { 
         if (!currentUser) return;
         await registerOathRefusal(currentUser.uid); 
         const newPunishment = await getActivePunishment(currentUser.uid);
@@ -272,8 +274,9 @@ const handleDeclineOath = useCallback(async () => {
         setInstructionOpen(false); 
         setIsHoldingOath(false); 
     }, [currentUser, setPunishmentStatus]);
-// --- HANDLER: FORCED RELEASE ---
-const handleConfirmForcedRelease = useCallback(async (outcome) => {
+
+    // --- HANDLER: FORCED RELEASE ---
+    const handleConfirmForcedRelease = useCallback(async (outcome) => {
         if (!currentUser) return;
         try {
             const activeInstSession = activeSessions.find(s => s.type === 'instruction');
@@ -299,31 +302,30 @@ const handleConfirmForcedRelease = useCallback(async (outcome) => {
             if (showToast) showToast("Fehler beim Speichern.", "error");
         }
     }, [currentUser, activeSessions, showToast]);
-const handleFailForcedRelease = useCallback(async () => {
+
+    const handleFailForcedRelease = useCallback(async () => {
         if (!currentUser) return;
         try {
             await registerPunishment(currentUser.uid, "Schwäche: Zwangsentladung fehlgeschlagen (Item ruiniert)", 60);
             const newStatus = await getActivePunishment(currentUser.uid);
             if (setPunishmentStatus) setPunishmentStatus(newStatus || { active: false });
             
-         
-   const batch = writeBatch(db);
+            const batch = writeBatch(db);
             if (currentInstruction && currentInstruction.items) {
                 currentInstruction.items.forEach(item => {
                     batch.update(doc(db, `users/${currentUser.uid}/items`, item.id), { status: 'washing' });
                 });
             }
       
-      
             batch.update(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), { "forcedRelease.executed": true });
             await batch.commit();
   
             setCurrentInstruction(prev => ({ ...prev, forcedRelease: { ...prev.forcedRelease, executed: true } }));
-setForcedReleaseOpen(false);
+            setForcedReleaseOpen(false);
             if (showToast) showToast("Schwäche protokolliert. Ausrüstung ruiniert. Strafe aktiv.", "error");
-} catch (e) {
+        } catch (e) {
             console.error("Error failing forced release:", e);
-}
+        }
     }, [currentUser, currentInstruction, setPunishmentStatus, showToast]);
   
     const handleRefuseForcedRelease = useCallback(async () => {
@@ -333,17 +335,16 @@ setForcedReleaseOpen(false);
             const newStatus = await getActivePunishment(currentUser.uid);
             if (setPunishmentStatus) setPunishmentStatus(newStatus || { active: false });
             
-  
-          await updateDoc(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), { "forcedRelease.executed": true });
+            await updateDoc(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), { "forcedRelease.executed": true });
             setCurrentInstruction(prev => ({ ...prev, forcedRelease: { ...prev.forcedRelease, executed: true } }));
             setForcedReleaseOpen(false);
             if (showToast) showToast("Verweigerung registriert. Massive Strafe aktiv.", "warning");
         } catch (e) {
             console.error("Error refusing forced release:", e);
-    
-    }
+        }
     }, [currentUser, setPunishmentStatus, showToast]);
-// --- RÜCKGABE DES VERTRAGS ---
+
+    // --- RÜCKGABE DES VERTRAGS ---
     return {
         currentPeriod,
         isNight,
@@ -356,8 +357,7 @@ setForcedReleaseOpen(false);
         isInstructionActive,
         oathProgress,
         isHoldingOath,
-  
-      forcedReleaseOpen,
+        forcedReleaseOpen,
         forcedReleaseMethod,
         handleStartRequest,
         startOathPress,
