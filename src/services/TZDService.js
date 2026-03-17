@@ -188,6 +188,23 @@ export const isItemEligibleForTZD = (item) => {
  * Regulärer TZD Trigger.
  */
 export const checkForTZDTrigger = async (userId, activeSessions, items) => {
+    // KORREKTUR: AMNESTIE-PRÜFUNG ZUERST (Filtert den Trigger aus, bevor überhaupt eine Chance berechnet wird)
+    try {
+        const tbSnap = await getDoc(doc(db, `users/${userId}/status/timeBank`));
+        if (tbSnap.exists()) {
+            const tbData = tbSnap.data();
+            if (tbData.tzdAmnestyUntil) {
+                const amnestyDate = tbData.tzdAmnestyUntil.toDate ? tbData.tzdAmnestyUntil.toDate() : new Date(tbData.tzdAmnestyUntil);
+                if (amnestyDate > new Date()) {
+                    console.log("TZD Wächter: 24h Amnestie aktiv. Kein Zufalls-TZD möglich.");
+                    return false;
+                }
+            }
+        }
+    } catch (e) {
+        console.error("Fehler beim Prüfen der TZD Amnestie:", e);
+    }
+
     const currentStatus = await getTZDStatus(userId);
     if (currentStatus && currentStatus.isActive) {
         const immune = await isImmunityActive(userId);
@@ -533,5 +550,52 @@ export const swapItemInTZD = async (userId, oldItemId, archiveData, allItems) =>
     } catch (e) {
         console.error("Swap failed:", e);
         return { success: false, error: e.message };
+    }
+};
+
+// --- NEU: AMNESTIE-KAUF-FUNKTION ---
+export const grantTZDAmnesty = async (userId) => {
+    const tbRef = doc(db, `users/${userId}/status/timeBank`);
+    const tzdRef = doc(db, `users/${userId}/status/tzd`);
+    
+    try {
+        const tbSnap = await getDoc(tbRef);
+        if (!tbSnap.exists()) return false;
+        
+        const data = tbSnap.data();
+        if (data.nc >= 500 && data.lc >= 500) {
+            const amnestyEnd = new Date(Date.now() + 24 * 60 * 60 * 1000); // Exakt 24 Stunden
+            
+            // Atomare Vernichtung der Coins
+            await updateDoc(tbRef, {
+                nc: increment(-500),
+                lc: increment(-500),
+                tzdAmnestyUntil: amnestyEnd
+            });
+            
+            // Sofortiges Abbrechen des angekündigten Diktats
+            await updateDoc(tzdRef, {
+                isActive: false,
+                result: 'amnestied',
+                endTime: serverTimestamp()
+            });
+            
+            // Forensik aufzeichnen
+            const tzdSnap = await getDoc(tzdRef);
+            if(tzdSnap.exists() && tzdSnap.data().lockedItems) {
+                for(const item of tzdSnap.data().lockedItems) {
+                    await addItemHistoryEntry(userId, item.id, {
+                        type: 'tzd_amnestied',
+                        message: 'TZD durch Amnestie-Freikauf (500 NC & 500 LC) abgewendet.'
+                    });
+                }
+            }
+
+            return true;
+        }
+        return false;
+    } catch (e) {
+        console.error("Amnesty Error:", e);
+        return false;
     }
 };

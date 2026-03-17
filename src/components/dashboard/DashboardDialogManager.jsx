@@ -53,7 +53,6 @@ const IndexDetailDialog = ({ open, onClose, details }) => {
 };
 
 export default function DashboardDialogManager(props) {
-    // 1. Daten direkt aus dem UI-Store (Kein Prop-Drilling mehr!)
     const {
         toast, handleCloseToast,
         laundryOpen, setLaundryOpen,
@@ -65,7 +64,6 @@ export default function DashboardDialogManager(props) {
         oathProgress, isHoldingOath
     } = useUIStore();
 
-    // 2. Komplexe Firebase-Logik oder statische Objekte kommen weiterhin aus Dashboard
     const {
         tzdActive, items, handleConfirmForcedRelease, handleFailForcedRelease, handleRefuseForcedRelease,
         timeBankData, handleAcknowledgeInflation, offerOpen, gambleStake, handleGambleAccept, handleGambleDecline, hasVoluntarySession, isForcedGamble,
@@ -81,7 +79,9 @@ export default function DashboardDialogManager(props) {
 
     return (
         <>
-            <TzdOverlay active={tzdActive} allItems={items} />
+            {/* KORREKTUR: TzdOverlay erhält nun timeBankData und currentUser für den Freikauf */}
+            <TzdOverlay active={tzdActive} allItems={items} timeBankData={timeBankData} currentUser={currentUser} />
+            
             <ForcedReleaseOverlay open={forcedReleaseOpen} method={forcedReleaseMethod} onConfirm={handleConfirmForcedRelease} onFail={handleFailForcedRelease} onRefuse={handleRefuseForcedRelease} />
             <InflationOverlay open={!!timeBankData.pendingInflationNotice} noticeData={timeBankData.pendingInflationNotice} onAcknowledge={handleAcknowledgeInflation} />
             <OfferDialog open={offerOpen} stakeItems={gambleStake} onAccept={handleGambleAccept} onDecline={handleGambleDecline} hasActiveSession={hasVoluntarySession} isForced={isForcedGamble} />

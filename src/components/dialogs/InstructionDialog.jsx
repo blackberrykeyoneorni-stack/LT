@@ -26,10 +26,10 @@ import FingerprintIcon from '@mui/icons-material/Fingerprint';
 
 import { useNFCGlobal } from '../../contexts/NFCContext';
 import { useAuth } from '../../contexts/AuthContext';
-import { startSession as startSessionService } from '../../services/SessionService';
+import { startSession as startSessionService, stopSession } from '../../services/SessionService';
 import { registerPunishment } from '../../services/PunishmentService';
 import { db } from '../../firebase';
-import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
 import { getTimeBankBalance, spendCredits, checkInsolvency } from '../../services/TimeBankService';
 
 const OVERDRAFT_PENALTY = 1.5; 
@@ -48,7 +48,9 @@ export default function InstructionDialog({
   // State für UI-Phasen
   const [viewState, setViewState] = useState('oath'); // 'oath' | 'preparation'
   
-  const [verifiedItems, setVerifiedItems] = useState([]);
+  // NEU: STAGING AREA STATE (Ankleide-Protokoll)
+  const [verifiedItemIds, setVerifiedItemIds] = useState([]);
+  
   const [suggestedItem, setSuggestedItem] = useState(null);
   const [hardcoreDialogOpen, setHardcoreDialogOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState(null);
@@ -83,12 +85,12 @@ export default function InstructionDialog({
     }
   }, [instruction]);
 
-  // Countdown Logic für Phase 2
+  // Countdown Logic für Phase 2 (Der Fluchtwächter Timer tickt weiter, bis die Instruction komplett startet!)
   useEffect(() => {
       if (viewState === 'preparation' && instruction?.acceptedAt) {
           const interval = setInterval(() => {
               const acceptedTime = instruction.acceptedAt.toDate ? instruction.acceptedAt.toDate() : new Date(instruction.acceptedAt);
-              const deadline = new Date(acceptedTime.getTime() + 30 * 60000); // 30 min Karenz
+              const deadline = new Date(acceptedTime.getTime() + 30 * 60000); 
               const now = new Date();
               const diff = deadline - now;
               
@@ -104,19 +106,101 @@ export default function InstructionDialog({
       }
   }, [viewState, instruction]);
 
-  // --- NFC SCAN LOGIC ---
-  // AUTOMATISCHER SCAN ENTFERNT. Wird jetzt per Button ausgelöst.
+  // --- NEU: STAGING AREA (ANKLEIDEN) LOGIK ---
+
+  const handleVerifyItem = async (scannedItem) => {
+      if (verifiedItemIds.includes(scannedItem.id)) return;
+      
+      try {
+          // Isolation der Material-Historie: Ein eigenes Session-Dokument pro Item
+          await startSessionService(currentUser.uid, {
+              items: [scannedItem],
+              itemId: scannedItem.id,
+              type: 'preparation', // Dieser Typ startet den globalen Instruction-Balken NICHT!
+              periodId: instruction.periodId,
+              verifiedViaNfc: true
+          });
+          
+          setVerifiedItemIds(prev => [...prev, scannedItem.id]);
+          if (showToast) showToast(`"${scannedItem.name}" am Körper. Materialzeit läuft.`, "success");
+      } catch (e) {
+          if (showToast) showToast("Fehler beim Erfassen des Items.", "error");
+      }
+  };
+
+  // Beobachter: Prüft in Echtzeit, ob das Outfit nun komplett ist
+  useEffect(() => {
+      if (instruction?.items && verifiedItemIds.length > 0 && verifiedItemIds.length === instruction.items.length) {
+          handleAllItemsVerified();
+      }
+  }, [verifiedItemIds, instruction]);
+
+  const handleAllItemsVerified = async () => {
+      try {
+          // 1. Beende alle temporären Staging/Preparation Sessions für die saubere Datenbank
+          const q = query(
+              collection(db, `users/${currentUser.uid}/sessions`), 
+              where('isActive', '==', true), 
+              where('type', '==', 'preparation')
+          );
+          const snap = await getDocs(q);
+          for (const document of snap.docs) {
+               await stopSession(currentUser.uid, document.id, { note: 'Ankleidephase beendet. Verschmelzung in Instruction.' });
+          }
+          
+          // 2. Starte die echte, offizielle Instruction Session (Jetzt beginnt der Protocol-Timer!)
+          await handleSessionStart(true);
+      } catch (e) {
+          console.error(e);
+          if (showToast) showToast("Fehler beim Abschluss der Ankleidephase.", "error");
+      }
+  };
+
+  // Die "Kalte Füße" Falle - Der unbarmherzige Abbruch in der Umkleidekabine
+  const handleColdFeet = async () => {
+      try {
+          // 1. Zerschlage laufende Preparation Sessions
+          const q = query(collection(db, `users/${currentUser.uid}/sessions`), where('isActive', '==', true), where('type', '==', 'preparation'));
+          const snap = await getDocs(q);
+          for (const document of snap.docs) {
+               await stopSession(currentUser.uid, document.id, { note: 'Abbruch (Kalte Füße)' });
+          }
+          
+          // 2. Kontaminiere die bereits getragenen Items (zwingt sie in den Wäschekorb)
+          for (const id of verifiedItemIds) {
+               await updateDoc(doc(db, `users/${currentUser.uid}/items`, id), {
+                   status: 'washing',
+                   cleanDate: null
+               });
+          }
+          
+          // 3. Verhängung der Strafe für den psychologischen Einknick
+          await registerPunishment(currentUser.uid, "Abbruch im Ankleide-Protokoll (Kalte Füße)", 120);
+          
+          // 4. Markiere die Instruction als versagt/geflohen
+          await updateDoc(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), {
+              evasionPenaltyTriggered: true
+          });
+          
+          if (showToast) showToast("Abbruch erfasst. Getragene Items kontaminiert. Strafe aktiv.", "error");
+          onClose();
+      } catch (e) {
+          console.error(e);
+          if (showToast) showToast("Systemfehler beim Abbruch.", "error");
+      }
+  };
+
+
+  // --- NFC SCAN LOGIC (STAGING ANGEPASST) ---
   const activateNfcScan = () => {
       if (showToast) showToast("Scanner aktiv. Halte das Item an.", "info");
       startBindingScan(handleNfcAutoStart);
   };
 
-  // Diese Funktion wird aufgerufen, wenn irgendein Tag gescannt wird
   const handleNfcAutoStart = async (scannedId) => {
-      // PHASE 1 BLOCKER: In Phase 1 ist NFC deaktiviert/ignoriert!
       if (viewState !== 'preparation') return;
-
       if (!instruction || !instruction.items) return;
+      
       const scannedItem = items.find(i => 
           (i.nfcTagId && i.nfcTagId === scannedId) || 
           (i.customId && i.customId === scannedId) ||
@@ -129,7 +213,7 @@ export default function InstructionDialog({
 
       let isValid = false;
 
-      // --- NEU: TRANSIT PROTOCOL LOGIK ---
+      // Transit Protocol Logik bleibt erhalten
       if (instruction.transitProtocol && instruction.transitProtocol.active) {
           const transit = instruction.transitProtocol;
           let isLate = false;
@@ -149,7 +233,7 @@ export default function InstructionDialog({
 
           if (!isValid) {
               if (isLate && scannedItem.id === transit.primaryItemId) {
-                   if (showToast) showToast("Transit verpasst (30 Min)! Das Nacht-Item ist unrein. Scanne Ersatz.", "error");
+                   if (showToast) showToast("Transit verpasst (30 Min)! Nacht-Item unrein. Scanne Ersatz.", "error");
                    return;
               } else if (!isLate && scannedItem.id === transit.backupItem.id) {
                    if (showToast) showToast("Transit-Fenster offen. Scanne dein Nacht-Item.", "error");
@@ -161,20 +245,16 @@ export default function InstructionDialog({
       }
 
       if (isValid) {
-          if (showToast) showToast(`Item "${scannedItem.name}" verifiziert. Starte Session...`, "success");
-          // PHASE 2 ABSCHLUSS: Scan startet die Session
-          await handleSessionStart(true);
+          await handleVerifyItem(scannedItem);
       } else {
-          if (showToast) showToast(`Falsches Item! "${scannedItem.name}" gehört nicht zur Anweisung.`, "error");
+          if (showToast) showToast(`Falsches Item! "${scannedItem.name}" blockiert.`, "error");
           if (navigator.vibrate) navigator.vibrate([100, 50, 100]); 
       }
   };
 
   // PHASE 1 ACTION: COMMITMENT (Der "Oath")
-  // Führt Transaktionen durch, akzeptiert die Instruction, wechselt zu Phase 2
   const handleCommitment = async () => {
       triggerHardcoreCheck(async () => {
-          // Time Bank Logic (Kaufen)
           if (creditReduction > 0) {
              try {
                  await spendCredits(currentUser.uid, creditReduction, creditType);
@@ -187,7 +267,6 @@ export default function InstructionDialog({
           try {
               const newDuration = (instruction.durationMinutes || 0) - creditReduction;
               
-              // Instruction Status auf "Accepted" setzen
               await updateDoc(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), {
                   isAccepted: true,
                   acceptedAt: serverTimestamp(),
@@ -197,9 +276,9 @@ export default function InstructionDialog({
                   wasOverdraft: isOverdraft 
               });
               
-              if (showToast) showToast("Akzeptiert. Bereite dich vor.", "success");
+              if (showToast) showToast("Akzeptiert. Gehe zur Umkleide.", "success");
               setViewState('preparation');
-              onCancelOath(); // Reset Hold Progress Visuals
+              onCancelOath(); 
 
           } catch (e) {
               console.error(e);
@@ -210,23 +289,21 @@ export default function InstructionDialog({
 
   // PHASE 2 ACTION: SESSION START (Die Ausführung)
   const handleSessionStart = async (viaNfc = false) => {
-      // Items laden
       const itemsToStart = instruction.items.map(instrItem => items.find(i => i.id === instrItem.id)).filter(Boolean);
       
       if (itemsToStart.length > 0) {
           try {
-              // Hier wird die eigentliche Session gestartet
               await startSessionService(currentUser.uid, {
                   items: itemsToStart,
                   itemId: itemsToStart[0].id,
                   type: 'instruction',
                   periodId: instruction.periodId,
-                  acceptedAt: instruction.acceptedAt, // Wichtig für Compliance Lag Berechnung
+                  acceptedAt: instruction.acceptedAt, 
                   verifiedViaNfc: viaNfc,
-                  instructionDurationMinutes: instruction.durationMinutes // Wurde bereits beim Accept angepasst
+                  instructionDurationMinutes: instruction.durationMinutes 
               });
               onClose();
-              if (showToast) showToast("Session erfolgreich gestartet.", "success");
+              if (showToast) showToast("Outfit komplett. Protokoll gestartet.", "success");
           } catch (e) {
               console.error(e);
               if (showToast) showToast("Fehler beim Session-Start.", "error");
@@ -254,7 +331,6 @@ export default function InstructionDialog({
             setCredits(balance);
             setCreditReduction(0); 
             
-            // Typ bestimmen durch Prüfung aller Items (Neu)
             let type = 'lingerie';
             if (instruction.items && instruction.items.length > 0) {
                 const hasNylon = instruction.items.some(instrItem => {
@@ -272,7 +348,6 @@ export default function InstructionDialog({
             }
             setCreditType(type);
             
-            // Insolvenz-Check
             const insCheck = await checkInsolvency(currentUser.uid, type);
             setInsolvencyData(insCheck);
         }
@@ -284,7 +359,6 @@ export default function InstructionDialog({
       if (open) setSuggestedItem(null);
   }, [open]);
 
-  // Spending Permission
   const canSpendCredits = 
       instruction && 
       !instruction.isAccepted && 
@@ -300,7 +374,6 @@ export default function InstructionDialog({
       }
   }, [canSpendCredits, instruction, insolvencyData]);
 
-  // KOSTEN-BERECHNUNG
   useEffect(() => {
       const currentBalance = creditType === 'nylon' ? credits.nc : credits.lc;
       
@@ -395,29 +468,21 @@ export default function InstructionDialog({
       }
   };
   
-  // Effekt: Wenn Hold-Button fertig ist (Progress 100%) -> Trigger HandleCommitment
-  // Nur in Phase 1 relevant
   useEffect(() => {
       if (oathProgress >= 100 && viewState === 'oath' && !instruction.isAccepted) {
           handleCommitment(); 
       }
   }, [oathProgress, viewState]);
 
-  const totalItems = instruction?.items?.length || 0;
-  const verifiedCount = verifiedItems.length;
-  const remainingCount = totalItems - verifiedCount;
-  const allDone = totalItems > 0 && remainingCount === 0;
   const dialogPaperStyle = DESIGN_TOKENS.dialog?.paper?.sx || { borderRadius: '28px', bgcolor: '#1e1e1e' };
 
   // ---------------- RENDER METHODS ----------------
 
-  // Phase 1: OATH / BLIND VIEW
   const renderOathPhase = () => {
       const originalDuration = instruction.durationMinutes || 0;
       const currentDuration = originalDuration - creditReduction;
       const currentBalance = creditType === 'nylon' ? credits.nc : credits.lc;
 
-      // Formatierung: 0h vermeiden bei < 60 min
       const formatTime = (mins) => {
           if (mins <= 0) return "0m";
           const h = Math.floor(mins / 60);
@@ -443,7 +508,6 @@ export default function InstructionDialog({
                     Verpflichtung ist absolut.
                 </Typography>
                 
-                {/* DURATION DISPLAY */}
                 <Box sx={{ mb: 3, p: 2, bgcolor: 'rgba(0,0,0,0.3)', borderRadius: 2 }}>
                     <Typography variant="caption" color="text.secondary">
                         {isNightProtocol ? "ZEITRAUM" : "ZIEL DAUER"}
@@ -453,14 +517,12 @@ export default function InstructionDialog({
                             {isNightProtocol ? "ÜBER NACHT" : formatTime(currentDuration)}
                         </Typography>
                         
-                        {/* Bei Nacht: Reduktion nur als Hinweis anzeigen */}
                         {isNightProtocol && creditReduction > 0 && (
                             <Typography variant="caption" sx={{ color: PALETTE.accents.green }}>
                                 (-{formatTime(creditReduction)})
                             </Typography>
                         )}
 
-                        {/* Bei Tag: Durchgestrichener Originalwert */}
                         {!isNightProtocol && creditReduction > 0 && (
                             <Typography variant="body2" sx={{ textDecoration: 'line-through', color: 'text.secondary' }}>
                                 {formatTime(originalDuration)}
@@ -469,7 +531,6 @@ export default function InstructionDialog({
                     </Box>
                 </Box>
 
-                {/* THE VAULT (TIME BANK) - Slider nur anzeigen, wenn erlaubt */}
                 {showVault && (
                     <Box sx={{ 
                         mb: 3, px: 2, py: 2, 
@@ -539,7 +600,6 @@ export default function InstructionDialog({
                     </Box>
                 )}
 
-                {/* ACTION BUTTONS */}
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
                     <Box sx={{ position: 'relative', width: '100%' }}>
                         <Button fullWidth variant="contained" size="large"
@@ -559,23 +619,23 @@ export default function InstructionDialog({
       );
   };
 
-  // Phase 2: PREPARATION / REVEAL VIEW
   const renderPreparationPhase = () => {
-      // Map durch alle zugewiesenen Items für die dynamische Anzeige (Neu)
       const displayItems = instruction.items.map(instrItem => 
           items.find(i => i.id === instrItem.id) || instrItem
       );
-
       const primaryTransitItem = instruction?.transitProtocol?.active ? items.find(i => i.id === instruction.transitProtocol.primaryItemId) : null;
+
+      const itemsSelectedCount = verifiedItemIds.length;
+      const totalRequired = instruction.items.length;
+      const isColdFeetAllowed = itemsSelectedCount > 0 && itemsSelectedCount < totalRequired;
 
       return (
         <Box sx={{ textAlign: 'center' }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                 <Typography variant="overline" color="primary" sx={{ letterSpacing: 2 }}>VORBEREITUNG</Typography>
+                 <Typography variant="overline" color="primary" sx={{ letterSpacing: 2 }}>UMKLEIDE (STAGING)</Typography>
                  <Chip icon={<TimerIcon />} label={timeLeftStr} color="warning" variant="outlined" size="small" />
             </Box>
 
-            {/* NEU: TRANSIT PROTOCOL UI (GNADENFRIST) */}
             {instruction?.transitProtocol?.active && (
                 <Box sx={{ mb: 3, p: 2, border: `1px solid ${PALETTE.accents.red}`, borderRadius: 2, bgcolor: 'rgba(255,0,0,0.05)', textAlign: 'left' }}>
                     <Typography variant="caption" color="error" sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
@@ -599,20 +659,26 @@ export default function InstructionDialog({
                 </Box>
             )}
 
-            {/* Der Forced Release Alert-Block wurde hier entfernt */}
-
             <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 2, my: 3 }}>
                 {displayItems.map((displayItem, idx) => {
                     const isTransitBackup = instruction.transitProtocol?.active && instruction.transitProtocol?.backupItem?.id === displayItem.id;
+                    const isVerified = verifiedItemIds.includes(displayItem.id);
                     
                     return (
                     <Box key={idx} sx={{ 
-                        textAlign: 'center', flex: '1 1 140px', maxWidth: 160,
+                        textAlign: 'center', flex: '1 1 140px', maxWidth: 160, position: 'relative',
                         border: isTransitBackup ? `1px dashed ${PALETTE.accents.red}` : 'none',
                         borderRadius: 2,
                         p: isTransitBackup ? 1 : 0,
                         opacity: isTransitBackup ? 0.7 : 1
                     }}>
+                        {/* Overlay für verifizierte Items */}
+                        {isVerified && (
+                             <Box sx={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'rgba(0,0,0,0.6)', borderRadius: 2 }}>
+                                 <CheckCircleIcon sx={{ fontSize: 70, color: PALETTE.accents.green }} />
+                             </Box>
+                        )}
+
                         {displayItem.img || displayItem.imageUrl ? (
                             <Avatar src={displayItem.img || displayItem.imageUrl} sx={{ width: 100, height: 100, border: `2px solid ${isTransitBackup ? PALETTE.accents.red : PALETTE.primary.main}`, mx: 'auto', mb: 1, boxShadow: '0 0 15px rgba(0,0,0,0.5)' }} />
                         ) : (
@@ -628,11 +694,13 @@ export default function InstructionDialog({
                             label={displayItem.customId || displayItem.id?.substring(0,6)} 
                             size="small" 
                             variant="outlined"
-                            sx={{ mb: 0.5, borderColor: 'rgba(255,255,255,0.1)', color: 'text.secondary', fontSize: '0.65rem', height: 20 }} 
+                            sx={{ mb: 1, borderColor: 'rgba(255,255,255,0.1)', color: 'text.secondary', fontSize: '0.65rem', height: 20 }} 
                         />
                         
-                         {displayItem.location && (
-                             <Chip label={`${displayItem.location}`} size="small" sx={{ display: 'flex', mx: 'auto', maxWidth: 'fit-content', bgcolor: 'rgba(255,255,255,0.1)', fontSize: '0.65rem', height: 20 }} />
+                         {!isVerified && (
+                             <Button size="small" variant="contained" onClick={() => handleVerifyItem(displayItem)} sx={{ mx: 'auto', display: 'block', fontSize: '0.6rem', bgcolor: PALETTE.primary.dark }}>
+                                 MANUELL ANZIEHEN
+                             </Button>
                          )}
 
                          {isTransitBackup && (
@@ -643,26 +711,26 @@ export default function InstructionDialog({
             </Box>
 
             <Alert severity="info" sx={{ mb: 3, textAlign: 'left', bgcolor: 'rgba(2, 136, 209, 0.1)' }}>
-                Item(s) suchen und anziehen. Danach Session starten.
+                {itemsSelectedCount < totalRequired ? `Ziehe alle Items an. Fortschritt: ${itemsSelectedCount}/${totalRequired}` : "Alle Items angezogen. Bestätigung läuft..."}
             </Alert>
 
-            {/* ACTION BUTTONS */}
+            {/* ACTION BUTTONS (STAGING) */}
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
-                <Button fullWidth variant="contained" size="large" onClick={() => handleSessionStart(false)}
-                        startIcon={<LaunchIcon />}
-                        sx={{ py: 2, bgcolor: PALETTE.accents.green, '&:hover': { bgcolor: PALETTE.accents.green } }}>
-                        SESSION STARTEN (MANUELL)
-                </Button>
-                
-                {/* Manual Scan Button */}
                 <Button fullWidth variant="outlined" size="large" onClick={activateNfcScan}
                         startIcon={<NfcIcon />}
-                        disabled={isScanning}
+                        disabled={isScanning || itemsSelectedCount >= totalRequired}
                         sx={{ py: 1.5, borderColor: 'rgba(255,255,255,0.3)', color: 'text.primary' }}>
-                        {isScanning ? "SCANNER LÄUFT..." : "SCAN STARTEN (NFC)"}
+                        {isScanning ? "SCANNER LÄUFT..." : "ITEM SCANNEN (NFC)"}
                 </Button>
                 
-                <Button color="inherit" onClick={onClose}>Später fortsetzen</Button>
+                {/* Die Falle für Kalte Füße */}
+                {isColdFeetAllowed && (
+                    <Button fullWidth variant="outlined" color="error" onClick={handleColdFeet} startIcon={<ReportProblemIcon />} sx={{ mt: 1 }}>
+                        Abbrechen (Kalte Füße)
+                    </Button>
+                )}
+
+                <Button color="inherit" onClick={onClose} sx={{ mt: 1 }}>Später fortsetzen</Button>
             </Box>
         </Box>
       );
@@ -673,11 +741,8 @@ export default function InstructionDialog({
         return <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 4 }}><CircularProgress color="primary" /></Box>;
     }
     
-    // Fall 1: Keine Instruction & Frei (Wochenende etc.)
     if (!instruction) {
         if (isFreeDay) {
-            
-            // NEU: Prüfung, ob bereits eine freiwillige Strumpfhosen-Session läuft
             const activeVoluntarySession = activeSessions.find(s => s.type === 'voluntary' && !s.endTime);
             let activeVoluntaryItem = null;
             if (activeVoluntarySession) {
@@ -758,7 +823,6 @@ export default function InstructionDialog({
         );
     }
 
-    // Fall 2: Instruction vorhanden -> Entscheiden nach ViewState
     if (viewState === 'preparation' || instruction.isAccepted) {
         return renderPreparationPhase();
     } else {
@@ -782,7 +846,7 @@ export default function InstructionDialog({
                 initial={{ opacity: 0, scale: 0.95 }} 
                 animate={{ opacity: 1, scale: 1 }} 
                 transition={{ duration: 0.3 }}
-                key={viewState} // Animation beim Wechsel
+                key={viewState} 
             >
                 {renderContent()}
             </motion.div>

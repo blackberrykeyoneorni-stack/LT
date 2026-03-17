@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
     Box, Typography, Button, Container, Stack, Chip, 
     List, ListItem, ListItemAvatar, Avatar, ListItemText, Divider,
@@ -7,6 +7,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { PALETTE } from '../../theme/obsidianDesign';
 import useTZDController from '../../hooks/dashboard/useTZDController';
+import { grantTZDAmnesty } from '../../services/TZDService';
 
 // Icons
 import SecurityIcon from '@mui/icons-material/Security';
@@ -18,8 +19,18 @@ import BrokenImageIcon from '@mui/icons-material/BrokenImage';
 import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 import WarningIcon from '@mui/icons-material/Warning';
 
-export default function TzdOverlay({ active, allItems }) {
+export default function TzdOverlay({ active, allItems, timeBankData, currentUser }) {
     
+    const [forceHide, setForceHide] = useState(false);
+    const [amnestyLoading, setAmnestyLoading] = useState(false);
+
+    // KORREKTUR: Overlay resettet seine Amnestie-Ausblendung bei Neuaufruf
+    useEffect(() => {
+        if (active) {
+            setForceHide(false);
+        }
+    }, [active]);
+
     // Die komplette Business-Logik und State-Verwaltung wird in den Controller ausgelagert
     const {
         status,
@@ -43,7 +54,17 @@ export default function TzdOverlay({ active, allItems }) {
         handleConfirmSwap
     } = useTZDController(active, allItems);
 
-    if (!active) return null;
+    const handleBuyAmnesty = async () => {
+        if (!currentUser) return;
+        setAmnestyLoading(true);
+        const success = await grantTZDAmnesty(currentUser.uid);
+        if (success) {
+            setForceHide(true); // Blendet Overlay lokal sofort aus, bevor der Firebase 5-Minuten-Ticker greift
+        }
+        setAmnestyLoading(false);
+    };
+
+    if (!active || forceHide) return null;
 
     if (loading && !status) {
         return (
@@ -222,6 +243,35 @@ export default function TzdOverlay({ active, allItems }) {
                                         >
                                             ICH UNTERWERFE MICH
                                         </Button>
+                                        
+                                        {/* KORREKTUR: AMNESTIE KAUFEN (Nur bei Zufalls-TZD) */}
+                                        {!status?.isPenalty && (
+                                            <Box sx={{ mt: 3, pt: 3, borderTop: `1px dashed ${PALETTE.accents.gold}80`, width: '100%' }}>
+                                                <Typography variant="caption" sx={{ color: PALETTE.accents.gold, display: 'block', mb: 1, fontWeight: 'bold', letterSpacing: 1 }}>
+                                                    FLUCHTWEG (24H AMNESTIE)
+                                                </Typography>
+                                                <Button 
+                                                    variant="outlined" 
+                                                    fullWidth
+                                                    disabled={amnestyLoading || !timeBankData || timeBankData.nc < 500 || timeBankData.lc < 500}
+                                                    onClick={handleBuyAmnesty}
+                                                    sx={{ 
+                                                        py: 1.5,
+                                                        color: PALETTE.accents.gold, 
+                                                        borderColor: PALETTE.accents.gold,
+                                                        fontWeight: 'bold',
+                                                        '&:hover': { bgcolor: 'rgba(255,215,0,0.1)', borderColor: PALETTE.accents.gold }
+                                                    }}
+                                                >
+                                                    {amnestyLoading ? <CircularProgress size={24} color="inherit" /> : "AMNESTIE ERKAUFEN (500 NC & 500 LC)"}
+                                                </Button>
+                                                {(!timeBankData || timeBankData.nc < 500 || timeBankData.lc < 500) && (
+                                                    <Typography variant="caption" color="error" sx={{ display: 'block', mt: 1, fontSize: '0.7rem' }}>
+                                                        Ungenügendes Guthaben (NC: {timeBankData?.nc || 0}, LC: {timeBankData?.lc || 0})
+                                                    </Typography>
+                                                )}
+                                            </Box>
+                                        )}
                                     </Stack>
                                 </Box>
                             ) : (

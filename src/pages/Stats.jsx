@@ -25,6 +25,10 @@ import TimerIcon from '@mui/icons-material/Timer';
 import SecurityIcon from '@mui/icons-material/Security';
 import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty'; 
 import ShieldIcon from '@mui/icons-material/Shield'; 
+import WarningIcon from '@mui/icons-material/Warning';
+import NightlightRoundIcon from '@mui/icons-material/NightlightRound';
+import Battery0BarIcon from '@mui/icons-material/Battery0Bar';
+import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 
 const safeDate = (val) => {
     if (!val) return null;
@@ -164,9 +168,8 @@ export default function Statistics() {
         loadData();
     }, [currentUser]);
 
-    const { coreMetrics, basics } = useKPIs(items, [], sessions);
+    const { coreMetrics, basics, deepAnalytics } = useKPIs(items, [], sessions);
 
-    // KORREKTUR: Umbau auf 6-Monats-Schnitt mit linearer Regression
     const calculateTrend = (metricId) => {
         const rawData = [];
         const today = new Date();
@@ -189,7 +192,6 @@ export default function Statistics() {
             let monthlySum = 0;
             
             if (metricId === 'cpnh') {
-                // CPNH benötigt eine kumulative Berechnung bis zum Ende des jeweiligen Monats
                 const validItems = items.filter(it => {
                     const pd = safeDate(it.purchaseDate) || new Date(0);
                     const cat = (it.mainCategory || '').toLowerCase();
@@ -222,7 +224,6 @@ export default function Statistics() {
                 continue;
             }
 
-            // Für alle anderen Metriken: Tägliche Analyse innerhalb des Monats und dann Durchschnitt
             for (let d = 1; d <= daysInMonth; d++) {
                 const currentDate = new Date(y, m, d);
                 const startOfDay = new Date(currentDate); startOfDay.setHours(0,0,0,0);
@@ -313,7 +314,6 @@ export default function Statistics() {
             rawData.push({ name: monthName, value: monthlyAvg });
         }
 
-        // Lineare Regression (y = mx + b)
         const n = rawData.length;
         let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
         rawData.forEach((d, idx) => {
@@ -337,7 +337,6 @@ export default function Statistics() {
     };
 
     const handleCardClick = (metricId, title) => { 
-        // KORREKTUR: Alle Detail-Graphen freigeschaltet (inkl. CPNH)
         if (['coverage', 'nocturnal', 'nylonGap', 'resistance', 'nylonEnclosure', 'compliance', 'voluntarism', 'endurance', 'cpnh'].includes(metricId)) {
             calculateTrend(metricId);
             setSelectedMetric({id: metricId, title}); 
@@ -346,7 +345,6 @@ export default function Statistics() {
         }
     };
 
-    // Forensik Helper
     const forensics = {
         archivedCount: basics?.archived || 0,
         realizedCPW: 0,
@@ -443,6 +441,57 @@ export default function Statistics() {
                     ))}
                 </Grid>
 
+                {/* NEU: DEEP ANALYTICS SEKTION */}
+                {deepAnalytics && (
+                    <motion.div variants={MOTION.listItem}>
+                        <Divider sx={{ my: 4, borderColor: PALETTE.background.glassBorder }} />
+                        <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1, color: PALETTE.accents.purple, mb: 2 }}>
+                            <PsychologyIcon /> Deep Analytics (Psycho-Profil)
+                        </Typography>
+                        <Grid container spacing={2}>
+                            {/* Krisen-Prädiktion */}
+                            <Grid item xs={6} sm={3}>
+                                <Paper sx={{ p: 2, ...DESIGN_TOKENS.glassCard, textAlign: 'center', height: '100%' }}>
+                                    <WarningIcon sx={{ color: PALETTE.accents.red, mb: 1 }}/>
+                                    <Typography variant="h6" color="text.primary">{deepAnalytics.krisenPraediktion.day}</Typography>
+                                    <Typography variant="caption" color="error" display="block" sx={{ fontWeight: 'bold' }}>Risiko: {deepAnalytics.krisenPraediktion.level}</Typography>
+                                    <Typography variant="caption" color="text.secondary">Krisen-Prädiktion</Typography>
+                                </Paper>
+                            </Grid>
+                            
+                            {/* Unterbewusste Adaption */}
+                            <Grid item xs={6} sm={3}>
+                                <Paper sx={{ p: 2, ...DESIGN_TOKENS.glassCard, textAlign: 'center', height: '100%' }}>
+                                    <NightlightRoundIcon sx={{ color: PALETTE.accents.blue, mb: 1 }}/>
+                                    <Typography variant="h6" color="text.primary">{deepAnalytics.unterbewussteAdaption.toFixed(1)}%</Typography>
+                                    <Typography variant="caption" sx={{ color: PALETTE.accents.blue, fontWeight: 'bold' }} display="block">Physische Assimilation</Typography>
+                                    <Typography variant="caption" color="text.secondary">Unterbewusste Adaption</Typography>
+                                </Paper>
+                            </Grid>
+                            
+                            {/* Willenskraft-Erschöpfungs-Matrix */}
+                            <Grid item xs={6} sm={3}>
+                                <Paper sx={{ p: 2, ...DESIGN_TOKENS.glassCard, textAlign: 'center', height: '100%' }}>
+                                    <Battery0BarIcon sx={{ color: PALETTE.accents.gold, mb: 1 }}/>
+                                    <Typography variant="h6" color="text.primary">{deepAnalytics.egoDepletionHours > 0 ? deepAnalytics.egoDepletionHours.toFixed(1) : '-'} h</Typography>
+                                    <Typography variant="caption" sx={{ color: PALETTE.accents.gold, fontWeight: 'bold' }} display="block">Kritischer Brechpunkt</Typography>
+                                    <Typography variant="caption" color="text.secondary">Ego-Depletion</Typography>
+                                </Paper>
+                            </Grid>
+
+                            {/* Infiltrations-Eskalationsmatrix */}
+                            <Grid item xs={6} sm={3}>
+                                <Paper sx={{ p: 2, ...DESIGN_TOKENS.glassCard, textAlign: 'center', height: '100%' }}>
+                                    <VisibilityOffIcon sx={{ color: PALETTE.accents.pink, mb: 1 }}/>
+                                    <Typography variant="h6" color="text.primary">{deepAnalytics.infiltrationEskalation.toFixed(1)}%</Typography>
+                                    <Typography variant="caption" sx={{ color: PALETTE.accents.pink, fontWeight: 'bold' }} display="block">Komplexe Tages-Dessous</Typography>
+                                    <Typography variant="caption" color="text.secondary">Infiltrations-Eskalation</Typography>
+                                </Paper>
+                            </Grid>
+                        </Grid>
+                    </motion.div>
+                )}
+
                 <motion.div variants={MOTION.listItem}>
                     <Divider sx={{ my: 4, borderColor: PALETTE.background.glassBorder }} />
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
@@ -502,7 +551,6 @@ export default function Statistics() {
                 </Grid>
             </motion.div>
 
-            {/* KORREKTUR: ComposedChart (Balken für Werte + Linie für Regression) */}
             <Dialog open={!!selectedMetric} onClose={() => setSelectedMetric(null)} fullWidth maxWidth="sm" PaperProps={DESIGN_TOKENS.dialog.paper}>
                 <DialogTitle sx={DESIGN_TOKENS.dialog.title.sx}>
                     <Box><Typography variant="h6">{selectedMetric?.title} Trend</Typography></Box>

@@ -432,8 +432,10 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
 
             if (isItemInRecovery(effectiveItem, restingHours)) return false;
 
-            // Bestehender Filter für Accessoires/Buttplugs wie gewünscht beibehalten
-            if (i.mainCategory === 'Accessoires' && i.subCategory === 'Buttplug') return false;
+            // Verschärfter Filter: Penetrations-Toys sind strikt für Bestrafungen reserviert und für reguläre Instructions gesperrt
+            const itemSub = (i.subCategory || '').toLowerCase();
+            if (i.mainCategory === 'Accessoires' && (itemSub.includes('buttplug') || itemSub.includes('dildo'))) { return false;
+            }
 
             // Nicht, wenn für die Zukunft geplant
             if (futureBlockedIds.includes(i.id)) return false;

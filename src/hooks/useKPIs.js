@@ -28,13 +28,13 @@ const calculateCoverage = (sessions) => {
     startOfPeriod.setDate(now.getDate() - 7); 
 
     const relevantSessions = sessions.filter(s => {
-        const start = s.startTime.toDate ? s.startTime.toDate() : new Date(s.startTime);
+        const start = s.startTime?.toDate ? s.startTime.toDate() : new Date(s.startTime);
         const end = s.endTime ? (s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime)) : new Date();
         return end > startOfPeriod && start < now;
     });
 
     const intervals = relevantSessions.map(s => {
-        const start = s.startTime.toDate ? s.startTime.toDate() : new Date(s.startTime);
+        const start = s.startTime?.toDate ? s.startTime.toDate() : new Date(s.startTime);
         const end = s.endTime ? (s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime)) : new Date();
         return {
             start: Math.max(start.getTime(), startOfPeriod.getTime()),
@@ -66,7 +66,7 @@ const calculateCoverage = (sessions) => {
 
 const isNocturnalComplaint = (targetTime, sessions, items) => {
     return sessions.some(s => {
-        const start = s.startTime.toDate ? s.startTime.toDate() : new Date(s.startTime);
+        const start = s.startTime?.toDate ? s.startTime.toDate() : new Date(s.startTime);
         const end = s.endTime ? (s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime)) : new Date(); 
         
         if (targetTime >= start && targetTime <= end) {
@@ -87,7 +87,7 @@ const calculateDailyNylonMinutes = (dateObj, sessions, items) => {
     const endOfDay = new Date(dateObj); endOfDay.setHours(23,59,59,999);
 
     const relevantSessions = sessions.filter(s => {
-        const sStart = s.startTime.toDate ? s.startTime.toDate() : new Date(s.startTime);
+        const sStart = s.startTime?.toDate ? s.startTime.toDate() : new Date(s.startTime);
         const sEnd = s.endTime ? (s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime)) : new Date();
         
         if (sStart > endOfDay || sEnd < startOfDay) return false;
@@ -103,7 +103,7 @@ const calculateDailyNylonMinutes = (dateObj, sessions, items) => {
     });
 
     const intervals = relevantSessions.map(s => {
-        const sStart = s.startTime.toDate ? s.startTime.toDate() : new Date(s.startTime);
+        const sStart = s.startTime?.toDate ? s.startTime.toDate() : new Date(s.startTime);
         const sEnd = s.endTime ? (s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime)) : new Date();
         return {
             start: Math.max(sStart.getTime(), startOfDay.getTime()),
@@ -130,7 +130,6 @@ const calculateDailyNylonMinutes = (dateObj, sessions, items) => {
     return Math.floor(totalMs / 60000);
 };
 
-
 export default function useKPIs(items = [], activeSessionsInput, historySessionsInput) {
     const { currentUser } = useAuth();
     
@@ -139,7 +138,6 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
     const [rawSessions, setRawSessions] = useState([]);
     const [releaseStats, setReleaseStats] = useState({ totalReleases: 0, cleanReleases: 0, keptOn: 0 });
 
-    // 1. DATA FETCHING ONLY (No Math here)
     useEffect(() => {
         if (!currentUser) return;
         
@@ -181,7 +179,6 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
         fetchData();
     }, [currentUser, refreshTrigger, historySessionsInput]);
 
-    // 2. MEMO: Session Aggregation
     const allSessions = useMemo(() => {
         if (historySessionsInput) {
             return [...historySessionsInput, ...(activeSessionsInput || [])];
@@ -196,7 +193,6 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
         });
     }, [allSessions]);
 
-    // 3. MEMO: Basic Items Math
     const itemStats = useMemo(() => {
         const activeItems = items.filter(i => i.status === 'active');
         const washingItems = items.filter(i => i.status === 'washing');
@@ -214,7 +210,6 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
         return { activeItems, washingItems, archivedItems, orphanCount, avgCPWVal };
     }, [items]);
 
-    // 4. MEMO: Nylon Usage Math
     const nylonStats = useMemo(() => {
         const tightsItems = items.filter(i => 
             i.status !== 'archived' && (
@@ -261,7 +256,6 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
         return { nylonIndexVal, cpnhVal };
     }, [items, historySessions]);
 
-    // 5. MEMO: Core Metrics
     const coreMetrics = useMemo(() => {
         const now = new Date();
         const coverageVal = calculateCoverage(allSessions);
@@ -400,7 +394,6 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
         return { coverageVal, nocturnalVal, avgGapVal, nylonEnclosureVal, voluntarismVal, resistanceVal, avgLagVal, enduranceVal, enduranceNylonVal, enduranceDessousVal };
     }, [items, allSessions, historySessions]);
 
-    // 6. MEMO: Chart Data (KORRIGIERT AUF 6 MONATE LINEARE REGRESSION)
     const chartData = useMemo(() => {
         const rawData = [];
         const today = new Date();
@@ -447,7 +440,6 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
         }));
     }, [items, allSessions]);
 
-    // 7. MEMO: Fem Index Math
     const femIndexData = useMemo(() => {
         const { enduranceVal, nylonEnclosureVal, avgLagVal, voluntarismVal, resistanceVal, nocturnalVal, coverageVal } = coreMetrics;
         
@@ -468,7 +460,75 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
         return { score: isNaN(femScore) ? 0 : Math.min(100, femScore), scorePhysis, scorePsyche, scoreInfiltration };
     }, [coreMetrics]);
 
-    // 8. FINAL MEMO: Format Output
+    // NEU: DEEP ANALYTICS MEMO (PSYCHO-PROFIL)
+    const deepAnalytics = useMemo(() => {
+        // 1. Krisen-Prädiktion
+        const failureDays = {0:0, 1:0, 2:0, 3:0, 4:0, 5:0, 6:0};
+        let totalFailures = 0;
+        historySessions.forEach(s => {
+            if (s.type === 'punishment' || s.isDebtSession) {
+                const d = s.startTime?.toDate ? s.startTime.toDate() : new Date(s.startTime);
+                if (d && !isNaN(d)) { failureDays[d.getDay()]++; totalFailures++; }
+            }
+        });
+        let maxDay = -1; let maxVal = -1;
+        Object.keys(failureDays).forEach(d => { if(failureDays[d] > maxVal) { maxVal = failureDays[d]; maxDay = parseInt(d); } });
+        const daysArr = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];
+        const riskDay = maxDay >= 0 && maxVal > 0 ? daysArr[maxDay] : 'Unbestimmt';
+        const riskLevel = totalFailures > 10 ? 'Hoch' : (totalFailures > 5 ? 'Moderat' : 'Gering');
+
+        // 2. Unterbewusste Adaption
+        const nightSessions = historySessions.filter(s => s.periodId && s.periodId.includes('night'));
+        let undisturbedCount = 0;
+        nightSessions.forEach(s => {
+            const start = s.startTime?.toDate ? s.startTime.toDate() : new Date(s.startTime);
+            const end = s.endTime ? (s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime)) : new Date();
+            const diffMins = (end - start) / 60000;
+            if (diffMins >= 360) undisturbedCount++; // Mindestens 6 Stunden ununterbrochener Schlaf in Nylons
+        });
+        const adaptionScore = nightSessions.length > 0 ? (undisturbedCount / nightSessions.length) * 100 : 0;
+
+        // 3. Willenskraft-Erschöpfung (Ego-Depletion)
+        let totalMinsBeforeFailure = 0;
+        let failureEvents = 0;
+        historySessions.forEach((s, idx) => {
+            if (s.type === 'punishment' && idx < historySessions.length - 1) {
+                const prevS = historySessions[idx + 1]; 
+                const start = prevS.startTime?.toDate ? prevS.startTime.toDate() : new Date(prevS.startTime);
+                const end = prevS.endTime ? (prevS.endTime.toDate ? prevS.endTime.toDate() : new Date(prevS.endTime)) : new Date();
+                const diffMins = (end - start) / 60000;
+                if (diffMins > 0) {
+                    totalMinsBeforeFailure += diffMins;
+                    failureEvents++;
+                }
+            }
+        });
+        const egoDepletionMins = failureEvents > 0 ? (totalMinsBeforeFailure / failureEvents) : 0; 
+
+        // 4. Infiltrations-Eskalation
+        const daySessions = historySessions.filter(s => s.periodId && s.periodId.includes('day'));
+        let complexDayCount = 0;
+        daySessions.forEach(s => {
+            const sItemIds = s.itemIds || (s.itemId ? [s.itemId] : []);
+            const hasComplex = sItemIds.some(id => {
+                const item = items.find(i => i.id === id);
+                if (!item) return false;
+                const cat = (item.mainCategory || '').toLowerCase();
+                const sub = (item.subCategory || '').toLowerCase();
+                return cat.includes('dessous') || sub.includes('body') || sub.includes('corsage');
+            });
+            if (hasComplex) complexDayCount++;
+        });
+        const infiltrationScore = daySessions.length > 0 ? (complexDayCount / daySessions.length) * 100 : 0;
+
+        return {
+            krisenPraediktion: { level: riskLevel, day: riskDay },
+            unterbewussteAdaption: adaptionScore,
+            egoDepletionHours: egoDepletionMins > 0 ? egoDepletionMins / 60 : 0, 
+            infiltrationEskalation: infiltrationScore
+        };
+    }, [historySessions, items]);
+
     const finalKpis = useMemo(() => {
         const spermaRateVal = releaseStats.totalReleases > 0 
             ? (releaseStats.cleanReleases / releaseStats.totalReleases) * 100 : 0;
@@ -530,5 +590,6 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
 
     const refreshKPIs = () => setRefreshTrigger(prev => prev + 1);
 
-    return { ...finalKpis, loading, refreshKPIs };
+    // NEU: deepAnalytics im Hook Return hinzugefügt
+    return { ...finalKpis, deepAnalytics, loading, refreshKPIs };
 }
