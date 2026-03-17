@@ -19,15 +19,16 @@ const COLLECTION_NAME = 'items';
 
 // --- RECOVERY LOGIK ---
 
-export const calculateItemRecoveryStatus = (item, sessions, restingHoursSetting = 24) => {
+export const calculateItemRecoveryStatus = (item, sessions) => {
     if (!item) return null;
     if (item.mainCategory !== 'Nylons') return null;
 
     let lastWornDate = safeDate(item.lastWorn);
+    let latestSession = null;
 
     if (sessions && Array.isArray(sessions) && sessions.length > 0) {
         // Robustes Ermitteln der absolut letzten beendeten Session (unabhängig von der Array-Sortierung)
-        const latestSession = sessions.reduce((latest, current) => {
+        latestSession = sessions.reduce((latest, current) => {
             if (!current.endTime) return latest;
             const currentEnd = safeDate(current.endTime);
             if (!currentEnd) return latest;
@@ -47,15 +48,36 @@ export const calculateItemRecoveryStatus = (item, sessions, restingHoursSetting 
 
     if (!lastWornDate) return null;
     
+    // --- NEU: Dynamische Recovery-Zeit Berechnung inkl. 10% Sicherheitspuffer ---
+    let requiredRestingHours = 26.4; // Fallback (24h + 10%), falls Session-Dauer unklar
+    
+    if (latestSession && latestSession.startTime && latestSession.endTime) {
+        const start = safeDate(latestSession.startTime);
+        const end = safeDate(latestSession.endTime);
+        if (start && end) {
+            const wornHours = (end - start) / (1000 * 60 * 60);
+            
+            if (wornHours <= 2) {
+                requiredRestingHours = 6 * 1.1; // 6.6 Stunden
+            } else if (wornHours <= 6) {
+                requiredRestingHours = 12 * 1.1; // 13.2 Stunden
+            } else if (wornHours <= 12) {
+                requiredRestingHours = 24 * 1.1; // 26.4 Stunden
+            } else {
+                requiredRestingHours = 48 * 1.1; // 52.8 Stunden
+            }
+        }
+    }
+
     const now = new Date();
     const diffMs = now - lastWornDate;
     const hoursSince = diffMs / (1000 * 60 * 60);
     
-    if (hoursSince < restingHoursSetting) {
+    if (hoursSince < requiredRestingHours) {
         return {
             isResting: true,
-            remainingHours: Math.ceil(restingHoursSetting - hoursSince),
-            progress: (hoursSince / restingHoursSetting) * 100
+            remainingHours: requiredRestingHours - hoursSince,
+            progress: (hoursSince / requiredRestingHours) * 100
         };
     }
 

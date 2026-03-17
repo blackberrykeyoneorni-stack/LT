@@ -71,6 +71,7 @@ export default function Inventory() {
   // --- PERSISTENT FILTER VALUES ---
   const [filterStatus, setFilterStatus] = usePersistentState('inv_filterStatus', 'active');
   const [filterCategory, setFilterCategory] = usePersistentState('inv_filterCategory', 'All');
+  const [filterSubCategory, setFilterSubCategory] = usePersistentState('inv_filterSubCategory', 'All'); // NEU
   const [filterBrand, setFilterBrand] = usePersistentState('inv_filterBrand', 'All');
   const [filterMaterial, setFilterMaterial] = usePersistentState('inv_filterMaterial', 'All'); 
   const [filterLocation, setFilterLocation] = usePersistentState('inv_filterLocation', 'All'); 
@@ -169,6 +170,7 @@ export default function Inventory() {
         }
 
         if (filterCategory !== 'All') res = res.filter(i => i.mainCategory === filterCategory || i.category === filterCategory);
+        if (filterSubCategory !== 'All') res = res.filter(i => i.subCategory === filterSubCategory); // NEU
         if (filterBrand !== 'All') res = res.filter(i => i.brand === filterBrand);
         if (filterMaterial !== 'All') res = res.filter(i => i.material === filterMaterial); 
         
@@ -196,7 +198,7 @@ export default function Inventory() {
       }
     });
     setFilteredItems(res);
-  }, [items, filterCategory, filterBrand, filterMaterial, filterMinRating, filterStatus, filterLocation, sortBy, scannedLocation, restingHours]);
+  }, [items, filterCategory, filterSubCategory, filterBrand, filterMaterial, filterMinRating, filterStatus, filterLocation, sortBy, scannedLocation, restingHours]); // NEU: filterSubCategory in Abhängigkeiten
 
   const getDisplayName = (item) => item.name || `${item.brand} ${item.model}`;
   const getImage = (item) => {
@@ -205,6 +207,7 @@ export default function Inventory() {
     return null; 
   };
   const categories = ['All', ...new Set(items.map(i => i.mainCategory || i.category).filter(Boolean))];
+  const subCategories = [...new Set(items.map(i => i.subCategory).filter(Boolean))].sort(); // NEU: Subkategorien extrahieren
   
   if (loading) return <Box sx={{display:'flex', justifyContent:'center', mt:10}}><CircularProgress/></Box>;
 
@@ -230,6 +233,7 @@ export default function Inventory() {
                 {!scannedLocation && (
                     <>
                         {filterCategory !== 'All' && <Chip label={filterCategory} onDelete={() => setFilterCategory('All')} sx={DESIGN_TOKENS.chip.active} />}
+                        {filterSubCategory !== 'All' && <Chip label={filterSubCategory} onDelete={() => setFilterSubCategory('All')} sx={DESIGN_TOKENS.chip.active} />} {/* NEU */}
                         {filterBrand !== 'All' && <Chip label={filterBrand} onDelete={() => setFilterBrand('All')} sx={DESIGN_TOKENS.chip.active} />}
                         {filterLocation !== 'All' && <Chip icon={<Inventory2Icon style={{fontSize: 16}}/>} label={filterLocation} onDelete={() => setFilterLocation('All')} sx={DESIGN_TOKENS.chip.active} />}
                         {filterStatus !== 'active' && filterStatus !== 'All' && <Chip label={filterStatus} onDelete={() => setFilterStatus('active')} sx={DESIGN_TOKENS.chip.active} />}
@@ -390,6 +394,12 @@ export default function Inventory() {
               {categories.map(c => <MenuItem key={c} value={c}>{c}</MenuItem>)}
           </TextField>
 
+          {/* NEU: Subkategorie Filter Dropdown */}
+          <TextField select fullWidth label="Subkategorie" margin="dense" size="small" value={filterSubCategory} onChange={e => setFilterSubCategory(e.target.value)} sx={DESIGN_TOKENS.inputField}>
+              <MenuItem value="All">Alle</MenuItem>
+              {subCategories.map(sc => <MenuItem key={sc} value={sc}>{sc}</MenuItem>)}
+          </TextField>
+
           <TextField select fullWidth label="Marke" margin="dense" size="small" value={filterBrand} onChange={e => setFilterBrand(e.target.value)} sx={DESIGN_TOKENS.inputField}>
               <MenuItem value="All">Alle Marken</MenuItem>
               {dropdowns.brands.map(b => <MenuItem key={b} value={b}>{b}</MenuItem>)}
@@ -401,7 +411,7 @@ export default function Inventory() {
           </TextField>
 
           <Button variant="outlined" fullWidth sx={{ mt: 4, ...DESIGN_TOKENS.buttonSecondary }} onClick={() => { 
-              setFilterStatus('active'); setFilterCategory('All'); setFilterBrand('All'); setFilterMaterial('All'); 
+              setFilterStatus('active'); setFilterCategory('All'); setFilterSubCategory('All'); setFilterBrand('All'); setFilterMaterial('All'); // NEU: setFilterSubCategory hinzugefügt
               setFilterLocation('All'); setFilterMinRating('0'); setSortBy('dateDesc'); setScannedLocation(null); 
           }}>
               Zurücksetzen

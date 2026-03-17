@@ -56,13 +56,11 @@ export default function Settings() {
   const [weightTarget, setWeightTarget] = useState(''); 
   const [weightValue, setWeightValue] = useState(2);
 
-  const [nylonRestingHours, setNylonRestingHours] = useState(24); 
   const [maxInstructionItems, setMaxInstructionItems] = useState(1); 
   
   const [protocolRules, setProtocolRules] = useState(null);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   
-  // Suspension & Stealth State
   const [suspensions, setSuspensions] = useState([]);
   const [suspensionDialog, setSuspensionDialog] = useState(false);
   const [suspensionDialogMode, setSuspensionDialogMode] = useState('plan'); 
@@ -76,7 +74,6 @@ export default function Settings() {
   const [isSavingAll, setIsSavingAll] = useState(false); 
   const [toast, setToast] = useState({ open: false, message: '', severity: 'success' });
   
-  // Restore State
   const fileInputRef = useRef(null);
   const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
   const [restoreFile, setRestoreFile] = useState(null);
@@ -118,7 +115,6 @@ export default function Settings() {
           
           if (prefSnap.exists()) {
               const d = prefSnap.data();
-              setNylonRestingHours(d.nylonRestingHours || 24);
               setMaxInstructionItems(d.maxInstructionItems || 1);
               setCategoryWeights(d.categoryWeights || {});
           }
@@ -172,9 +168,9 @@ export default function Settings() {
           const prefRef = doc(db, `users/${uid}/settings/preferences`);
           const prefSnap = await getDoc(prefRef);
           if (prefSnap.exists()) {
-              batch.update(prefRef, { nylonRestingHours, maxInstructionItems, categoryWeights });
+              batch.update(prefRef, { maxInstructionItems, categoryWeights });
           } else {
-              batch.set(prefRef, { nylonRestingHours, maxInstructionItems, categoryWeights });
+              batch.set(prefRef, { maxInstructionItems, categoryWeights });
           }
 
           if (protocolRules) {
@@ -513,14 +509,6 @@ export default function Settings() {
                     onChange={(e, v) => setMaxInstructionItems(v)} 
                     sx={{ color: PALETTE.primary.main }} 
                 />
-            </Box>
-
-            <Box sx={{ mb: 2 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                    <Typography variant="body2" color="text.secondary">Ruhezeit für Nylons</Typography>
-                    <Typography fontWeight="bold" color="secondary">{nylonRestingHours} Std</Typography>
-                </Box>
-                <Slider value={nylonRestingHours} min={0} max={72} step={4} onChange={(e, v) => setNylonRestingHours(v)} sx={{ color: PALETTE.secondary.main }} />
             </Box>
             
         </AccordionDetails>

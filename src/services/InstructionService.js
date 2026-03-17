@@ -533,8 +533,53 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
             }
 
             const itemsInGroup = groups[chosenCategoryKey];
-            const randomItemIndex = Math.floor(Math.random() * itemsInGroup.length);
-            const selectedItem = itemsInGroup[randomItemIndex];
+            
+            // --- NEU: NEGLECT-WEIGHTING ALGORITHMUS (Nur für Nylons) ---
+            let groupTotalItemWeight = 0;
+            const weightedItemsInGroup = itemsInGroup.map(item => {
+                let itemWeight = 1; // Standard-Gewicht
+                
+                // Prüfen, ob es ein Nylon ist
+                const isNylon = item.mainCategory === 'Nylons' || 
+                                (item.subCategory || '').toLowerCase().includes('strumpfhose') || 
+                                (item.subCategory || '').toLowerCase().includes('stockings') ||
+                                (item.subCategory || '').toLowerCase().includes('tights');
+                
+                if (isNylon) {
+                    // Ermittle den echten letzten Tragezeitpunkt (inkl. recentSessionsMap für maximale Genauigkeit)
+                    let lastWornDate = item.lastWorn && item.lastWorn.toDate ? item.lastWorn.toDate() : (item.lastWorn ? new Date(item.lastWorn) : null);
+                    if (recentSessionsMap[item.id] && (!lastWornDate || recentSessionsMap[item.id] > lastWornDate)) {
+                        lastWornDate = recentSessionsMap[item.id];
+                    }
+
+                    if (!item.wearCount || item.wearCount === 0 || !lastWornDate) {
+                        // Orphan Boost: Extrem hohe Priorität für ungetragene/neue Nylons
+                        itemWeight = 10;
+                    } else {
+                        // Multiplikator: 5% (0.05) pro Tag der Nichtbeachtung
+                        const daysSince = Math.max(0, Math.floor((Date.now() - lastWornDate.getTime()) / (1000 * 60 * 60 * 24)));
+                        itemWeight = 1 + (daysSince * 0.05); 
+                    }
+                }
+                
+                groupTotalItemWeight += itemWeight;
+                return { item, weight: itemWeight };
+            });
+
+            // Gewichtete Zufallsauswahl innerhalb der Kategorie
+            let randomItemValue = Math.random() * groupTotalItemWeight;
+            let selectedItem = null;
+
+            for (const wi of weightedItemsInGroup) {
+                randomItemValue -= wi.weight;
+                if (randomItemValue <= 0) {
+                    selectedItem = wi.item;
+                    break;
+                }
+            }
+            if (!selectedItem && weightedItemsInGroup.length > 0) {
+                selectedItem = weightedItemsInGroup[weightedItemsInGroup.length - 1].item;
+            }
 
             selectedItems.push(selectedItem);
             availableGroupKeys = availableGroupKeys.filter(key => key !== chosenCategoryKey);

@@ -20,7 +20,6 @@ function useItemFetcher(id, currentUser, navigate) {
     const [item, setItem] = useState(null);
     const [loading, setLoading] = useState(true);
     const [isBusy, setIsBusy] = useState(false); 
-    const [restingHoursSetting, setRestingHoursSetting] = useState(24);
     const [sessions, setSessions] = useState([]);
     const [dropdowns, setDropdowns] = useState({
         brands: [], categoryStructure: {}, materials: [], locations: [],
@@ -53,10 +52,6 @@ function useItemFetcher(id, currentUser, navigate) {
 
                 const itemData = { id: itemSnap.id, ...itemSnap.data() };
                 setItem(itemData);
-
-                if (prefSnap.exists()) {
-                    setRestingHoursSetting(prefSnap.data().nylonRestingHours || 24);
-                }
                 
                 // Dropdowns Init
                 let newDropdowns = {
@@ -78,8 +73,6 @@ function useItemFetcher(id, currentUser, navigate) {
                 setDropdowns(newDropdowns);
 
                 // KORREKTUR: Umgehung des Firebase Composite Index Fehlers.
-                // orderBy wurde hier entfernt, da ansonsten die Abfrage in Firestore scheitert, 
-                // wenn der Index (itemId + startTime) fehlt. Die Sortierung erfolgt ohnehin sicher lokal.
                 let snapLegacy = { docs: [] };
                 let snapNew = { docs: [] };
                 
@@ -126,7 +119,6 @@ function useItemFetcher(id, currentUser, navigate) {
     }, [currentUser, id, navigate]);
 
     const stats = useMemo(() => {
-        // Client-Side Aggregation Fix: Voraggregierte DB-Werte bevorzugen
         const wearCount = item?.wearCount || 0;
         const totalWearTime = item?.totalMinutes || 0; 
 
@@ -152,8 +144,8 @@ function useItemFetcher(id, currentUser, navigate) {
     }, [sessions, item]);
 
     const recoveryInfo = useMemo(() => {
-        return calculateItemRecoveryStatus(item, sessions, restingHoursSetting);
-    }, [item, sessions, restingHoursSetting]);
+        return calculateItemRecoveryStatus(item, sessions);
+    }, [item, sessions]);
 
     const historyEvents = useMemo(() => {
         const events = [];
@@ -171,7 +163,6 @@ function useItemFetcher(id, currentUser, navigate) {
             events.push({ type: 'wash', date: safeDate(item.cleanDate), data: { legacy: true } });
         }
 
-        // KORREKTUR: Robuste Sortierung absteigend anhand exakter Zeitstempel
         return events.sort((a, b) => {
             const timeA = a.date instanceof Date && !isNaN(a.date) ? a.date.getTime() : 0;
             const timeB = b.date instanceof Date && !isNaN(b.date) ? b.date.getTime() : 0;
@@ -193,7 +184,6 @@ function useItemForm(item) {
         open: false, reason: '', runLocation: '', runCause: ''
     });
 
-    // Initialize form when item loads, aber NICHT überschreiben, wenn Nutzer gerade editiert
     useEffect(() => {
         if (item && !isEditing) {
             setFormData({
@@ -284,7 +274,6 @@ function useItemActions(config) {
         try {
             let uploadedUrls = [];
             
-            // Upload Bottleneck Fix: Uploads parallelisieren
             if (pendingFiles.length > 0) {
                 const uploadPromises = pendingFiles.map(async (p) => {
                     const fileRef = ref(storage, `users/${currentUser.uid}/items/${Date.now()}_${p.file.name}`);
@@ -371,13 +360,9 @@ export function useItemDetailLogic() {
     const { currentUser } = useAuth();
     const { writeTag } = useNFCGlobal();
 
-    // 1. Daten holen (Fetcher)
     const { item, setItem, loading, isBusy, dropdowns, stats, recoveryInfo, historyEvents } = useItemFetcher(id, currentUser, navigate);
-    
-    // 2. Formular-Zustand verwalten (UI State)
     const form = useItemForm(item);
     
-    // 3. Aktionen bündeln (Mutations)
     const actions = useItemActions({
         id, currentUser, navigate, item, 
         formData: form.formData, pendingFiles: form.pendingFiles, archiveDialog: form.archiveDialog,
@@ -385,7 +370,6 @@ export function useItemDetailLogic() {
         setIsEditing: form.setIsEditing, setPendingFiles: form.setPendingFiles, setArchiveDialog: form.setArchiveDialog
     });
 
-    // NFC Autostart Check
     useEffect(() => {
         if (!loading && item && location.state?.nfcAction === 'start_session') {
             navigate(location.pathname, { replace: true, state: {} });
