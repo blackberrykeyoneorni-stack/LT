@@ -81,18 +81,20 @@ export const PALETTE = {
 /**
  * 3. COMPONENT STYLES & DESIGN TOKENS
  */
+// ANPASSUNG: "Sheer-Black" Glassmorphismus
 const M3_CARD_STYLE = {
-    backgroundColor: 'rgba(17, 13, 16, 0.65)',
-    backdropFilter: 'blur(12px)',
-    WebkitBackdropFilter: 'blur(12px)',
-    border: '1px solid rgba(255, 0, 127, 0.20)', 
+    backgroundColor: 'rgba(0, 0, 0, 0.4)', // Transparenter, um Nylon durchscheinen zu lassen
+    backdropFilter: 'blur(16px)',
+    WebkitBackdropFilter: 'blur(16px)',
+    border: '1px solid rgba(255, 0, 127, 0.1)', // Subtile Kante
+    borderTop: '1px dashed rgba(255, 0, 127, 0.25)', // Spitzen-Imitation oben
     borderRadius: '16px',
-    boxShadow: '0 8px 32px rgba(255, 0, 127, 0.1)', 
+    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)', 
     color: m3Tokens.onSurface,
     transition: 'all 0.3s ease',
     '&:hover': {
-        backgroundColor: 'rgba(17, 13, 16, 0.80)',
-        borderColor: 'rgba(255, 0, 127, 0.40)',
+        backgroundColor: 'rgba(5, 5, 5, 0.5)',
+        borderColor: 'rgba(255, 0, 127, 0.3)',
     }
 };
 
@@ -105,7 +107,7 @@ export const DESIGN_TOKENS = {
   container: { maxWidth: 'md', disableGutters: false, sx: { px: 2, pt: 2 } },
 
   textGradient: {
-    background: `linear-gradient(90deg, ${m3Tokens.primary} 0%, ${m3Tokens.secondary} 100%)`, 
+    background: `linear-gradient(90deg, #FFFFFF 0%, ${m3Tokens.onPrimaryContainer} 100%)`, // Harter Kontrast für Lesbarkeit auf Sheer Black
     WebkitBackgroundClip: 'text',
     WebkitTextFillColor: 'transparent',
     backgroundClip: 'text',
@@ -129,47 +131,50 @@ export const DESIGN_TOKENS = {
   
   glassCard: M3_CARD_STYLE,
   
+  // ANPASSUNG: Schwerer Satin-Effekt für Buttons
   buttonGradient: {
-    background: m3Tokens.primary, 
+    background: `linear-gradient(135deg, ${m3Tokens.primary} 0%, #99004D 40%, #E60073 60%, ${m3Tokens.primary} 100%)`, 
     color: m3Tokens.onPrimary,
     fontWeight: 700,
     borderRadius: '9999px', 
     textTransform: 'uppercase',
     letterSpacing: '1px',
-    boxShadow: `0 4px 14px rgba(255, 0, 127, 0.4)`, 
+    boxShadow: `inset 0px 2px 4px rgba(255, 255, 255, 0.3), 0 4px 14px rgba(255, 0, 127, 0.5)`, // Taktiles Glanz-Feedback
+    transition: 'all 0.2s ease-in-out',
     '&:hover': {
-      backgroundColor: m3Tokens.primary, 
-      boxShadow: `0 6px 20px rgba(255, 0, 127, 0.6)`,
+      background: `linear-gradient(135deg, #E60073 0%, #800040 40%, #CC0066 60%, #E60073 100%)`,
+      boxShadow: `inset 0px 4px 8px rgba(0, 0, 0, 0.4), 0 6px 20px rgba(255, 0, 127, 0.6)`, // Invertiert beim Drücken
     },
     '&:disabled': {
-        background: m3Tokens.onSurface + '1F', 
-        color: m3Tokens.onSurface + '61', 
-        boxShadow: 'none'
+        background: 'rgba(255, 0, 127, 0.1)', 
+        color: 'rgba(255, 255, 255, 0.3)', 
+        boxShadow: 'none',
+        border: '1px dashed rgba(255, 0, 127, 0.2)'
     }
   },
 
   buttonSecondary: {
-    border: `1px solid ${m3Tokens.outline}`,
+    border: `1px dashed ${m3Tokens.outline}`, // Spitzen-Assoziation
     color: m3Tokens.primary,
     borderRadius: '9999px', 
     textTransform: 'uppercase',
     letterSpacing: '1px',
     background: 'transparent',
     '&:hover': {
-        background: m3Tokens.primary + '14', 
+        background: 'rgba(255, 0, 127, 0.05)', 
         borderColor: m3Tokens.primary,
-        boxShadow: `0 0 10px rgba(255, 0, 127, 0.2)`
+        boxShadow: `inset 0 0 10px rgba(255, 0, 127, 0.1)`
     }
   },
 
   inputField: {
     '& .MuiOutlinedInput-root': {
         borderRadius: '8px', 
-        bgcolor: m3Tokens.surfaceContainerHighest,
-        '& fieldset': { border: `1px solid ${m3Tokens.outlineVariant}` }, 
+        bgcolor: 'rgba(0, 0, 0, 0.3)',
+        '& fieldset': { border: `1px solid rgba(255, 0, 127, 0.15)` }, 
         '&:hover fieldset': { borderColor: m3Tokens.outline },
         '&.Mui-focused fieldset': { border: `2px solid ${m3Tokens.primary}` },
-        '& input': { color: m3Tokens.onSurface }
+        '& input': { color: '#FFFFFF' }
     },
     '& .MuiInputLabel-root': { color: m3Tokens.onSurfaceVariant },
     '& .MuiInputLabel-root.Mui-focused': { color: m3Tokens.primary },
@@ -179,64 +184,76 @@ export const DESIGN_TOKENS = {
       paper: {
           sx: {
             borderRadius: '28px', 
-            background: 'rgba(17, 13, 16, 0.85)',
-            backdropFilter: 'blur(16px)',
-            WebkitBackdropFilter: 'blur(16px)',
-            border: `1px solid rgba(255, 0, 127, 0.3)`,
-            boxShadow: `0 0 40px rgba(255, 0, 127, 0.15)`,
+            background: 'rgba(0, 0, 0, 0.6)', // Sheer Black
+            backdropFilter: 'blur(20px)',
+            WebkitBackdropFilter: 'blur(20px)',
+            border: `1px solid rgba(255, 0, 127, 0.2)`,
+            borderTop: `2px dashed rgba(255, 0, 127, 0.4)`, // Spitzen-Bogenkante
+            boxShadow: `0 20px 50px rgba(0, 0, 0, 0.8), inset 0 2px 0 rgba(255, 255, 255, 0.05)`,
             backgroundImage: 'none',
           }
       },
-      title: { sx: { pb: 2, fontSize: '20px', fontWeight: 700, textTransform: 'uppercase', color: m3Tokens.primary, textAlign: 'center', letterSpacing: '1px', borderBottom: `1px solid rgba(255, 0, 127, 0.1)` } },
+      title: { sx: { pb: 2, fontSize: '20px', fontWeight: 700, textTransform: 'uppercase', color: m3Tokens.primary, textAlign: 'center', letterSpacing: '1px', borderBottom: `1px dashed rgba(255, 0, 127, 0.15)` } },
       content: { sx: { py: 3 }, dividers: false },
-      actions: { sx: { p: 3, justifyContent: 'space-between', gap: 1, borderTop: `1px solid rgba(255, 0, 127, 0.1)` } }
+      actions: { sx: { p: 3, justifyContent: 'space-between', gap: 1, borderTop: `1px dashed rgba(255, 0, 127, 0.15)` } }
   },
 
-  bottomSheet: { sx: { background: 'rgba(17, 13, 16, 0.90)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', borderTop: `1px solid rgba(255, 0, 127, 0.3)`, borderRadius: '28px 28px 0 0' } },
+  // ANPASSUNG: BottomSheet mit Silicone-Grip Schatten und Lace-Kante
+  bottomSheet: { 
+      sx: { 
+          background: 'rgba(5, 5, 5, 0.75)', 
+          backdropFilter: 'blur(20px)', 
+          WebkitBackdropFilter: 'blur(20px)', 
+          borderTop: `1px dashed rgba(255, 0, 127, 0.4)`, 
+          borderRadius: '28px 28px 0 0',
+          boxShadow: `0 -10px 30px rgba(0, 0, 0, 0.8), inset 0 2px 0 rgba(255, 0, 127, 0.2)` // Silicone Grip
+      } 
+  },
 
   accordion: {
     root: {
-      bgcolor: 'rgba(17, 13, 16, 0.5)',
-      backdropFilter: 'blur(8px)',
+      bgcolor: 'rgba(0, 0, 0, 0.3)',
+      backdropFilter: 'blur(12px)',
       border: `1px solid rgba(255, 0, 127, 0.1)`,
+      borderLeft: `2px dashed rgba(255, 0, 127, 0.3)`,
       backgroundImage: 'none',
       boxShadow: 'none',
       borderRadius: '16px !important',
       marginBottom: 8,
       '&:before': { display: 'none' },
       '&.Mui-expanded': { 
-          bgcolor: 'rgba(17, 13, 16, 0.7)',
-          borderColor: `rgba(255, 0, 127, 0.3)`,
+          bgcolor: 'rgba(0, 0, 0, 0.5)',
+          borderColor: `rgba(255, 0, 127, 0.25)`,
           marginBottom: 16 
       },
     },
-    details: { padding: 16, color: m3Tokens.onSurfaceVariant }
+    details: { padding: 16, color: '#EBE7E1' }
   },
 
   chip: {
     default: { 
-        bgcolor: m3Tokens.surfaceContainerHighest, 
-        color: m3Tokens.onSurfaceVariant,
+        bgcolor: 'rgba(0, 0, 0, 0.4)', 
+        color: '#FFFFFF',
         borderRadius: '8px',
-        border: '1px solid ' + m3Tokens.outlineVariant,
+        border: '1px dashed ' + m3Tokens.outlineVariant,
         fontWeight: 500
     },
     active: { 
-        bgcolor: m3Tokens.secondaryContainer, 
-        color: m3Tokens.onSecondaryContainer,
+        bgcolor: `linear-gradient(135deg, ${m3Tokens.secondary}40 0%, transparent 100%)`, 
+        color: m3Tokens.secondary,
         borderRadius: '8px',
         border: `1px solid ${m3Tokens.secondary}`,
         fontWeight: 700,
-        boxShadow: `0 0 10px rgba(0, 229, 255, 0.3)`
+        boxShadow: `0 0 10px rgba(0, 229, 255, 0.2)`
     }
   },
 
   calendar: {
     '.react-calendar': { width: '100%', backgroundColor: 'transparent', border: 'none', fontFamily: 'inherit' },
-    '.react-calendar__navigation button': { color: m3Tokens.onSurface, fontSize: '1rem', fontWeight: 700, textTransform: 'uppercase' },
+    '.react-calendar__navigation button': { color: '#FFFFFF', fontSize: '1rem', fontWeight: 700, textTransform: 'uppercase' },
     '.react-calendar__month-view__weekdays': { textTransform: 'uppercase', fontSize: '0.75rem', color: m3Tokens.primary, fontWeight: 700 },
-    '.react-calendar__tile': { padding: '10px 0', color: m3Tokens.onSurface, fontSize: '0.9rem' },
-    '.react-calendar__tile:enabled:hover': { backgroundColor: m3Tokens.surfaceContainerHighest, borderRadius: '20px' }, 
+    '.react-calendar__tile': { padding: '10px 0', color: '#FFFFFF', fontSize: '0.9rem' },
+    '.react-calendar__tile:enabled:hover': { backgroundColor: 'rgba(255, 0, 127, 0.1)', borderRadius: '20px' }, 
     '.react-calendar__tile--now': { background: 'transparent', border: `1px dashed ${m3Tokens.primary}`, borderRadius: '20px', color: m3Tokens.primary },
     '.react-calendar__tile--active': { background: `${m3Tokens.primary} !important`, color: `${m3Tokens.onPrimary} !important`, borderRadius: '20px', boxShadow: `0 0 15px ${m3Tokens.primary}80` },
   }
@@ -244,14 +261,14 @@ export const DESIGN_TOKENS = {
 
 export const CHART_THEME = {
     background: 'transparent',
-    textColor: m3Tokens.onSurfaceVariant,
-    grid: { line: { stroke: m3Tokens.outlineVariant, strokeWidth: 1, strokeDasharray: '4 4' } },
+    textColor: '#FFFFFF',
+    grid: { line: { stroke: 'rgba(255, 0, 127, 0.15)', strokeWidth: 1, strokeDasharray: '2 4' } }, // Dotted lace feel
     axis: { 
         domain: { line: { stroke: 'transparent' } }, 
-        ticks: { text: { fill: m3Tokens.onSurfaceVariant, fontSize: 11 } } 
+        ticks: { text: { fill: '#FFFFFF', fontSize: 11 } } 
     },
     tooltip: {
-        container: { background: 'rgba(17, 13, 16, 0.9)', backdropFilter: 'blur(8px)', color: m3Tokens.onSurface, borderRadius: '12px', border: `1px solid ${m3Tokens.primary}40` }
+        container: { background: 'rgba(0, 0, 0, 0.8)', backdropFilter: 'blur(12px)', color: '#FFFFFF', borderRadius: '12px', border: `1px dashed ${m3Tokens.primary}40` }
     },
     colors: [m3Tokens.primary, m3Tokens.secondary, m3Tokens.tertiary, m3Tokens.error, m3Tokens.outline]
 };

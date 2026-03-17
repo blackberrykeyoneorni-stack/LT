@@ -16,6 +16,12 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden;
+  
+  /* NEU: Das 15-Denier Nylon-Overlay */
+  background-image: 
+    radial-gradient(circle at 50% 30%, rgba(30, 20, 25, 0.8) 0%, rgba(5, 5, 5, 1) 80%),
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.06'/%3E%3C/svg%3E");
+  background-attachment: fixed; /* Der Lycra-Glanz bleibt beim Scrollen starr auf der "Haut" */
 }
 
 /* TYPOGRAPHY OVERRIDES */
@@ -25,13 +31,13 @@ h1, h2, h3, h4, h5, h6 {
   letter-spacing: 0.02em;
 }
 
-/* GLASSMORPHISM UTILITIES */
+/* GLASSMORPHISM UTILITIES -> Umgewandelt in "Sheer Black" */
 .glass-panel {
-  background: var(--glass-surface) !important;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid var(--glass-border) !important;
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  background: rgba(0, 0, 0, 0.4) !important;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 0, 127, 0.15) !important; /* Subtile Spitzen-Kante */
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.6);
 }
 
 /* PUNISHMENT MODE OVERRIDE (Wird dynamisch aktiviert) */
@@ -63,4 +69,19 @@ body.punishment-active .MuiPaper-root {
   position: relative;
   overflow: hidden;
   transition: transform 0.3s ease;
+}
+
+/* NEU: Spannungsaufbau-Animation (Tension Animation) für Ladezustände */
+@keyframes elastane-tension {
+  0% { transform: scaleX(0.1); opacity: 0.3; filter: brightness(1); }
+  70% { transform: scaleX(1); opacity: 1; filter: brightness(1.8); }
+  100% { transform: scaleX(1); opacity: 0; filter: brightness(2); }
+}
+
+.tension-loader {
+  height: 2px;
+  width: 100%;
+  background: linear-gradient(90deg, transparent, #FF007F, transparent);
+  animation: elastane-tension 1.5s cubic-bezier(0.25, 1, 0.5, 1) infinite;
+  box-shadow: 0 0 10px rgba(255, 0, 127, 0.8);
 }

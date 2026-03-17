@@ -2,9 +2,8 @@ import { createTheme } from '@mui/material/styles';
 import { m3Tokens } from './obsidianDesign';
 
 /**
- * ANDROID 16 / MATERIAL DESIGN 3 - SYNTHETIC SISSY (SHEER NYLON)
+ * ANDROID 16 / MATERIAL DESIGN 3 - TEXTILE UI (NYLON, LACE, SATIN)
  * Importiert die m3Tokens aus obsidianDesign.js, um das Grid stabil zu halten.
- * HINWEIS: Kinetische Animationen und Wasserzeichen wurden zur Systemstabilität entfernt.
  */
 
 export const materialTheme = createTheme({
@@ -16,11 +15,11 @@ export const materialTheme = createTheme({
     error: { main: m3Tokens.error, contrastText: m3Tokens.onError },
     background: {
       default: m3Tokens.background,
-      paper: m3Tokens.surfaceContainer,
+      paper: 'transparent', // Durch Sheer-Black und Backdrop-Filter in Komponenten überschrieben
     },
     text: {
-      primary: m3Tokens.onSurface,
-      secondary: m3Tokens.onSurfaceVariant, 
+      primary: '#FFFFFF', // Harter Kontrast für Sheer Black
+      secondary: 'rgba(255, 255, 255, 0.7)', 
     },
     m3: m3Tokens
   },
@@ -39,22 +38,22 @@ export const materialTheme = createTheme({
     borderRadius: 16, 
   },
   components: {
-    // --- GLOBAL: NYLON MESH ---
+    // --- GLOBAL: NYLON MESH & NOISE ---
     MuiCssBaseline: {
       styleOverrides: {
         body: {
-          backgroundColor: m3Tokens.background,
-          // Der "Sheer Nylon" Maschen-Effekt
+          backgroundColor: '#050505',
+          // Komplett schwarzes, leicht schimmerndes 15-Denier Nylon
           backgroundImage: `
-            linear-gradient(rgba(255, 0, 127, 0.03) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(255, 0, 127, 0.03) 1px, transparent 1px)
+            radial-gradient(circle at 50% 30%, rgba(30, 20, 25, 0.8) 0%, rgba(5, 5, 5, 1) 80%),
+            url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.06'/%3E%3C/svg%3E")
           `,
-          backgroundSize: '3px 3px',
-          color: m3Tokens.onSurface,
+          backgroundAttachment: 'fixed',
+          color: '#FFFFFF',
         }
       }
     },
-    // --- BUTTONS: PILL SHAPE & NEON GLOW ---
+    // --- BUTTONS: SCHWERER SATIN ---
     MuiButton: {
       styleOverrides: {
         root: {
@@ -64,49 +63,56 @@ export const materialTheme = createTheme({
           textTransform: 'uppercase',
           fontWeight: 'bold',
           letterSpacing: '1px',
+          transition: 'all 0.2s ease-in-out',
         },
         contained: {
-          backgroundColor: m3Tokens.primary,
+          background: `linear-gradient(135deg, ${m3Tokens.primary} 0%, #99004D 40%, #E60073 60%, ${m3Tokens.primary} 100%)`,
           color: m3Tokens.onPrimary,
-          boxShadow: `0 4px 14px rgba(255, 0, 127, 0.4)`, 
+          boxShadow: `inset 0px 2px 4px rgba(255, 255, 255, 0.3), 0 4px 14px rgba(255, 0, 127, 0.5)`, 
           '&:hover': { 
-              backgroundColor: m3Tokens.primary,
-              boxShadow: `0 6px 20px rgba(255, 0, 127, 0.6)`,
-              backgroundImage: 'linear-gradient(rgba(255,255,255,0.1), rgba(255,255,255,0.1))' 
+              background: `linear-gradient(135deg, #E60073 0%, #800040 40%, #CC0066 60%, #E60073 100%)`,
+              boxShadow: `inset 0px 4px 8px rgba(0, 0, 0, 0.4), 0 6px 20px rgba(255, 0, 127, 0.6)`,
           }
         },
         outlined: {
-          borderColor: m3Tokens.outline,
+          borderColor: 'rgba(255, 0, 127, 0.4)',
+          borderStyle: 'dashed', // Spitzen-Haptik
           color: m3Tokens.primary,
+          '&:hover': {
+              backgroundColor: 'rgba(255, 0, 127, 0.05)',
+              borderColor: m3Tokens.primary,
+          }
         },
         text: {
             padding: '10px 16px', 
         }
       },
     },
-    // --- CARDS: GLASSMORPHISM ---
+    // --- CARDS: SHEER BLACK GLASSMORPHISM ---
     MuiCard: {
       styleOverrides: {
         root: {
-          backgroundColor: m3Tokens.surfaceContainer,
-          backdropFilter: 'blur(12px)', 
+          backgroundColor: 'rgba(0, 0, 0, 0.4)',
+          backdropFilter: 'blur(16px)', 
           borderRadius: '16px', 
           backgroundImage: 'none',
-          boxShadow: '0 8px 32px rgba(255, 0, 127, 0.1)',
-          border: `1px solid ${m3Tokens.outlineVariant}`, 
+          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.6)',
+          border: `1px solid rgba(255, 0, 127, 0.1)`, 
+          borderTop: `1px dashed rgba(255, 0, 127, 0.25)`, // Lace Edge Top
         },
       },
     },
-    // --- DIALOGS: EXTRA LARGE SHAPE ---
+    // --- DIALOGS: LACE & SILICONE GRIP ---
     MuiDialogPaper: {
         styleOverrides: {
             root: {
                 borderRadius: '28px', 
-                backgroundColor: m3Tokens.surfaceContainerHigh,
-                backdropFilter: 'blur(16px)', 
+                backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                backdropFilter: 'blur(20px)', 
                 backgroundImage: 'none',
-                border: `1px solid ${m3Tokens.outline}`,
-                boxShadow: `0 0 40px rgba(255, 0, 127, 0.15)`,
+                border: `1px solid rgba(255, 0, 127, 0.2)`,
+                borderTop: `2px dashed rgba(255, 0, 127, 0.4)`,
+                boxShadow: `0 20px 50px rgba(0, 0, 0, 0.8), inset 0 2px 0 rgba(255, 255, 255, 0.05)`,
             }
         }
     },
@@ -114,11 +120,12 @@ export const materialTheme = createTheme({
     MuiDrawer: {
         styleOverrides: {
             paper: {
-                backgroundColor: 'rgba(17, 13, 16, 0.90)',
-                backdropFilter: 'blur(16px)',
+                backgroundColor: 'rgba(5, 5, 5, 0.75)',
+                backdropFilter: 'blur(20px)',
                 borderTopLeftRadius: '28px',
                 borderTopRightRadius: '28px',
-                borderTop: `1px solid ${m3Tokens.outline}`,
+                borderTop: `1px dashed rgba(255, 0, 127, 0.4)`,
+                boxShadow: `0 -10px 30px rgba(0, 0, 0, 0.8), inset 0 2px 0 rgba(255, 0, 127, 0.2)`,
             }
         }
     },
@@ -127,8 +134,8 @@ export const materialTheme = createTheme({
         styleOverrides: {
             root: {
                 borderRadius: '8px', 
-                backgroundColor: m3Tokens.surfaceContainerHighest,
-                '& fieldset': { border: `1px solid ${m3Tokens.outlineVariant}` }, 
+                backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                '& fieldset': { border: `1px solid rgba(255, 0, 127, 0.15)` }, 
                 '&.Mui-focused fieldset': { border: `2px solid ${m3Tokens.primary}` },
             },
             input: { padding: '16px' }
@@ -149,8 +156,9 @@ export const materialTheme = createTheme({
             root: {
                 borderRadius: '8px', 
                 height: '32px',
-                backgroundColor: m3Tokens.surfaceContainerHighest,
-                border: `1px solid ${m3Tokens.outlineVariant}`,
+                backgroundColor: 'rgba(0, 0, 0, 0.4)',
+                border: `1px dashed rgba(255, 0, 127, 0.2)`,
+                color: '#FFFFFF',
                 fontWeight: 700,
             },
             filled: {
