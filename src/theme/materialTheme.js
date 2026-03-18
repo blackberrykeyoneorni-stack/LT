@@ -1,8 +1,5 @@
 import { createTheme } from '@mui/material/styles';
-import { m3Tokens } from './obsidianDesign';
-
-// ARCHITEKTUR-FIX: Expliziter Import des Assets für die Vite Build-Pipeline
-import bgLeg from '../assets/bg-leg.jpg';
+import { m3Tokens, DESIGN_TOKENS } from './obsidianDesign';
 
 export const materialTheme = createTheme({
   palette: {
@@ -39,19 +36,9 @@ export const materialTheme = createTheme({
     MuiCssBaseline: {
       styleOverrides: {
         body: {
-          backgroundColor: '#050505',
-          // KORRIGIERTE LAYER-REIHENFOLGE: 1. Noise (Top), 2. Gradient (Middle), 3. Bild (Bottom)
-          backgroundImage: `
-            url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.08'/%3E%3C/svg%3E"),
-            linear-gradient(rgba(5, 5, 5, 0.75), rgba(5, 5, 5, 0.92)),
-            url(${bgLeg})
-          `,
-          backgroundAttachment: 'fixed',
-          // Sizing und Positionierung müssen exakt den Ebenen oben entsprechen
-          backgroundSize: '3px 3px, cover, cover',
-          backgroundPosition: 'top left, center, right center',
-          backgroundRepeat: 'repeat, no-repeat, no-repeat',
-          color: '#FFFFFF',
+          backgroundColor: m3Tokens.absoluteBg,
+          ...DESIGN_TOKENS.bodyBackground,
+          color: m3Tokens.onSurface,
         }
       }
     },
@@ -67,22 +54,16 @@ export const materialTheme = createTheme({
           transition: 'all 0.2s ease-in-out',
         },
         contained: {
-          background: `linear-gradient(135deg, ${m3Tokens.primary} 0%, #99004D 40%, #E60073 60%, ${m3Tokens.primary} 100%)`,
-          color: m3Tokens.onPrimary,
-          boxShadow: `inset 0px 2px 4px rgba(255, 255, 255, 0.3), 0 4px 14px rgba(255, 0, 127, 0.5)`, 
-          '&:hover': { 
-              background: `linear-gradient(135deg, #E60073 0%, #800040 40%, #CC0066 60%, #E60073 100%)`,
-              boxShadow: `inset 0px 4px 8px rgba(0, 0, 0, 0.4), 0 6px 20px rgba(255, 0, 127, 0.6)`,
-          }
+          background: DESIGN_TOKENS.buttonGradient.background,
+          color: DESIGN_TOKENS.buttonGradient.color,
+          boxShadow: DESIGN_TOKENS.buttonGradient.boxShadow,
+          '&:hover': DESIGN_TOKENS.buttonGradient['&:hover'],
         },
         outlined: {
-          borderColor: 'rgba(255, 0, 127, 0.4)',
+          borderColor: m3Tokens.outline,
           borderStyle: 'dashed', 
           color: m3Tokens.primary,
-          '&:hover': {
-              backgroundColor: 'rgba(255, 0, 127, 0.05)',
-              borderColor: m3Tokens.primary,
-          }
+          '&:hover': DESIGN_TOKENS.buttonSecondary['&:hover'],
         },
         text: {
             padding: '10px 16px', 
@@ -91,49 +72,26 @@ export const materialTheme = createTheme({
     },
     MuiCard: {
       styleOverrides: {
-        root: {
-          backgroundColor: 'rgba(0, 0, 0, 0.4)',
-          backdropFilter: 'blur(16px)', 
-          borderRadius: '16px', 
-          backgroundImage: 'none',
-          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.6)',
-          border: `1px solid rgba(255, 0, 127, 0.1)`, 
-          borderTop: `1px dashed rgba(255, 0, 127, 0.25)`,
-        },
+        root: DESIGN_TOKENS.glassCard,
       },
     },
     MuiDialogPaper: {
         styleOverrides: {
-            root: {
-                borderRadius: '28px', 
-                backgroundColor: 'rgba(0, 0, 0, 0.6)',
-                backdropFilter: 'blur(20px)', 
-                backgroundImage: 'none',
-                border: `1px solid rgba(255, 0, 127, 0.2)`,
-                borderTop: `2px dashed rgba(255, 0, 127, 0.4)`,
-                boxShadow: `0 20px 50px rgba(0, 0, 0, 0.8), inset 0 2px 0 rgba(255, 255, 255, 0.05)`,
-            }
+            root: DESIGN_TOKENS.dialog.paper.sx
         }
     },
     MuiDrawer: {
         styleOverrides: {
-            paper: {
-                backgroundColor: 'rgba(5, 5, 5, 0.75)',
-                backdropFilter: 'blur(20px)',
-                borderTopLeftRadius: '28px',
-                borderTopRightRadius: '28px',
-                borderTop: `1px dashed rgba(255, 0, 127, 0.4)`,
-                boxShadow: `0 -10px 30px rgba(0, 0, 0, 0.8), inset 0 2px 0 rgba(255, 0, 127, 0.2)`,
-            }
+            paper: DESIGN_TOKENS.bottomSheet.sx
         }
     },
     MuiOutlinedInput: {
         styleOverrides: {
             root: {
-                borderRadius: '8px', 
-                backgroundColor: 'rgba(0, 0, 0, 0.3)',
-                '& fieldset': { border: `1px solid rgba(255, 0, 127, 0.15)` }, 
-                '&.Mui-focused fieldset': { border: `2px solid ${m3Tokens.primary}` },
+                borderRadius: DESIGN_TOKENS.inputField['& .MuiOutlinedInput-root'].borderRadius,
+                backgroundColor: DESIGN_TOKENS.inputField['& .MuiOutlinedInput-root'].bgcolor,
+                '& fieldset': DESIGN_TOKENS.inputField['& .MuiOutlinedInput-root']['& fieldset'],
+                '&.Mui-focused fieldset': DESIGN_TOKENS.inputField['& .MuiOutlinedInput-root']['&.Mui-focused fieldset'],
             },
             input: { padding: '16px' }
         }
@@ -149,12 +107,12 @@ export const materialTheme = createTheme({
     MuiChip: {
         styleOverrides: {
             root: {
-                borderRadius: '8px', 
-                height: '32px',
-                backgroundColor: 'rgba(0, 0, 0, 0.4)',
-                border: `1px dashed rgba(255, 0, 127, 0.2)`,
-                color: '#FFFFFF',
-                fontWeight: 700,
+                borderRadius: DESIGN_TOKENS.chip.default.borderRadius,
+                height: DESIGN_TOKENS.chip.default.height,
+                backgroundColor: DESIGN_TOKENS.chip.default.bgcolor,
+                border: DESIGN_TOKENS.chip.default.border,
+                color: DESIGN_TOKENS.chip.default.color,
+                fontWeight: DESIGN_TOKENS.chip.default.fontWeight,
             },
             filled: {
                 border: 'none'

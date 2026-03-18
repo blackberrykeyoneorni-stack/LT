@@ -1,5 +1,7 @@
 // src/theme/obsidianDesign.js
 
+import bgLeg from '../assets/bg-leg.jpg';
+
 /**
  * 1. CORE TOKENS - SYNTHETIC SISSY (SHEER NYLON)
  * (Diese liegen hier, um zirkuläre Importe mit materialTheme.js zu verhindern!)
@@ -21,17 +23,35 @@ export const m3Tokens = {
   onError: '#FFFFFF',
   errorContainer: 'rgba(255, 0, 64, 0.2)',
   onErrorContainer: '#FFB3C6',
+  
+  // Base Backgrounds
   background: '#110D10',       
+  absoluteBg: '#050505',
+  coreGold: '#EBE7E1',
+  coreCrimson: '#93000A',
   onBackground: '#FFFFFF',
   surface: '#110D10',
   onSurface: '#FFFFFF',
   onSurfaceVariant: 'rgba(255, 182, 193, 0.8)', 
+  
+  // Surfaces & Transparencies (SSOT Extension)
   surfaceContainerLow: 'rgba(17, 13, 16, 0.4)',   
   surfaceContainer: 'rgba(17, 13, 16, 0.7)',      
   surfaceContainerHigh: 'rgba(17, 13, 16, 0.85)',  
   surfaceContainerHighest: 'rgba(255, 0, 127, 0.05)', 
+  glassSurface: 'rgba(0, 0, 0, 0.4)',
+  glassSurfaceHover: 'rgba(5, 5, 5, 0.5)',
+  glassSurfaceHeavy: 'rgba(0, 0, 0, 0.6)',
+  glassSurfaceBottomSheet: 'rgba(5, 5, 5, 0.75)',
+  inputSurface: 'rgba(0, 0, 0, 0.3)',
+  
+  // Borders (SSOT Extension)
   outline: 'rgba(255, 0, 127, 0.3)', 
   outlineVariant: 'rgba(255, 0, 127, 0.15)',
+  glassBorderLight: 'rgba(255, 0, 127, 0.1)',
+  glassBorderMedium: 'rgba(255, 0, 127, 0.2)',
+  glassBorderStrong: 'rgba(255, 0, 127, 0.25)',
+  glassBorderDashed: 'rgba(255, 0, 127, 0.4)',
 };
 
 /**
@@ -65,10 +85,10 @@ export const PALETTE = {
     blue: m3Tokens.secondary,       
     green: m3Tokens.tertiary,       
     red: m3Tokens.error,            
-    gold: m3Tokens.secondary,       
+    gold: m3Tokens.coreGold,       
     pink: m3Tokens.primary,         
     grey: m3Tokens.outlineVariant,
-    crimson: m3Tokens.errorContainer
+    crimson: m3Tokens.coreCrimson
   },
   gradients: {
     primary: m3Tokens.primary, 
@@ -81,24 +101,36 @@ export const PALETTE = {
 /**
  * 3. COMPONENT STYLES & DESIGN TOKENS
  */
-// ANPASSUNG: "Sheer-Black" Glassmorphismus
 const M3_CARD_STYLE = {
-    backgroundColor: 'rgba(0, 0, 0, 0.4)', // Transparenter, um Nylon durchscheinen zu lassen
+    backgroundColor: m3Tokens.glassSurface,
     backdropFilter: 'blur(16px)',
     WebkitBackdropFilter: 'blur(16px)',
-    border: '1px solid rgba(255, 0, 127, 0.1)', // Subtile Kante
-    borderTop: '1px dashed rgba(255, 0, 127, 0.25)', // Spitzen-Imitation oben
+    border: `1px solid ${m3Tokens.glassBorderLight}`,
+    borderTop: `1px dashed ${m3Tokens.glassBorderStrong}`, 
     borderRadius: '16px',
     boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)', 
     color: m3Tokens.onSurface,
     transition: 'all 0.3s ease',
     '&:hover': {
-        backgroundColor: 'rgba(5, 5, 5, 0.5)',
-        borderColor: 'rgba(255, 0, 127, 0.3)',
+        backgroundColor: m3Tokens.glassSurfaceHover,
+        borderColor: m3Tokens.outline,
     }
 };
 
 export const DESIGN_TOKENS = {
+  // Zentrale SSOT Hintergrund-Logik
+  bodyBackground: {
+    backgroundImage: `
+      url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.08'/%3E%3C/svg%3E"),
+      linear-gradient(rgba(5, 5, 5, 0.75), rgba(5, 5, 5, 0.92)),
+      url(${bgLeg})
+    `,
+    backgroundAttachment: 'fixed',
+    backgroundSize: '3px 3px, cover, cover',
+    backgroundPosition: 'top left, center, right center',
+    backgroundRepeat: 'repeat, no-repeat, no-repeat',
+  },
+
   bottomNavSpacer: {
     pb: '80px', 
     minHeight: '100vh',
@@ -107,7 +139,7 @@ export const DESIGN_TOKENS = {
   container: { maxWidth: 'md', disableGutters: false, sx: { px: 2, pt: 2 } },
 
   textGradient: {
-    background: `linear-gradient(90deg, #FFFFFF 0%, ${m3Tokens.onPrimaryContainer} 100%)`, // Harter Kontrast für Lesbarkeit auf Sheer Black
+    background: `linear-gradient(90deg, #FFFFFF 0%, ${m3Tokens.onPrimaryContainer} 100%)`, 
     WebkitBackgroundClip: 'text',
     WebkitTextFillColor: 'transparent',
     backgroundClip: 'text',
@@ -131,7 +163,6 @@ export const DESIGN_TOKENS = {
   
   glassCard: M3_CARD_STYLE,
   
-  // ANPASSUNG: Schwerer Satin-Effekt für Buttons
   buttonGradient: {
     background: `linear-gradient(135deg, ${m3Tokens.primary} 0%, #99004D 40%, #E60073 60%, ${m3Tokens.primary} 100%)`, 
     color: m3Tokens.onPrimary,
@@ -139,29 +170,29 @@ export const DESIGN_TOKENS = {
     borderRadius: '9999px', 
     textTransform: 'uppercase',
     letterSpacing: '1px',
-    boxShadow: `inset 0px 2px 4px rgba(255, 255, 255, 0.3), 0 4px 14px rgba(255, 0, 127, 0.5)`, // Taktiles Glanz-Feedback
+    boxShadow: `inset 0px 2px 4px rgba(255, 255, 255, 0.3), 0 4px 14px rgba(255, 0, 127, 0.5)`, 
     transition: 'all 0.2s ease-in-out',
     '&:hover': {
       background: `linear-gradient(135deg, #E60073 0%, #800040 40%, #CC0066 60%, #E60073 100%)`,
-      boxShadow: `inset 0px 4px 8px rgba(0, 0, 0, 0.4), 0 6px 20px rgba(255, 0, 127, 0.6)`, // Invertiert beim Drücken
+      boxShadow: `inset 0px 4px 8px rgba(0, 0, 0, 0.4), 0 6px 20px rgba(255, 0, 127, 0.6)`, 
     },
     '&:disabled': {
-        background: 'rgba(255, 0, 127, 0.1)', 
+        background: m3Tokens.glassBorderLight, 
         color: 'rgba(255, 255, 255, 0.3)', 
         boxShadow: 'none',
-        border: '1px dashed rgba(255, 0, 127, 0.2)'
+        border: `1px dashed ${m3Tokens.glassBorderMedium}`
     }
   },
 
   buttonSecondary: {
-    border: `1px dashed ${m3Tokens.outline}`, // Spitzen-Assoziation
+    border: `1px dashed ${m3Tokens.outline}`, 
     color: m3Tokens.primary,
     borderRadius: '9999px', 
     textTransform: 'uppercase',
     letterSpacing: '1px',
     background: 'transparent',
     '&:hover': {
-        background: 'rgba(255, 0, 127, 0.05)', 
+        background: m3Tokens.surfaceContainerHighest, 
         borderColor: m3Tokens.primary,
         boxShadow: `inset 0 0 10px rgba(255, 0, 127, 0.1)`
     }
@@ -170,8 +201,8 @@ export const DESIGN_TOKENS = {
   inputField: {
     '& .MuiOutlinedInput-root': {
         borderRadius: '8px', 
-        bgcolor: 'rgba(0, 0, 0, 0.3)',
-        '& fieldset': { border: `1px solid rgba(255, 0, 127, 0.15)` }, 
+        bgcolor: m3Tokens.inputSurface,
+        '& fieldset': { border: `1px solid ${m3Tokens.outlineVariant}` }, 
         '&:hover fieldset': { borderColor: m3Tokens.outline },
         '&.Mui-focused fieldset': { border: `2px solid ${m3Tokens.primary}` },
         '& input': { color: '#FFFFFF' }
@@ -184,46 +215,45 @@ export const DESIGN_TOKENS = {
       paper: {
           sx: {
             borderRadius: '28px', 
-            background: 'rgba(0, 0, 0, 0.6)', // Sheer Black
+            background: m3Tokens.glassSurfaceHeavy, 
             backdropFilter: 'blur(20px)',
             WebkitBackdropFilter: 'blur(20px)',
-            border: `1px solid rgba(255, 0, 127, 0.2)`,
-            borderTop: `2px dashed rgba(255, 0, 127, 0.4)`, // Spitzen-Bogenkante
+            border: `1px solid ${m3Tokens.glassBorderMedium}`,
+            borderTop: `2px dashed ${m3Tokens.glassBorderDashed}`, 
             boxShadow: `0 20px 50px rgba(0, 0, 0, 0.8), inset 0 2px 0 rgba(255, 255, 255, 0.05)`,
             backgroundImage: 'none',
           }
       },
-      title: { sx: { pb: 2, fontSize: '20px', fontWeight: 700, textTransform: 'uppercase', color: m3Tokens.primary, textAlign: 'center', letterSpacing: '1px', borderBottom: `1px dashed rgba(255, 0, 127, 0.15)` } },
+      title: { sx: { pb: 2, fontSize: '20px', fontWeight: 700, textTransform: 'uppercase', color: m3Tokens.primary, textAlign: 'center', letterSpacing: '1px', borderBottom: `1px dashed ${m3Tokens.outlineVariant}` } },
       content: { sx: { py: 3 }, dividers: false },
-      actions: { sx: { p: 3, justifyContent: 'space-between', gap: 1, borderTop: `1px dashed rgba(255, 0, 127, 0.15)` } }
+      actions: { sx: { p: 3, justifyContent: 'space-between', gap: 1, borderTop: `1px dashed ${m3Tokens.outlineVariant}` } }
   },
 
-  // ANPASSUNG: BottomSheet mit Silicone-Grip Schatten und Lace-Kante
   bottomSheet: { 
       sx: { 
-          background: 'rgba(5, 5, 5, 0.75)', 
+          background: m3Tokens.glassSurfaceBottomSheet, 
           backdropFilter: 'blur(20px)', 
           WebkitBackdropFilter: 'blur(20px)', 
-          borderTop: `1px dashed rgba(255, 0, 127, 0.4)`, 
+          borderTop: `1px dashed ${m3Tokens.glassBorderDashed}`, 
           borderRadius: '28px 28px 0 0',
-          boxShadow: `0 -10px 30px rgba(0, 0, 0, 0.8), inset 0 2px 0 rgba(255, 0, 127, 0.2)` // Silicone Grip
+          boxShadow: `0 -10px 30px rgba(0, 0, 0, 0.8), inset 0 2px 0 rgba(255, 0, 127, 0.2)` 
       } 
   },
 
   accordion: {
     root: {
-      bgcolor: 'rgba(0, 0, 0, 0.3)',
+      bgcolor: m3Tokens.inputSurface,
       backdropFilter: 'blur(12px)',
-      border: `1px solid rgba(255, 0, 127, 0.1)`,
-      borderLeft: `2px dashed rgba(255, 0, 127, 0.3)`,
+      border: `1px solid ${m3Tokens.glassBorderLight}`,
+      borderLeft: `2px dashed ${m3Tokens.outline}`,
       backgroundImage: 'none',
       boxShadow: 'none',
       borderRadius: '16px !important',
       marginBottom: 8,
       '&:before': { display: 'none' },
       '&.Mui-expanded': { 
-          bgcolor: 'rgba(0, 0, 0, 0.5)',
-          borderColor: `rgba(255, 0, 127, 0.25)`,
+          bgcolor: m3Tokens.glassSurfaceHover,
+          borderColor: m3Tokens.glassBorderStrong,
           marginBottom: 16 
       },
     },
@@ -232,11 +262,12 @@ export const DESIGN_TOKENS = {
 
   chip: {
     default: { 
-        bgcolor: 'rgba(0, 0, 0, 0.4)', 
+        bgcolor: m3Tokens.glassSurface, 
         color: '#FFFFFF',
         borderRadius: '8px',
         border: '1px dashed ' + m3Tokens.outlineVariant,
-        fontWeight: 500
+        fontWeight: 700,
+        height: '32px'
     },
     active: { 
         bgcolor: `linear-gradient(135deg, ${m3Tokens.secondary}40 0%, transparent 100%)`, 
@@ -253,7 +284,7 @@ export const DESIGN_TOKENS = {
     '.react-calendar__navigation button': { color: '#FFFFFF', fontSize: '1rem', fontWeight: 700, textTransform: 'uppercase' },
     '.react-calendar__month-view__weekdays': { textTransform: 'uppercase', fontSize: '0.75rem', color: m3Tokens.primary, fontWeight: 700 },
     '.react-calendar__tile': { padding: '10px 0', color: '#FFFFFF', fontSize: '0.9rem' },
-    '.react-calendar__tile:enabled:hover': { backgroundColor: 'rgba(255, 0, 127, 0.1)', borderRadius: '20px' }, 
+    '.react-calendar__tile:enabled:hover': { backgroundColor: m3Tokens.glassBorderLight, borderRadius: '20px' }, 
     '.react-calendar__tile--now': { background: 'transparent', border: `1px dashed ${m3Tokens.primary}`, borderRadius: '20px', color: m3Tokens.primary },
     '.react-calendar__tile--active': { background: `${m3Tokens.primary} !important`, color: `${m3Tokens.onPrimary} !important`, borderRadius: '20px', boxShadow: `0 0 15px ${m3Tokens.primary}80` },
   }
@@ -262,18 +293,18 @@ export const DESIGN_TOKENS = {
 export const CHART_THEME = {
     background: 'transparent',
     textColor: '#FFFFFF',
-    grid: { line: { stroke: 'rgba(255, 0, 127, 0.15)', strokeWidth: 1, strokeDasharray: '2 4' } }, // Dotted lace feel
+    grid: { line: { stroke: m3Tokens.outlineVariant, strokeWidth: 1, strokeDasharray: '2 4' } }, 
     axis: { 
         domain: { line: { stroke: 'transparent' } }, 
         ticks: { text: { fill: '#FFFFFF', fontSize: 11 } } 
     },
     tooltip: {
-        container: { background: 'rgba(0, 0, 0, 0.8)', backdropFilter: 'blur(12px)', color: '#FFFFFF', borderRadius: '12px', border: `1px dashed ${m3Tokens.primary}40` }
+        container: { background: 'rgba(0, 0, 0, 0.8)', backdropFilter: 'blur(12px)', color: '#FFFFFF', borderRadius: '12px', border: `1px dashed ${m3Tokens.outlineDashed}` }
     },
     colors: [m3Tokens.primary, m3Tokens.secondary, m3Tokens.tertiary, m3Tokens.error, m3Tokens.outline]
 };
 
-export const getCategoryColor = () => ({ border: 'transparent', bg: 'rgba(255, 0, 127, 0.1)' });
+export const getCategoryColor = () => ({ border: 'transparent', bg: m3Tokens.glassBorderLight });
 
 export const MOTION = {
     page: { initial: { opacity: 0, y: 10 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0 }, transition: { duration: 0.3, ease: [0.2, 0.0, 0, 1.0] } },
