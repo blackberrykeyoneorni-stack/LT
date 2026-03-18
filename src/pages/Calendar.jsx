@@ -1,20 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  collection, query, getDocs, addDoc, Timestamp, serverTimestamp, deleteDoc, doc 
-} from 'firebase/firestore';
-import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useItems } from '../contexts/ItemContext';
 import { getAllSuspensions } from '../services/SuspensionService'; 
+import { fetchCalendarSessions, addPlannedSession, deletePlannedSession } from '../services/CalendarService';
 
 // UI & THEME
-import { 
-    Box, Container, Typography, IconButton, Paper, 
-    ToggleButton, ToggleButtonGroup, Chip,
-    Stack, Dialog, DialogTitle, DialogContent, DialogActions,
-    Button, List, ListItem, ListItemText, Divider,
-    TextField, FormControl, InputLabel, Select, MenuItem
-} from '@mui/material';
+import { Box, Container, Typography, IconButton, Paper, ToggleButton, ToggleButtonGroup } from '@mui/material';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DESIGN_TOKENS, PALETTE } from '../theme/obsidianDesign';
 
@@ -23,81 +14,13 @@ import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import CalendarViewMonthIcon from '@mui/icons-material/CalendarViewMonth';
 import ViewListIcon from '@mui/icons-material/ViewList';
-import AccessTimeIcon from '@mui/icons-material/AccessTime';
-import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
-import EventIcon from '@mui/icons-material/Event';
-import BlockIcon from '@mui/icons-material/Block'; 
-import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 
-// --- HILFSFUNKTIONEN ---
-
-const getStartOfWeek = (date) => {
-    const d = new Date(date);
-    const day = d.getDay();
-    const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Montag als Wochenstart
-    return new Date(d.setDate(diff));
-};
-
-const addDays = (date, days) => {
-    const result = new Date(date);
-    result.setDate(result.getDate() + days);
-    return result;
-};
-
-const isSameDay = (d1, d2) => {
-    return d1.getDate() === d2.getDate() &&
-           d1.getMonth() === d2.getMonth() &&
-           d1.getFullYear() === d2.getFullYear();
-};
-
-const formatDuration = (totalMinutes) => {
-    const h = Math.floor(totalMinutes / 60);
-    const m = Math.round(totalMinutes % 60);
-    return `${h}h ${m < 10 ? '0'+m : m}m`;
-};
-
-const getSuspensionForDate = (date, suspensions) => {
-    if (!suspensions || suspensions.length === 0) return null;
-    const checkDate = new Date(date);
-    checkDate.setHours(12, 0, 0, 0); 
-
-    return suspensions.find(s => {
-        const start = new Date(s.startDate);
-        start.setHours(0, 0, 0, 0);
-        const end = new Date(s.endDate);
-        end.setHours(23, 59, 59, 999);
-        return checkDate >= start && checkDate <= end;
-    });
-};
-
-// --- LOGIK: ZEITEN VERSCHMELZEN ---
-const calculateEffectiveMinutes = (sessions) => {
-    if (!sessions || sessions.length === 0) return 0;
-    const intervals = sessions.map(s => {
-        const start = s.date.getTime();
-        const durationMs = (s.duration || 0) * 60000;
-        return { start, end: start + durationMs };
-    }).filter(i => i.end > i.start);
-
-    if (intervals.length === 0) return 0;
-    intervals.sort((a, b) => a.start - b.start);
-
-    const merged = [];
-    let current = intervals[0];
-
-    for (let i = 1; i < intervals.length; i++) {
-        const next = intervals[i];
-        if (next.start < current.end) {
-            current.end = Math.max(current.end, next.end);
-        } else {
-            merged.push(current);
-            current = next;
-        }
-    }
-    merged.push(current);
-    const totalMs = merged.reduce((sum, interval) => sum + (interval.end - interval.start), 0);
-    return Math.floor(totalMs / 60000);
-};
+// COMPONENTS & UTILS
+import PlanSessionDialog from '../components/calendar/PlanSessionDialog';
+import DayDetailDialog from '../components/calendar/DayDetailDialog';
+import WeekDayRow from '../components/calendar/WeekDayRow';
+import MonthDayCell from '../components/calendar/MonthDayCell';
+import { getStartOfWeek, addDays, isSameDay, getKw } from '../utils/calendarUtils';
 
 // --- DATA HOOK ---
 const useCalendarData = (currentUser, items) => {
@@ -108,81 +31,11 @@ const useCalendarData = (currentUser, items) => {
     const fetchData = async () => {
         setLoading(true);
         try {
-            const q = query(collection(db, `users/${currentUser.uid}/sessions`));
-            const snap = await getDocs(q);
-            const now = new Date(); 
-            
-            const loadedSessions = [];
-
-            snap.docs.forEach(doc => {
-                const data = doc.data();
-                const sessionItems = (data.itemIds || [data.itemId]).map(id => items.find(i => i.id === id)).filter(Boolean);
-                
-                let hasNylon = false;
-                let hasLingerie = false;
-                
-                // SINGLE SOURCE OF TRUTH CHECK
-                sessionItems.forEach(item => {
-                    const cat = (item.mainCategory || '').toLowerCase();
-                    
-                    if (cat === 'nylons') {
-                        hasNylon = true;
-                    }
-                    else if (cat === 'wäsche' || cat === 'dessous') {
-                        hasLingerie = true;
-                    }
-                });
-
-                if (!data.startTime) return;
-
-                const start = data.startTime.toDate();
-                let end;
-                let isActive = false;
-
-                // Simulation des Endes für geplante Sessions im Kalender
-                if (data.type === 'planned' && !data.endTime && data.durationMinutes) {
-                    end = new Date(start.getTime() + data.durationMinutes * 60000);
-                } else {
-                    end = data.endTime ? data.endTime.toDate() : now;
-                    isActive = !data.endTime;
-                }
-
-                // VIRTUELLER SCHNITT: Sessions über Mitternacht in Tagesfragmente aufteilen
-                let currentStart = new Date(start.getTime());
-
-                while (currentStart < end) {
-                    const currentEndDay = new Date(currentStart);
-                    currentEndDay.setHours(23, 59, 59, 999);
-
-                    // Das Ende des aktuellen Fragments ist entweder das wirkliche Ende oder Mitternacht
-                    const fragmentEnd = end < currentEndDay ? end : currentEndDay;
-                    const diffMins = Math.floor((fragmentEnd.getTime() - currentStart.getTime()) / 60000);
-
-                    if (diffMins > 0) {
-                        loadedSessions.push({
-                            id: `${doc.id}_${currentStart.getTime()}`, // Eindeutige ID pro Fragment
-                            originalId: doc.id,
-                            date: new Date(currentStart.getTime()),
-                            duration: diffMins,
-                            type: data.type,
-                            isActive: isActive && (fragmentEnd.getTime() === end.getTime()), // Nur letztes Fragment ist aktiv
-                            hasNylon,
-                            hasLingerie,
-                            items: sessionItems 
-                        });
-                    }
-
-                    // Für den nächsten Schleifendurchlauf auf 00:00:00 Uhr des Folgetags setzen
-                    currentStart = new Date(currentEndDay.getTime() + 1);
-                }
-            });
-            
-            loadedSessions.sort((a, b) => a.date - b.date);
+            const loadedSessions = await fetchCalendarSessions(currentUser.uid, items);
             setSessions(loadedSessions);
 
             const loadedSuspensions = await getAllSuspensions(currentUser.uid);
             setSuspensions(loadedSuspensions);
-
         } catch (e) {
             console.error("Calendar Fetch Error", e);
         } finally {
@@ -195,405 +48,6 @@ const useCalendarData = (currentUser, items) => {
     }, [currentUser, items]);
 
     return { sessions, suspensions, loading, refreshSessions: fetchData };
-};
-
-// --- SUB-KOMPONENTEN ---
-
-const PlanSessionDialog = ({ open, onClose, date, items, onSave }) => {
-    const [selectedItemId, setSelectedItemId] = useState('');
-    const [time, setTime] = useState('20:00');
-    const [duration, setDuration] = useState(60);
-
-    const handleSave = () => {
-        if (!selectedItemId) return;
-        const [hours, minutes] = time.split(':');
-        const startDateTime = new Date(date);
-        startDateTime.setHours(parseInt(hours), parseInt(minutes), 0, 0);
-        
-        onSave({
-            itemId: selectedItemId,
-            startTime: startDateTime,
-            durationMinutes: parseInt(duration),
-            type: 'planned'
-        });
-        onClose();
-    };
-
-    return (
-        <Dialog open={open} onClose={onClose} fullWidth maxWidth="xs" PaperProps={DESIGN_TOKENS.dialog.paper}>
-            <DialogTitle sx={DESIGN_TOKENS.dialog.title.sx}>Planung: {date?.toLocaleDateString()}</DialogTitle>
-            <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
-                <Stack spacing={3} sx={{ mt: 1 }}>
-                    <FormControl fullWidth>
-                        <InputLabel sx={{ color: 'text.secondary' }}>Item auswählen</InputLabel>
-                        <Select 
-                            value={selectedItemId} 
-                            label="Item auswählen" 
-                            onChange={(e) => setSelectedItemId(e.target.value)}
-                            sx={{ 
-                                color: 'text.primary',
-                                '.MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.2)' }
-                            }}
-                            MenuProps={{ PaperProps: { sx: { bgcolor: '#1a1a1a' } } }}
-                        >
-                            {items.filter(i => i.status === 'active').map(item => (
-                                <MenuItem key={item.id} value={item.id}>
-                                    {item.name || item.brand} <Typography component="span" variant="caption" color="text.secondary" sx={{ml: 1}}>({item.customId || item.id})</Typography>
-                                </MenuItem>
-                            ))}
-                        </Select>
-                    </FormControl>
-
-                    <TextField
-                        label="Startzeit"
-                        type="time"
-                        value={time}
-                        onChange={(e) => setTime(e.target.value)}
-                        fullWidth
-                        InputLabelProps={{ shrink: true, sx: { color: 'text.secondary' } }}
-                        sx={DESIGN_TOKENS.inputField}
-                    />
-
-                    <TextField
-                        label="Geplante Dauer (Minuten)"
-                        type="number"
-                        value={duration}
-                        onChange={(e) => setDuration(e.target.value)}
-                        fullWidth
-                        sx={DESIGN_TOKENS.inputField}
-                    />
-                </Stack>
-            </DialogContent>
-            <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}>
-                <Button onClick={onClose} color="inherit">Abbrechen</Button>
-                <Button onClick={handleSave} variant="contained" sx={DESIGN_TOKENS.buttonGradient}>Speichern</Button>
-            </DialogActions>
-        </Dialog>
-    );
-};
-
-const DayDetailDialog = ({ open, onClose, date, sessions, suspensions, onOpenPlan, onDeleteSession }) => {
-    if (!date) return null;
-
-    const rawDaySessions = sessions.filter(s => isSameDay(s.date, date));
-    rawDaySessions.sort((a, b) => a.date - b.date);
-    
-    // Grouping Logik
-    const groupedSessions = useMemo(() => {
-        const groups = [];
-        rawDaySessions.forEach(session => {
-            const existing = groups.find(g => 
-                Math.abs(g.date - session.date) < 60000 && 
-                g.type === session.type
-            );
-            if (existing) {
-                session.items.forEach(item => {
-                    if (!existing.items.find(i => i.id === item.id)) {
-                        existing.items.push(item);
-                    }
-                });
-            } else {
-                groups.push({
-                    ...session,
-                    items: [...session.items] 
-                });
-            }
-        });
-        return groups;
-    }, [rawDaySessions]);
-
-    const activeSuspension = getSuspensionForDate(date, suspensions);
-
-    return (
-        <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm" PaperProps={DESIGN_TOKENS.dialog.paper}>
-            <DialogTitle sx={{ ...DESIGN_TOKENS.dialog.title.sx, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Box>
-                    <Typography variant="h6">{date.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' })}</Typography>
-                    <Typography variant="caption" color="text.secondary">Tagesprotokoll</Typography>
-                </Box>
-                {!activeSuspension && (
-                    <IconButton onClick={onOpenPlan} sx={{ color: PALETTE.primary.main }}>
-                        <AddCircleOutlineIcon />
-                    </IconButton>
-                )}
-            </DialogTitle>
-            
-            <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
-                {activeSuspension && (
-                    <Paper sx={{ 
-                        p: 2, mb: 3, 
-                        bgcolor: `${PALETTE.accents.gold}15`, 
-                        border: `1px solid ${PALETTE.accents.gold}44`,
-                        display: 'flex', alignItems: 'center', gap: 2
-                    }}>
-                        <BlockIcon sx={{ color: PALETTE.accents.gold, fontSize: 30 }} />
-                        <Box>
-                            <Typography variant="subtitle1" fontWeight="bold" sx={{ color: PALETTE.accents.gold }}>
-                                AUSFALLZEIT AKTIV
-                            </Typography>
-                            <Typography variant="body2" color="text.secondary">
-                                Grund: {activeSuspension.reason}
-                            </Typography>
-                            <Chip size="small" label={activeSuspension.status} sx={{ mt: 1, bgcolor: 'rgba(0,0,0,0.3)', color: '#fff' }} />
-                        </Box>
-                    </Paper>
-                )}
-
-                {groupedSessions.length === 0 ? (
-                    !activeSuspension && (
-                        <Box sx={{ py: 4, textAlign: 'center', opacity: 0.5 }}>
-                            <EventIcon sx={{ fontSize: 40, mb: 1 }} />
-                            <Typography>Keine Einträge für diesen Tag.</Typography>
-                        </Box>
-                    )
-                ) : (
-                    <List>
-                        {groupedSessions.map((session, index) => (
-                            <React.Fragment key={session.id + index}>
-                                {index > 0 && <Divider sx={{ borderColor: 'rgba(255,255,255,0.1)' }} />}
-                                <ListItem alignItems="flex-start" sx={{ px: 0, py: 2 }}>
-                                    <Box sx={{ mr: 2, mt: 0.5, display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 60 }}>
-                                        <Typography variant="caption" color="text.secondary">
-                                            {session.date.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
-                                        </Typography>
-                                        <Box sx={{ height: 20, width: 2, bgcolor: 'rgba(255,255,255,0.1)', my: 0.5 }} />
-                                        <Typography variant="caption" color="text.secondary">
-                                            {session.isActive 
-                                                ? "..." 
-                                                : new Date(session.date.getTime() + session.duration * 60000).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
-                                            }
-                                        </Typography>
-                                    </Box>
-                                    
-                                    <ListItemText
-                                        primary={
-                                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                                    <Typography variant="body1" fontWeight="bold" color={session.type === 'planned' ? 'text.secondary' : 'text.primary'}>
-                                                        {formatDuration(session.duration)}
-                                                    </Typography>
-                                                    <Stack direction="row" spacing={1}>
-                                                        {session.isActive && <Chip label="Aktiv" size="small" color="success" variant="outlined" />}
-                                                        {session.type === 'planned' && <Chip label="Geplant" size="small" variant="outlined" color="info" />}
-                                                    </Stack>
-                                                </Box>
-                                                {session.type === 'planned' && (
-                                                    <IconButton size="small" color="error" onClick={() => onDeleteSession(session.originalId)} sx={{ ml: 1, mt: -0.5 }}>
-                                                        <DeleteOutlineIcon fontSize="small" />
-                                                    </IconButton>
-                                                )}
-                                            </Box>
-                                        }
-                                        secondary={
-                                            <Stack spacing={1} sx={{ mt: 1 }}>
-                                                {session.items.map(item => (
-                                                    <Box key={item.id} sx={{ bgcolor: 'rgba(255,255,255,0.05)', p: 1, borderRadius: 1, opacity: session.type === 'planned' ? 0.6 : 1 }}>
-                                                        <Typography variant="body2" color="text.primary">{item.name || item.brand}</Typography>
-                                                        <Box sx={{ display: 'flex', gap: 2, mt: 0.5 }}>
-                                                            <Typography variant="caption" color="text.secondary">
-                                                                ID: {item.customId || item.id}
-                                                            </Typography>
-                                                            <Typography variant="caption" color="text.secondary">
-                                                                Sub: {item.subCategory || '-'}
-                                                            </Typography>
-                                                        </Box>
-                                                    </Box>
-                                                ))}
-                                                {session.items.length === 0 && (
-                                                    <Typography variant="caption" color="text.disabled" sx={{fontStyle:'italic'}}>Keine Items getrackt (Session Only)</Typography>
-                                                )}
-                                            </Stack>
-                                        }
-                                    />
-                                </ListItem>
-                            </React.Fragment>
-                        ))}
-                    </List>
-                )}
-            </DialogContent>
-            <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}>
-                <Button onClick={onClose} fullWidth color="inherit">Schließen</Button>
-            </DialogActions>
-        </Dialog>
-    );
-};
-
-// 3. Wochen-Zeile (Angepasst: Filterung von Planungen in den Metriken)
-const WeekDayRow = ({ date, sessions, suspensions, isToday, onClick }) => {
-    const daySessions = sessions.filter(s => isSameDay(s.date, date));
-    
-    // STRIKTER FILTER: Wir trennen physische Vollzüge von bloßen Planungen
-    const actualSessions = daySessions.filter(s => s.type !== 'planned');
-    const plannedSessions = daySessions.filter(s => s.type === 'planned');
-
-    const nylonSessions = actualSessions.filter(s => s.hasNylon);
-    const lingerieSessions = actualSessions.filter(s => s.hasLingerie);
-
-    // Diese Minuten fließen in die KPI - und zwar NUR noch echte, stattgefundene
-    const nylonMinutes = calculateEffectiveMinutes(nylonSessions);
-    const lingerieMinutes = calculateEffectiveMinutes(lingerieSessions);
-    
-    const hasActiveSession = actualSessions.some(s => s.isActive);
-    const activeSuspension = getSuspensionForDate(date, suspensions);
-
-    const dayName = date.toLocaleDateString('de-DE', { weekday: 'short' }).toUpperCase();
-    const dayNumber = date.getDate();
-    const isFuture = date > new Date();
-
-    const isEmpty = nylonMinutes === 0 && lingerieMinutes === 0 && !hasActiveSession && plannedSessions.length === 0;
-
-    return (
-        <Paper 
-            onClick={() => onClick(date)}
-            sx={{ 
-                mb: 1, p: 1.5, 
-                display: 'flex', alignItems: 'center', gap: 2,
-                ...DESIGN_TOKENS.glassCard,
-                borderLeft: isToday ? `4px solid ${PALETTE.primary.main}` : (activeSuspension ? `4px solid ${PALETTE.accents.gold}` : '1px solid rgba(255,255,255,0.1)'),
-                bgcolor: activeSuspension ? 'rgba(255, 215, 0, 0.03)' : undefined,
-                opacity: isFuture && !activeSuspension && plannedSessions.length === 0 ? 0.6 : 1,
-                cursor: 'pointer',
-                transition: 'all 0.2s',
-                '&:hover': { bgcolor: 'rgba(255,255,255,0.08)' }
-            }}
-        >
-            <Box sx={{ 
-                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                minWidth: 50, borderRight: '1px solid rgba(255,255,255,0.1)', pr: 2
-            }}>
-                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 'bold' }}>{dayName}</Typography>
-                <Typography variant="h5" sx={{ fontWeight: 600, color: isToday ? PALETTE.primary.main : (activeSuspension ? PALETTE.accents.gold : 'text.primary') }}>{dayNumber}</Typography>
-            </Box>
-
-            <Box sx={{ flex: 1 }}>
-                {activeSuspension ? (
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <BlockIcon sx={{ fontSize: 18, color: PALETTE.accents.gold }} />
-                        <Typography variant="body2" sx={{ color: PALETTE.accents.gold, fontWeight: 'bold', letterSpacing: 1 }}>
-                            AUSFALLZEIT
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
-                            {activeSuspension.reason}
-                        </Typography>
-                    </Box>
-                ) : (
-                    <>
-                        {isEmpty ? (
-                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <Typography variant="body2" color="text.disabled" sx={{ fontStyle: 'italic' }}>
-                                    {isFuture ? "Keine Planung" : "Keine Aktivität"}
-                                </Typography>
-                                {isFuture && <AddCircleOutlineIcon sx={{ color: 'text.disabled', fontSize: 20 }} />}
-                            </Box>
-                        ) : (
-                            <Stack spacing={1}>
-                                {hasActiveSession && (
-                                    <Chip label="Session läuft" size="small" color="success" variant="outlined" sx={{ alignSelf: 'flex-start' }} />
-                                )}
-                                
-                                {/* Anzeige für ECHTE GETRAGENE Zeiten */}
-                                {nylonMinutes > 0 && (
-                                    <Box sx={{ 
-                                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                                        bgcolor: `${PALETTE.accents.purple}15`, 
-                                        borderRadius: 1, px: 1.5, py: 0.5,
-                                        border: `1px solid ${PALETTE.accents.purple}44`
-                                    }}>
-                                        <Typography variant="caption" sx={{ color: PALETTE.accents.purple, fontWeight: 'bold' }}>NYLON</Typography>
-                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                            <AccessTimeIcon sx={{ fontSize: 14, color: PALETTE.accents.purple }} />
-                                            <Typography variant="body2" sx={{ color: PALETTE.text.primary, fontWeight: 600 }}>
-                                                {formatDuration(nylonMinutes)}
-                                            </Typography>
-                                        </Box>
-                                    </Box>
-                                )}
-                                {lingerieMinutes > 0 && (
-                                    <Box sx={{ 
-                                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                                        bgcolor: `${PALETTE.accents.blue}15`, 
-                                        borderRadius: 1, px: 1.5, py: 0.5,
-                                        border: `1px solid ${PALETTE.accents.blue}44`
-                                    }}>
-                                        <Typography variant="caption" sx={{ color: PALETTE.accents.blue, fontWeight: 'bold' }}>DESSOUS</Typography>
-                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                            <AccessTimeIcon sx={{ fontSize: 14, color: PALETTE.accents.blue }} />
-                                            <Typography variant="body2" sx={{ color: PALETTE.text.primary, fontWeight: 600 }}>
-                                                {formatDuration(lingerieMinutes)}
-                                            </Typography>
-                                        </Box>
-                                    </Box>
-                                )}
-
-                                {/* VISUELLE ABGRENZUNG: Anzeige für geplante (noch nicht erfüllte) Sessions */}
-                                {plannedSessions.length > 0 && (
-                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: (nylonMinutes > 0 || lingerieMinutes > 0) ? 0.5 : 0 }}>
-                                        <EventIcon sx={{ fontSize: 14, color: PALETTE.text.secondary }} />
-                                        <Typography variant="body2" sx={{ color: PALETTE.text.secondary, fontStyle: 'italic' }}>
-                                            {plannedSessions.length} Session(s) geplant
-                                        </Typography>
-                                    </Box>
-                                )}
-                            </Stack>
-                        )}
-                    </>
-                )}
-            </Box>
-        </Paper>
-    );
-};
-
-// 4. Monats-Zelle (Angepasst: Visuelle Abgrenzung von Planungen)
-const MonthDayCell = ({ date, sessions, suspensions, isToday, onClick }) => {
-    const daySessions = sessions.filter(s => isSameDay(s.date, date));
-    
-    const actualSessions = daySessions.filter(s => s.type !== 'planned');
-    const plannedSessions = daySessions.filter(s => s.type === 'planned');
-
-    const hasNylon = actualSessions.some(s => s.hasNylon);
-    const hasLingerie = actualSessions.some(s => s.hasLingerie);
-    const hasActive = actualSessions.some(s => s.isActive);
-    const hasPlanned = plannedSessions.length > 0;
-    
-    const activeSuspension = getSuspensionForDate(date, suspensions);
-
-    return (
-        <Paper 
-            onClick={() => onClick(date)}
-            sx={{ 
-                height: 80, p: 0.5, 
-                display: 'flex', flexDirection: 'column', justifyContent: 'flex-start',
-                position: 'relative', 
-                bgcolor: isToday ? 'rgba(255,255,255,0.08)' : (activeSuspension ? 'rgba(255, 215, 0, 0.05)' : 'rgba(255,255,255,0.02)'),
-                border: isToday ? `1px solid ${PALETTE.primary.main}` : (activeSuspension ? `1px solid ${PALETTE.accents.gold}44` : '1px solid rgba(255,255,255,0.05)'),
-                borderRadius: 1,
-                cursor: 'pointer',
-                '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' }
-            }}
-        >
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%', px: 0.5 }}>
-                <Typography variant="caption" sx={{ color: isToday ? PALETTE.primary.main : 'text.secondary', fontWeight: 'bold' }}>
-                    {date.getDate()}
-                </Typography>
-                {activeSuspension && (
-                    <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: PALETTE.accents.gold }} />
-                )}
-                {hasActive && !activeSuspension && (
-                    <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: PALETTE.accents.green }} />
-                )}
-            </Box>
-
-            {(hasNylon || hasLingerie || hasPlanned) && (
-                <Stack spacing={0.5} mt={1} sx={{ width: '100%', alignItems: 'center' }}>
-                    {hasNylon && <Box sx={{ width: '80%', height: 4, borderRadius: 2, bgcolor: PALETTE.accents.purple }} />}
-                    {hasLingerie && <Box sx={{ width: '80%', height: 4, borderRadius: 2, bgcolor: PALETTE.accents.blue }} />}
-                    {hasPlanned && !hasNylon && !hasLingerie && (
-                        <Box sx={{ width: '80%', height: 4, borderRadius: 2, bgcolor: 'rgba(255,255,255,0.2)' }} />
-                    )}
-                </Stack>
-            )}
-        </Paper>
-    );
 };
 
 export default function Calendar() {
@@ -617,11 +71,7 @@ export default function Calendar() {
 
   const handlePlanSession = async (sessionData) => {
       try {
-          await addDoc(collection(db, `users/${currentUser.uid}/sessions`), {
-              ...sessionData,
-              startTime: Timestamp.fromDate(sessionData.startTime),
-              createdAt: serverTimestamp() 
-          });
+          await addPlannedSession(currentUser.uid, sessionData);
           refreshSessions();
       } catch (e) {
           console.error("Fehler beim Planen:", e);
@@ -631,9 +81,8 @@ export default function Calendar() {
   const handleDeleteSession = async (sessionId) => {
       if (window.confirm('Möchtest du diese geplante Session wirklich löschen?')) {
           try {
-              await deleteDoc(doc(db, `users/${currentUser.uid}/sessions`, sessionId));
+              await deletePlannedSession(currentUser.uid, sessionId);
               refreshSessions();
-              // DetailDialog schließt sich nicht automatisch, der Eintrag verschwindet live durch refresh.
           } catch (e) {
               console.error("Fehler beim Löschen der Session:", e);
           }
@@ -803,13 +252,4 @@ export default function Calendar() {
         </Container>
     </Box>
   );
-}
-
-// Hilfsfunktion für Kalenderwoche
-function getKw(date) {
-    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-    const dayNum = d.getUTCDay() || 7;
-    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-    const yearStart = new Date(Date.UTC(d.getUTCFullYear(),0,1));
-    return Math.ceil((((d - yearStart) / 86400000) + 1)/7);
 }
