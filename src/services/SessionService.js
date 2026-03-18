@@ -1,6 +1,6 @@
 // src/services/SessionService.js
 import { db } from '../firebase';
-import { collection, doc, writeBatch, serverTimestamp, getDoc, addDoc, updateDoc, increment } from 'firebase/firestore';
+import { collection, doc, writeBatch, serverTimestamp, getDoc, addDoc, setDoc, increment } from 'firebase/firestore';
 import { updateWearStats, addItemHistoryEntry, setItemStatus } from './ItemService';
 import { addCredits, getTimeBankBalance, calculateEarnedCredits } from './TimeBankService';
 import { registerPunishment } from './PunishmentService';
@@ -62,24 +62,24 @@ export const startSession = async (userId, sessionData) => {
 
         for (const itemId of itemIds) {
             const itemRef = doc(db, `users/${userId}/items`, itemId);
-            batch.update(itemRef, { status: 'worn' });
+            // BUGFIX C: Absicherung durch set + merge anstelle von reinem update
+            batch.set(itemRef, { status: 'worn' }, { merge: true });
         }
 
         // Aktualisiere Status Tracker
         if (sessionData.type === 'instruction') {
              const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
-             batch.update(instrRef, {
+             batch.set(instrRef, {
                  isActive: true,
                  activeSessionId: newSessionRef.id
-             });
+             }, { merge: true });
         }
 
         if (sessionData.type === 'punishment') {
-             // KORREKTUR: Falscher Pfad 'activePunishment' in 'punishment' geändert
              const punRef = doc(db, `users/${userId}/status/punishment`);
-             batch.update(punRef, {
+             batch.set(punRef, {
                  activeSessionId: newSessionRef.id
-             });
+             }, { merge: true });
         }
 
         await batch.commit();
@@ -112,19 +112,24 @@ export const startTransitProtocol = async (userId, itemId) => {
 
     // 2. Item auf getragen setzen
     const itemRef = doc(db, `users/${userId}/items`, itemId);
-    batch.update(itemRef, { status: 'worn' });
+    batch.set(itemRef, { status: 'worn' }, { merge: true });
 
     // 3. Instruction Status updaten (Transit ist aktiv, Forced Release scharfgestellt)
+    // BUGFIX C: Punkt-Notation durch saubere verschachtelte Objekte für merge:true ersetzt
     const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
-    batch.update(instrRef, {
-        "transitProtocol.active": true,
-        "transitProtocol.sessionId": newSessionRef.id,
-        "transitProtocol.startTime": serverTimestamp(),
-        "forcedRelease.required": true,
-        "forcedRelease.executed": false,
+    batch.set(instrRef, {
+        transitProtocol: {
+            active: true,
+            sessionId: newSessionRef.id,
+            startTime: serverTimestamp()
+        },
+        forcedRelease: {
+            required: true,
+            executed: false
+        },
         isActive: true,
         activeSessionId: newSessionRef.id
-    });
+    }, { merge: true });
 
     await batch.commit();
     return newSessionRef.id;
@@ -181,55 +186,51 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
     if (nightSuccess !== null) {
         updateData.nightSuccess = nightSuccess;
     }
-    batch.update(sessionRef, updateData);
+    batch.set(sessionRef, updateData, { merge: true });
 
     // --- POST-NUT CLARITY EVALUATION (Retention Tracking) ---
+    // BUGFIX A: Evaluierung findet statt, aber Ausführung (Strafe) wird auf NACH dem commit verschoben
+    let pendingPunishment = null;
     if (sessionData.forcedReleaseAt) {
         const releaseTime = sessionData.forcedReleaseAt?.toDate ? sessionData.forcedReleaseAt.toDate() : new Date(sessionData.forcedReleaseAt);
         const retentionMinutes = Math.floor((endTime - releaseTime) / 60000);
         const MIN_RETENTION_MINUTES = 60; // 60 Minuten Halte-Schwelle
 
         if (retentionMinutes < MIN_RETENTION_MINUTES) {
-            // Versagt: Dem Drang nachgegeben und zu früh abgelegt
-            await registerPunishment(
-                userId, 
-                `Schwäche nach Entladung: Items nach ${retentionMinutes}m abgelegt (gefordert: ${MIN_RETENTION_MINUTES}m)`, 
-                120
-            );
+            pendingPunishment = {
+                msg: `Schwäche nach Entladung: Items nach ${retentionMinutes}m abgelegt (gefordert: ${MIN_RETENTION_MINUTES}m)`,
+                dur: 120
+            };
         }
     }
-    // --------------------------------------------------------
 
     const itemIds = sessionData.itemIds || (sessionData.itemId ? [sessionData.itemId] : []);
     const itemDetails = [];
 
+    // BUGFIX B: Strikte Trennung. ERST alle Lese-Operationen (Reads) durchführen...
     for (const id of itemIds) {
         const itemRef = doc(db, `users/${userId}/items`, id);
-        
-        // NEU: Hygiene-Regel (Zwangswäsche bei erfolgreichem Transit)
-        const isTransitItem = sessionData.transitProtocolActive && id === sessionData.transitItemId;
-        
-        batch.update(itemRef, { 
-            status: isTransitItem ? 'washing' : 'active', 
-            lastWorn: serverTimestamp(),
-            wearCount: increment(1),
-            totalMinutes: increment(durationMinutes)
-        });
-
         try {
             const iSnap = await getDoc(itemRef);
             if (iSnap.exists()) itemDetails.push(iSnap.data());
         } catch (e) { console.error(e); }
     }
 
+    // ... DANN alle Schreib-Operationen (Writes) in den Batch legen
+    for (const id of itemIds) {
+        const itemRef = doc(db, `users/${userId}/items`, id);
+        const isTransitItem = sessionData.transitProtocolActive && id === sessionData.transitItemId;
+        
+        batch.set(itemRef, { 
+            status: isTransitItem ? 'washing' : 'active', 
+            lastWorn: serverTimestamp(),
+            wearCount: increment(1),
+            totalMinutes: increment(durationMinutes)
+        }, { merge: true });
+    }
+
     let creditCalculated = false;
-    
-    const sessionForCredit = {
-        ...sessionData,
-        startTime,
-        endTime
-    };
-    
+    const sessionForCredit = { ...sessionData, startTime, endTime };
     const earnedResult = await calculateEarnedCredits(userId, sessionForCredit);
 
     const isEligible = (typeof earnedResult === 'object' && earnedResult !== null && earnedResult.exactCredits > 0) || 
@@ -238,8 +239,6 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
     if (isEligible) {
         try {
             const resultValue = (typeof earnedResult === 'object') ? earnedResult.exactCredits : earnedResult;
-            
-            // Credits nach Hauptkategorie aufteilen (Heuristisch auf Basis des ersten Items, falls gemischt)
             let cat = 'nylon';
             if (itemDetails.length > 0) {
                 const mainCat = (itemDetails[0].category || '').toLowerCase();
@@ -247,15 +246,12 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
                     cat = 'lingerie';
                 }
             }
-            
             if (cat === 'nylon') {
                 await addCredits(userId, resultValue, 'nylon');
             } else {
                 await addCredits(userId, resultValue, 'lingerie');
             }
-            
             creditCalculated = true;
-            
         } catch (e) {
             console.error("Credit Buchung fehlgeschlagen:", e);
         }
@@ -264,45 +260,49 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
     // Cleanup System-Status
     if (sessionData.type === 'instruction') {
         const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
-        batch.update(instrRef, { isActive: false, activeSessionId: null });
+        batch.set(instrRef, { isActive: false, activeSessionId: null }, { merge: true });
         
-        // Falls das Transit-Protocol aktiv war, muss es sauber abgeschlossen werden
         if (sessionData.transitProtocolActive) {
-            batch.update(instrRef, {
-                 "transitProtocol.active": false,
-                 "transitProtocol.sessionId": null,
-                 "transitProtocol.startTime": null
-            });
+            batch.set(instrRef, {
+                 transitProtocol: { active: false, sessionId: null, startTime: null }
+            }, { merge: true });
         }
     } else if (sessionData.type === 'punishment') {
-        // KORREKTUR: Falscher Pfad 'activePunishment' in 'punishment' geändert
         const punRef = doc(db, `users/${userId}/status/punishment`);
-        batch.update(punRef, { activeSessionId: null });
+        batch.set(punRef, { activeSessionId: null }, { merge: true });
     }
 
+    // 1. Sicheres Schließen der Session
     await batch.commit();
+
+    // 2. KORREKTUR A: Ausführung der Strafe erfolgt isoliert NACH dem sicheren Abschluss
+    if (pendingPunishment) {
+        try {
+            await registerPunishment(userId, pendingPunishment.msg, pendingPunishment.dur);
+        } catch (e) {
+            console.error("Session wurde geschlossen, aber Punishment schlug fehl.", e);
+        }
+    }
 
     return { creditCalculated };
 };
 
-// Hilfsfunktion: TZD Hook kann dies nutzen, um isPornActive zu loggen
 export const updateSessionPornStatus = async (userId, sessionId, isPornActive) => {
     if (!userId || !sessionId) return;
     try {
         const sessionRef = doc(db, `users/${userId}/sessions`, sessionId);
-        await updateDoc(sessionRef, { isPornActive });
+        await setDoc(sessionRef, { isPornActive }, { merge: true });
     } catch (e) {
         console.error("Fehler beim Update des Porn-Status", e);
     }
 };
 
-// Aktualisiert nur den Forced Release Status (wird evtl. für manuelle Overrides gebraucht)
 export const registerInstructionRelease = async (userId) => {
     try {
         const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
-        await updateDoc(instrRef, {
-            "forcedRelease.executed": true
-        });
+        await setDoc(instrRef, {
+            forcedRelease: { executed: true }
+        }, { merge: true });
     } catch (e) {
         console.error("Fehler beim Registrieren des Instruction Release", e);
     }

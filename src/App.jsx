@@ -91,10 +91,13 @@ const lazyRetry = (importFn) => {
         
         if (retries < 2) {
           sessionStorage.setItem('pwa-chunk-retry', String(retries + 1));
+          
           // Seite neu laden, um die neue Version (neue Chunks) vom Server zu holen
           window.location.reload();
-          // Promise nicht auflösen, um React-Rendering während des Reloads zu blockieren
-          return new Promise(() => {});
+          
+          // BUGFIX E: Kein blockierendes, leeres Promise mehr! Wir werfen direkt einen Fehler,
+          // damit die ErrorBoundary das UI übernimmt (Fallback), während der Browser den Reload ausführt.
+          throw new Error("Systemdateien werden aktualisiert...");
         }
       }
       // Andere Fehler weiterwerfen, damit ErrorBoundary sie fängt (und Endlosschleife verhindert wird)

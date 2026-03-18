@@ -6,14 +6,17 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'prompt', // GEÄNDERT: Von 'autoUpdate' auf 'prompt', für das erzwungene Update-Routing
-      // PWA-FIX: Caching-Strategie
+      registerType: 'prompt', // Beibehalten für das manuelle Update-Routing durch die UI
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         maximumFileSizeToCacheInBytes: 3000000,
-        cleanupOutdatedCaches: false, // KORREKTUR: Verhindert das sofortige Löschen alter Chunks während der Nutzung
-        clientsClaim: false,          // KORREKTUR: Verhindert sofortige Übernahme, die aktive Sitzungen stört
-        skipWaiting: false,           // KORREKTUR: Wartet auf Tab-Schließung vor dem Update
+        
+        // BUGFIX D: Harte Aktivierung erzwingen. 
+        // Da der UpdateBlocker das UI sperrt, ist ein Warten auf "Tab-Schließen" unnötig.
+        cleanupOutdatedCaches: true, 
+        clientsClaim: true,          
+        skipWaiting: false, // Bleibt false, damit der "prompt" erst durch den Klick triggert
+        
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/firebasestorage\.googleapis\.com\/.*/i,
@@ -67,11 +70,8 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          // Isoliert recharts in einen eigenen Chunk, um die zirkuläre Abhängigkeit zu beheben
           recharts: ['recharts'],
-          // Isoliert Firebase, um den Main-Chunk drastisch zu verkleinern
           firebase: ['firebase/app', 'firebase/firestore', 'firebase/auth'],
-          // Isoliert React und Material UI
           vendor: ['react', 'react-dom', 'react-router-dom', '@mui/material', '@mui/icons-material']
         }
       }
