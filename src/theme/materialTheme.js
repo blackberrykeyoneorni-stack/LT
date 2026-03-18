@@ -15,10 +15,10 @@ export const materialTheme = createTheme({
     error: { main: m3Tokens.error, contrastText: m3Tokens.onError },
     background: {
       default: m3Tokens.background,
-      paper: 'transparent', // Durch Sheer-Black und Backdrop-Filter in Komponenten überschrieben
+      paper: 'transparent',
     },
     text: {
-      primary: '#FFFFFF', // Harter Kontrast für Sheer Black
+      primary: '#FFFFFF',
       secondary: 'rgba(255, 255, 255, 0.7)', 
     },
     m3: m3Tokens
@@ -38,22 +38,23 @@ export const materialTheme = createTheme({
     borderRadius: 16, 
   },
   components: {
-    // --- GLOBAL: NYLON MESH & NOISE ---
     MuiCssBaseline: {
       styleOverrides: {
         body: {
           backgroundColor: '#050505',
-          // Komplett schwarzes, leicht schimmerndes 15-Denier Nylon
           backgroundImage: `
-            radial-gradient(circle at 50% 30%, rgba(30, 20, 25, 0.8) 0%, rgba(5, 5, 5, 1) 80%),
+            linear-gradient(rgba(5, 5, 5, 0.88), rgba(5, 5, 5, 0.96)),
+            url('/bg-leg.jpg'),
             url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.06'/%3E%3C/svg%3E")
           `,
           backgroundAttachment: 'fixed',
+          backgroundSize: 'cover, cover, 3px 3px',
+          backgroundPosition: 'center, right center, top left',
+          backgroundRepeat: 'no-repeat, no-repeat, repeat',
           color: '#FFFFFF',
         }
       }
     },
-    // --- BUTTONS: SCHWERER SATIN ---
     MuiButton: {
       styleOverrides: {
         root: {
@@ -76,7 +77,7 @@ export const materialTheme = createTheme({
         },
         outlined: {
           borderColor: 'rgba(255, 0, 127, 0.4)',
-          borderStyle: 'dashed', // Spitzen-Haptik
+          borderStyle: 'dashed', 
           color: m3Tokens.primary,
           '&:hover': {
               backgroundColor: 'rgba(255, 0, 127, 0.05)',
@@ -88,7 +89,6 @@ export const materialTheme = createTheme({
         }
       },
     },
-    // --- CARDS: SHEER BLACK GLASSMORPHISM ---
     MuiCard: {
       styleOverrides: {
         root: {
@@ -98,11 +98,10 @@ export const materialTheme = createTheme({
           backgroundImage: 'none',
           boxShadow: '0 8px 32px rgba(0, 0, 0, 0.6)',
           border: `1px solid rgba(255, 0, 127, 0.1)`, 
-          borderTop: `1px dashed rgba(255, 0, 127, 0.25)`, // Lace Edge Top
+          borderTop: `1px dashed rgba(255, 0, 127, 0.25)`,
         },
       },
     },
-    // --- DIALOGS: LACE & SILICONE GRIP ---
     MuiDialogPaper: {
         styleOverrides: {
             root: {
@@ -116,7 +115,6 @@ export const materialTheme = createTheme({
             }
         }
     },
-    // --- BOTTOM SHEET / DRAWER ---
     MuiDrawer: {
         styleOverrides: {
             paper: {
@@ -129,7 +127,6 @@ export const materialTheme = createTheme({
             }
         }
     },
-    // --- INPUTS ---
     MuiOutlinedInput: {
         styleOverrides: {
             root: {
@@ -141,7 +138,6 @@ export const materialTheme = createTheme({
             input: { padding: '16px' }
         }
     },
-    // --- LISTS ---
     MuiListItem: {
         styleOverrides: {
             root: {
@@ -150,7 +146,6 @@ export const materialTheme = createTheme({
             }
         }
     },
-    // --- CHIPS ---
     MuiChip: {
         styleOverrides: {
             root: {
@@ -169,5 +164,4 @@ export const materialTheme = createTheme({
   },
 });
 
-// SICHERHEITS-FALLBACK: Stellt sicher, dass das Theme unabhängig vom Import-Namen geladen wird.
 export const theme = materialTheme;

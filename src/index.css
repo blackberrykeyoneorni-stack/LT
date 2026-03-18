@@ -17,11 +17,15 @@ body {
   -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden;
   
-  /* NEU: Das 15-Denier Nylon-Overlay */
+  /* Das 15-Denier Nylon-Overlay mit integriertem Motiv (Sheer-Black Spiegelung) */
   background-image: 
-    radial-gradient(circle at 50% 30%, rgba(30, 20, 25, 0.8) 0%, rgba(5, 5, 5, 1) 80%),
-    url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.06'/%3E%3C/svg%3E");
-  background-attachment: fixed; /* Der Lycra-Glanz bleibt beim Scrollen starr auf der "Haut" */
+    linear-gradient(rgba(5, 5, 5, 0.88), rgba(5, 5, 5, 0.96)), /* Abdunklungsschicht (88% bis 96% Schwarz) */
+    url('/bg-leg.jpg'), /* Das zugrunde liegende Motiv */
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.06'/%3E%3C/svg%3E"); /* Nylon-Noise */
+  background-attachment: fixed;
+  background-size: cover, cover, 3px 3px;
+  background-position: center, right center, top left;
+  background-repeat: no-repeat, no-repeat, repeat;
 }
 
 /* TYPOGRAPHY OVERRIDES */
@@ -36,7 +40,7 @@ h1, h2, h3, h4, h5, h6 {
   background: rgba(0, 0, 0, 0.4) !important;
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 0, 127, 0.15) !important; /* Subtile Spitzen-Kante */
+  border: 1px solid rgba(255, 0, 127, 0.15) !important;
   box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.6);
 }
 
@@ -71,7 +75,7 @@ body.punishment-active .MuiPaper-root {
   transition: transform 0.3s ease;
 }
 
-/* NEU: Spannungsaufbau-Animation (Tension Animation) für Ladezustände */
+/* Spannungsaufbau-Animation (Tension Animation) für Ladezustände */
 @keyframes elastane-tension {
   0% { transform: scaleX(0.1); opacity: 0.3; filter: brightness(1); }
   70% { transform: scaleX(1); opacity: 1; filter: brightness(1.8); }

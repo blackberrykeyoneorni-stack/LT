@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  collection, query, getDocs, addDoc, Timestamp, serverTimestamp 
+  collection, query, getDocs, addDoc, Timestamp, serverTimestamp, deleteDoc, doc 
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
@@ -27,6 +27,7 @@ import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import EventIcon from '@mui/icons-material/Event';
 import BlockIcon from '@mui/icons-material/Block'; 
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 
 // --- HILFSFUNKTIONEN ---
 
@@ -271,7 +272,7 @@ const PlanSessionDialog = ({ open, onClose, date, items, onSave }) => {
     );
 };
 
-const DayDetailDialog = ({ open, onClose, date, sessions, suspensions, onOpenPlan }) => {
+const DayDetailDialog = ({ open, onClose, date, sessions, suspensions, onOpenPlan, onDeleteSession }) => {
     if (!date) return null;
 
     const rawDaySessions = sessions.filter(s => isSameDay(s.date, date));
@@ -366,20 +367,27 @@ const DayDetailDialog = ({ open, onClose, date, sessions, suspensions, onOpenPla
                                     
                                     <ListItemText
                                         primary={
-                                            <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                                                <Typography variant="body1" fontWeight="bold" color="text.primary">
-                                                    {formatDuration(session.duration)}
-                                                </Typography>
-                                                <Stack direction="row" spacing={1}>
-                                                    {session.isActive && <Chip label="Aktiv" size="small" color="success" variant="outlined" />}
-                                                    {session.type === 'planned' && <Chip label="Geplant" size="small" variant="outlined" color="info" />}
-                                                </Stack>
+                                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                                    <Typography variant="body1" fontWeight="bold" color={session.type === 'planned' ? 'text.secondary' : 'text.primary'}>
+                                                        {formatDuration(session.duration)}
+                                                    </Typography>
+                                                    <Stack direction="row" spacing={1}>
+                                                        {session.isActive && <Chip label="Aktiv" size="small" color="success" variant="outlined" />}
+                                                        {session.type === 'planned' && <Chip label="Geplant" size="small" variant="outlined" color="info" />}
+                                                    </Stack>
+                                                </Box>
+                                                {session.type === 'planned' && (
+                                                    <IconButton size="small" color="error" onClick={() => onDeleteSession(session.originalId)} sx={{ ml: 1, mt: -0.5 }}>
+                                                        <DeleteOutlineIcon fontSize="small" />
+                                                    </IconButton>
+                                                )}
                                             </Box>
                                         }
                                         secondary={
                                             <Stack spacing={1} sx={{ mt: 1 }}>
                                                 {session.items.map(item => (
-                                                    <Box key={item.id} sx={{ bgcolor: 'rgba(255,255,255,0.05)', p: 1, borderRadius: 1 }}>
+                                                    <Box key={item.id} sx={{ bgcolor: 'rgba(255,255,255,0.05)', p: 1, borderRadius: 1, opacity: session.type === 'planned' ? 0.6 : 1 }}>
                                                         <Typography variant="body2" color="text.primary">{item.name || item.brand}</Typography>
                                                         <Box sx={{ display: 'flex', gap: 2, mt: 0.5 }}>
                                                             <Typography variant="caption" color="text.secondary">
@@ -410,25 +418,29 @@ const DayDetailDialog = ({ open, onClose, date, sessions, suspensions, onOpenPla
     );
 };
 
-// 3. Wochen-Zeile (Wiederhergestellt: Strikt Nylon/Dessous)
+// 3. Wochen-Zeile (Angepasst: Filterung von Planungen in den Metriken)
 const WeekDayRow = ({ date, sessions, suspensions, isToday, onClick }) => {
     const daySessions = sessions.filter(s => isSameDay(s.date, date));
     
-    // Sortieren nach Typ
-    const nylonSessions = daySessions.filter(s => s.hasNylon);
-    const lingerieSessions = daySessions.filter(s => s.hasLingerie);
+    // STRIKTER FILTER: Wir trennen physische Vollzüge von bloßen Planungen
+    const actualSessions = daySessions.filter(s => s.type !== 'planned');
+    const plannedSessions = daySessions.filter(s => s.type === 'planned');
 
+    const nylonSessions = actualSessions.filter(s => s.hasNylon);
+    const lingerieSessions = actualSessions.filter(s => s.hasLingerie);
+
+    // Diese Minuten fließen in die KPI - und zwar NUR noch echte, stattgefundene
     const nylonMinutes = calculateEffectiveMinutes(nylonSessions);
     const lingerieMinutes = calculateEffectiveMinutes(lingerieSessions);
     
-    const hasActiveSession = daySessions.some(s => s.isActive);
+    const hasActiveSession = actualSessions.some(s => s.isActive);
     const activeSuspension = getSuspensionForDate(date, suspensions);
 
     const dayName = date.toLocaleDateString('de-DE', { weekday: 'short' }).toUpperCase();
     const dayNumber = date.getDate();
     const isFuture = date > new Date();
 
-    const isEmpty = nylonMinutes === 0 && lingerieMinutes === 0 && !hasActiveSession;
+    const isEmpty = nylonMinutes === 0 && lingerieMinutes === 0 && !hasActiveSession && plannedSessions.length === 0;
 
     return (
         <Paper 
@@ -439,7 +451,7 @@ const WeekDayRow = ({ date, sessions, suspensions, isToday, onClick }) => {
                 ...DESIGN_TOKENS.glassCard,
                 borderLeft: isToday ? `4px solid ${PALETTE.primary.main}` : (activeSuspension ? `4px solid ${PALETTE.accents.gold}` : '1px solid rgba(255,255,255,0.1)'),
                 bgcolor: activeSuspension ? 'rgba(255, 215, 0, 0.03)' : undefined,
-                opacity: isFuture && !activeSuspension ? 0.6 : 1,
+                opacity: isFuture && !activeSuspension && plannedSessions.length === 0 ? 0.6 : 1,
                 cursor: 'pointer',
                 transition: 'all 0.2s',
                 '&:hover': { bgcolor: 'rgba(255,255,255,0.08)' }
@@ -469,7 +481,7 @@ const WeekDayRow = ({ date, sessions, suspensions, isToday, onClick }) => {
                         {isEmpty ? (
                             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                 <Typography variant="body2" color="text.disabled" sx={{ fontStyle: 'italic' }}>
-                                    {isFuture ? "Planen..." : "Keine Aktivität"}
+                                    {isFuture ? "Keine Planung" : "Keine Aktivität"}
                                 </Typography>
                                 {isFuture && <AddCircleOutlineIcon sx={{ color: 'text.disabled', fontSize: 20 }} />}
                             </Box>
@@ -478,6 +490,8 @@ const WeekDayRow = ({ date, sessions, suspensions, isToday, onClick }) => {
                                 {hasActiveSession && (
                                     <Chip label="Session läuft" size="small" color="success" variant="outlined" sx={{ alignSelf: 'flex-start' }} />
                                 )}
+                                
+                                {/* Anzeige für ECHTE GETRAGENE Zeiten */}
                                 {nylonMinutes > 0 && (
                                     <Box sx={{ 
                                         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -510,6 +524,16 @@ const WeekDayRow = ({ date, sessions, suspensions, isToday, onClick }) => {
                                         </Box>
                                     </Box>
                                 )}
+
+                                {/* VISUELLE ABGRENZUNG: Anzeige für geplante (noch nicht erfüllte) Sessions */}
+                                {plannedSessions.length > 0 && (
+                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: (nylonMinutes > 0 || lingerieMinutes > 0) ? 0.5 : 0 }}>
+                                        <EventIcon sx={{ fontSize: 14, color: PALETTE.text.secondary }} />
+                                        <Typography variant="body2" sx={{ color: PALETTE.text.secondary, fontStyle: 'italic' }}>
+                                            {plannedSessions.length} Session(s) geplant
+                                        </Typography>
+                                    </Box>
+                                )}
                             </Stack>
                         )}
                     </>
@@ -519,12 +543,17 @@ const WeekDayRow = ({ date, sessions, suspensions, isToday, onClick }) => {
     );
 };
 
-// 4. Monats-Zelle (Wiederhergestellt: Keine "Other" Dots)
+// 4. Monats-Zelle (Angepasst: Visuelle Abgrenzung von Planungen)
 const MonthDayCell = ({ date, sessions, suspensions, isToday, onClick }) => {
     const daySessions = sessions.filter(s => isSameDay(s.date, date));
-    const hasNylon = daySessions.some(s => s.hasNylon);
-    const hasLingerie = daySessions.some(s => s.hasLingerie);
-    const hasActive = daySessions.some(s => s.isActive);
+    
+    const actualSessions = daySessions.filter(s => s.type !== 'planned');
+    const plannedSessions = daySessions.filter(s => s.type === 'planned');
+
+    const hasNylon = actualSessions.some(s => s.hasNylon);
+    const hasLingerie = actualSessions.some(s => s.hasLingerie);
+    const hasActive = actualSessions.some(s => s.isActive);
+    const hasPlanned = plannedSessions.length > 0;
     
     const activeSuspension = getSuspensionForDate(date, suspensions);
 
@@ -554,10 +583,13 @@ const MonthDayCell = ({ date, sessions, suspensions, isToday, onClick }) => {
                 )}
             </Box>
 
-            {(hasNylon || hasLingerie) && (
+            {(hasNylon || hasLingerie || hasPlanned) && (
                 <Stack spacing={0.5} mt={1} sx={{ width: '100%', alignItems: 'center' }}>
                     {hasNylon && <Box sx={{ width: '80%', height: 4, borderRadius: 2, bgcolor: PALETTE.accents.purple }} />}
                     {hasLingerie && <Box sx={{ width: '80%', height: 4, borderRadius: 2, bgcolor: PALETTE.accents.blue }} />}
+                    {hasPlanned && !hasNylon && !hasLingerie && (
+                        <Box sx={{ width: '80%', height: 4, borderRadius: 2, bgcolor: 'rgba(255,255,255,0.2)' }} />
+                    )}
                 </Stack>
             )}
         </Paper>
@@ -593,6 +625,18 @@ export default function Calendar() {
           refreshSessions();
       } catch (e) {
           console.error("Fehler beim Planen:", e);
+      }
+  };
+
+  const handleDeleteSession = async (sessionId) => {
+      if (window.confirm('Möchtest du diese geplante Session wirklich löschen?')) {
+          try {
+              await deleteDoc(doc(db, `users/${currentUser.uid}/sessions`, sessionId));
+              refreshSessions();
+              // DetailDialog schließt sich nicht automatisch, der Eintrag verschwindet live durch refresh.
+          } catch (e) {
+              console.error("Fehler beim Löschen der Session:", e);
+          }
       }
   };
 
@@ -647,7 +691,7 @@ export default function Calendar() {
     <Box sx={DESIGN_TOKENS.bottomNavSpacer}>
         <Container maxWidth="md" sx={{ pt: 2, pb: 4, minHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
             
-            {/* HEADER (ANGEPASST AN DASHBOARD STYLE) */}
+            {/* HEADER */}
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, px: 2 }}>
                 <Typography variant="h4" sx={DESIGN_TOKENS.textGradient}>
                     Kalender
@@ -745,6 +789,7 @@ export default function Calendar() {
                 sessions={sessions}
                 suspensions={suspensions} 
                 onOpenPlan={() => { setDetailOpen(false); setPlanOpen(true); }}
+                onDeleteSession={handleDeleteSession}
             />
 
             <PlanSessionDialog 
