@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
     Dialog, DialogTitle, DialogContent, DialogActions, 
     Button, Stack, FormControl, InputLabel, Select, MenuItem, TextField, Typography 
@@ -9,6 +9,15 @@ export default function PlanSessionDialog({ open, onClose, date, items, onSave }
     const [selectedItemId, setSelectedItemId] = useState('');
     const [time, setTime] = useState('20:00');
     const [duration, setDuration] = useState(60);
+
+    // BUGFIX: Hard-Reset des Formulars, sobald der Dialog geöffnet wird
+    useEffect(() => {
+        if (open) {
+            setSelectedItemId('');
+            setTime('20:00');
+            setDuration(60);
+        }
+    }, [open]);
 
     const handleSave = () => {
         if (!selectedItemId) return;

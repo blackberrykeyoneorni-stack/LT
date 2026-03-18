@@ -1,8 +1,7 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useItems } from '../contexts/ItemContext';
-import { getAllSuspensions } from '../services/SuspensionService'; 
-import { fetchCalendarSessions, addPlannedSession, deletePlannedSession } from '../services/CalendarService';
+import { useCalendarData } from '../hooks/useCalendarData';
 
 // UI & THEME
 import { Box, Container, Typography, IconButton, Paper, ToggleButton, ToggleButtonGroup } from '@mui/material';
@@ -21,34 +20,7 @@ import DayDetailDialog from '../components/calendar/DayDetailDialog';
 import WeekDayRow from '../components/calendar/WeekDayRow';
 import MonthDayCell from '../components/calendar/MonthDayCell';
 import { getStartOfWeek, addDays, isSameDay, getKw } from '../utils/calendarUtils';
-
-// --- DATA HOOK ---
-const useCalendarData = (currentUser, items) => {
-    const [sessions, setSessions] = useState([]);
-    const [suspensions, setSuspensions] = useState([]); 
-    const [loading, setLoading] = useState(true);
-
-    const fetchData = async () => {
-        setLoading(true);
-        try {
-            const loadedSessions = await fetchCalendarSessions(currentUser.uid, items);
-            setSessions(loadedSessions);
-
-            const loadedSuspensions = await getAllSuspensions(currentUser.uid);
-            setSuspensions(loadedSuspensions);
-        } catch (e) {
-            console.error("Calendar Fetch Error", e);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    useEffect(() => {
-        if (currentUser && items.length > 0) fetchData();
-    }, [currentUser, items]);
-
-    return { sessions, suspensions, loading, refreshSessions: fetchData };
-};
+import { addPlannedSession, deletePlannedSession } from '../services/CalendarService';
 
 export default function Calendar() {
   const { currentUser } = useAuth();
@@ -62,6 +34,7 @@ export default function Calendar() {
   const [planOpen, setPlanOpen] = useState(false);
   const [selectedDay, setSelectedDay] = useState(null);
 
+  // BUGFIX: Der Hook liegt jetzt sauber abstrahiert in src/hooks/
   const { sessions, suspensions, refreshSessions } = useCalendarData(currentUser, items);
 
   const handleDayClick = (date) => {

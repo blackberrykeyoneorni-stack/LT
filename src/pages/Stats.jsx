@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, getDocs, orderBy } from 'firebase/firestore';
-import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import useKPIs from '../hooks/useKPIs'; 
+import { fetchStatsData } from '../services/StatsService';
 import { Box, Typography, CircularProgress, Container, Dialog, DialogTitle, DialogContent, IconButton } from '@mui/material';
 import { motion } from 'framer-motion';
 
@@ -13,7 +12,7 @@ import CoreMetricsGrid from '../components/stats/CoreMetricsGrid';
 import DeepAnalyticsPanel from '../components/stats/DeepAnalyticsPanel';
 import ForensicsView from '../components/stats/ForensicsView';
 import TrendDialog from '../components/stats/TrendDialog';
-import { safeDate, calculateTrend, calculateForensics } from '../utils/statsCalculator';
+import { calculateTrend, calculateForensics } from '../utils/statsCalculator';
 
 export default function Statistics() {
     const { currentUser } = useAuth();
@@ -31,23 +30,15 @@ export default function Statistics() {
         const loadData = async () => {
             setLoading(true);
             try {
-                const iSnap = await getDocs(collection(db, `users/${currentUser.uid}/items`));
-                const loadedItems = iSnap.docs.map(d => ({ 
-                    id: d.id, ...d.data(), 
-                    purchaseDate: safeDate(d.data().purchaseDate) || new Date()
-                }));
-                setItems(loadedItems);
-
-                const sSnap = await getDocs(query(collection(db, `users/${currentUser.uid}/sessions`), orderBy('startTime', 'asc')));
-                const loadedSessions = sSnap.docs.map(d => ({ 
-                    id: d.id, ...d.data(), 
-                    startTime: safeDate(d.data().startTime) || new Date(),
-                    endTime: safeDate(d.data().endTime)
-                }));
-                setSessions(loadedSessions);
-
-            } catch (e) { console.error("Stats Load Error:", e); } 
-            finally { setLoading(false); }
+                // BUGFIX: Firebase ist hier weg, sauberer Aufruf des Data-Layers
+                const data = await fetchStatsData(currentUser.uid);
+                setItems(data.items);
+                setSessions(data.sessions);
+            } catch (e) { 
+                console.error("Stats Load Error:", e); 
+            } finally { 
+                setLoading(false); 
+            }
         };
         loadData();
     }, [currentUser]);
