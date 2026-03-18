@@ -121,28 +121,41 @@ export default function Dashboard() {
     if (!currentUser) return;
     const initLoad = async () => {
         try {
-            await runTimeBankAuditor(currentUser.uid);
+            // PERFORMANCE FIX: Alle unabhängigen Firebase-Reads parallel ausführen, um den Waterfall-Effekt zu zerstören.
+            const [
+                _, // runTimeBankAuditor erzeugt keinen direkten Return-Wert für den State
+                pSnap,
+                statusData,
+                auditResult,
+                budgetResult,
+                bSnap,
+                suspResult,
+                immuneResult
+            ] = await Promise.all([
+                runTimeBankAuditor(currentUser.uid),
+                getDoc(doc(db, `users/${currentUser.uid}/settings/preferences`)),
+                getActivePunishment(currentUser.uid),
+                isAuditDue(currentUser.uid),
+                loadMonthlyBudget(currentUser.uid),
+                getDoc(doc(db, `users/${currentUser.uid}/settings/budget`)),
+                checkActiveSuspension(currentUser.uid),
+                isImmunityActive(currentUser.uid)
+            ]);
 
-            const pSnap = await getDoc(doc(db, `users/${currentUser.uid}/settings/preferences`));
+            // States mit den Ergebnissen der parallelen Abfragen füllen
             if(pSnap.exists()) setMaxInstructionItems(pSnap.data().maxInstructionItems || 1);
-
-            const statusData = await getActivePunishment(currentUser.uid);
             setPunishmentStatus(statusData || { active: false });
-            
-            setAuditDue(await isAuditDue(currentUser.uid));
-            setMonthlyBudget(await loadMonthlyBudget(currentUser.uid));
-            
-            const bRef = doc(db, `users/${currentUser.uid}/settings/budget`);
-            const bSnap = await getDoc(bRef);
+            setAuditDue(auditResult);
+            setMonthlyBudget(budgetResult);
             if(bSnap.exists()) setCurrentSpent(bSnap.data().currentSpent || 0);
+            setActiveSuspension(suspResult);
+            setImmunityActive(immuneResult);
 
-            const susp = await checkActiveSuspension(currentUser.uid);
-            setActiveSuspension(susp);
-
-            const immune = await isImmunityActive(currentUser.uid);
-            setImmunityActive(immune);
-
-        } catch(e) { console.error(e); } finally { setLoadingSuspension(false); }
+        } catch(e) { 
+            console.error(e); 
+        } finally { 
+            setLoadingSuspension(false); 
+        }
     };
     initLoad();
 
