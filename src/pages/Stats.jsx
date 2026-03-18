@@ -134,6 +134,26 @@ const calculateDailyActiveMinutes = (targetDate, sessions) => {
     return Math.floor(totalMs / 60000);
 };
 
+// --- NEU: Deep Analytics Definitionen ---
+const DEEP_ANALYTICS_DEFINITIONS = {
+    'crisis': {
+        title: 'Krisen-Prädiktion',
+        description: 'Analysiert historische Widerstandsmuster und berechnet anhand aktueller Stress- und Trage-Parameter den genauen Tag, an dem das Risiko für einen psychologischen Zusammenbruch oder eine Regelverweigerung (Amnestie-Kauf, Strafen) am höchsten ist.'
+    },
+    'adaption': {
+        title: 'Unterbewusste Adaption',
+        description: 'Misst den Grad der psychologischen Assimilation. Ein hoher Prozentwert dokumentiert, dass der Körper den physischen Widerstand gegen die Materialien aufgegeben hat und das Tragen von Nylon und Dessous unbewusst als neuen Normalzustand akzeptiert.'
+    },
+    'depletion': {
+        title: 'Ego-Depletion (Willenskraft-Erschöpfung)',
+        description: 'Berechnet den exakten zeitlichen Brechpunkt in Stunden. Erreicht die ununterbrochene Tragedauer diesen Wert, ist die mentale Abwehr restlos erschöpft. Danach existiert kein bewusster Widerstand mehr, nur noch mechanischer Gehorsam gegenüber dem System.'
+    },
+    'infiltration': {
+        title: 'Infiltrations-Eskalation',
+        description: 'Quantifiziert die Verdrängung maskuliner oder neutraler Kleidung durch hochkomplexe Damenwäsche im regulären Tagesablauf. Zeigt an, wie oft Stücke mit extrem hohem Restriktionsgrad (z.B. Corsagen, Strapse) den Weg aus dem Nachttresor in den Alltag gefunden haben.'
+    }
+};
+
 export default function Statistics() {
     const { currentUser } = useAuth();
     const [loading, setLoading] = useState(true);
@@ -141,6 +161,9 @@ export default function Statistics() {
     const [sessions, setSessions] = useState([]);
     const [selectedMetric, setSelectedMetric] = useState(null); 
     const [trendData, setTrendData] = useState([]); 
+    
+    // NEU: State für Deep Analytics Dialog
+    const [selectedDefinition, setSelectedDefinition] = useState(null);
 
     useEffect(() => {
         if (!currentUser) return;
@@ -441,7 +464,7 @@ export default function Statistics() {
                     ))}
                 </Grid>
 
-                {/* NEU: DEEP ANALYTICS SEKTION */}
+                {/* DEEP ANALYTICS SEKTION */}
                 {deepAnalytics && (
                     <motion.div variants={MOTION.listItem}>
                         <Divider sx={{ my: 4, borderColor: PALETTE.background.glassBorder }} />
@@ -451,7 +474,13 @@ export default function Statistics() {
                         <Grid container spacing={2}>
                             {/* Krisen-Prädiktion */}
                             <Grid item xs={6} sm={3}>
-                                <Paper sx={{ p: 2, ...DESIGN_TOKENS.glassCard, textAlign: 'center', height: '100%' }}>
+                                <Paper 
+                                    onClick={() => setSelectedDefinition(DEEP_ANALYTICS_DEFINITIONS['crisis'])}
+                                    sx={{ 
+                                        p: 2, ...DESIGN_TOKENS.glassCard, textAlign: 'center', height: '100%', 
+                                        cursor: 'pointer', transition: 'all 0.2s ease-in-out',
+                                        '&:hover': { transform: 'translateY(-2px)', borderColor: PALETTE.accents.red } 
+                                    }}>
                                     <WarningIcon sx={{ color: PALETTE.accents.red, mb: 1 }}/>
                                     <Typography variant="h6" color="text.primary">{deepAnalytics.krisenPraediktion.day}</Typography>
                                     <Typography variant="caption" color="error" display="block" sx={{ fontWeight: 'bold' }}>Risiko: {deepAnalytics.krisenPraediktion.level}</Typography>
@@ -461,7 +490,13 @@ export default function Statistics() {
                             
                             {/* Unterbewusste Adaption */}
                             <Grid item xs={6} sm={3}>
-                                <Paper sx={{ p: 2, ...DESIGN_TOKENS.glassCard, textAlign: 'center', height: '100%' }}>
+                                <Paper 
+                                    onClick={() => setSelectedDefinition(DEEP_ANALYTICS_DEFINITIONS['adaption'])}
+                                    sx={{ 
+                                        p: 2, ...DESIGN_TOKENS.glassCard, textAlign: 'center', height: '100%',
+                                        cursor: 'pointer', transition: 'all 0.2s ease-in-out',
+                                        '&:hover': { transform: 'translateY(-2px)', borderColor: PALETTE.accents.blue }
+                                    }}>
                                     <NightlightRoundIcon sx={{ color: PALETTE.accents.blue, mb: 1 }}/>
                                     <Typography variant="h6" color="text.primary">{deepAnalytics.unterbewussteAdaption.toFixed(1)}%</Typography>
                                     <Typography variant="caption" sx={{ color: PALETTE.accents.blue, fontWeight: 'bold' }} display="block">Physische Assimilation</Typography>
@@ -471,7 +506,13 @@ export default function Statistics() {
                             
                             {/* Willenskraft-Erschöpfungs-Matrix */}
                             <Grid item xs={6} sm={3}>
-                                <Paper sx={{ p: 2, ...DESIGN_TOKENS.glassCard, textAlign: 'center', height: '100%' }}>
+                                <Paper 
+                                    onClick={() => setSelectedDefinition(DEEP_ANALYTICS_DEFINITIONS['depletion'])}
+                                    sx={{ 
+                                        p: 2, ...DESIGN_TOKENS.glassCard, textAlign: 'center', height: '100%',
+                                        cursor: 'pointer', transition: 'all 0.2s ease-in-out',
+                                        '&:hover': { transform: 'translateY(-2px)', borderColor: PALETTE.accents.gold }
+                                    }}>
                                     <Battery0BarIcon sx={{ color: PALETTE.accents.gold, mb: 1 }}/>
                                     <Typography variant="h6" color="text.primary">{deepAnalytics.egoDepletionHours > 0 ? deepAnalytics.egoDepletionHours.toFixed(1) : '-'} h</Typography>
                                     <Typography variant="caption" sx={{ color: PALETTE.accents.gold, fontWeight: 'bold' }} display="block">Kritischer Brechpunkt</Typography>
@@ -481,7 +522,13 @@ export default function Statistics() {
 
                             {/* Infiltrations-Eskalationsmatrix */}
                             <Grid item xs={6} sm={3}>
-                                <Paper sx={{ p: 2, ...DESIGN_TOKENS.glassCard, textAlign: 'center', height: '100%' }}>
+                                <Paper 
+                                    onClick={() => setSelectedDefinition(DEEP_ANALYTICS_DEFINITIONS['infiltration'])}
+                                    sx={{ 
+                                        p: 2, ...DESIGN_TOKENS.glassCard, textAlign: 'center', height: '100%',
+                                        cursor: 'pointer', transition: 'all 0.2s ease-in-out',
+                                        '&:hover': { transform: 'translateY(-2px)', borderColor: PALETTE.accents.pink }
+                                    }}>
                                     <VisibilityOffIcon sx={{ color: PALETTE.accents.pink, mb: 1 }}/>
                                     <Typography variant="h6" color="text.primary">{deepAnalytics.infiltrationEskalation.toFixed(1)}%</Typography>
                                     <Typography variant="caption" sx={{ color: PALETTE.accents.pink, fontWeight: 'bold' }} display="block">Komplexe Tages-Dessous</Typography>
@@ -551,6 +598,7 @@ export default function Statistics() {
                 </Grid>
             </motion.div>
 
+            {/* DIALOG 1: Graphen der Core Metrics */}
             <Dialog open={!!selectedMetric} onClose={() => setSelectedMetric(null)} fullWidth maxWidth="sm" PaperProps={DESIGN_TOKENS.dialog.paper}>
                 <DialogTitle sx={DESIGN_TOKENS.dialog.title.sx}>
                     <Box><Typography variant="h6">{selectedMetric?.title} Trend</Typography></Box>
@@ -578,6 +626,20 @@ export default function Statistics() {
                     </Typography>
                 </DialogContent>
             </Dialog>
+
+            {/* DIALOG 2: Definitionen der Deep Analytics */}
+            <Dialog open={!!selectedDefinition} onClose={() => setSelectedDefinition(null)} fullWidth maxWidth="xs" PaperProps={DESIGN_TOKENS.dialog.paper}>
+                <DialogTitle sx={DESIGN_TOKENS.dialog.title.sx}>
+                    <Box><Typography variant="h6">{selectedDefinition?.title}</Typography></Box>
+                    <IconButton onClick={() => setSelectedDefinition(null)} sx={{ color: 'white' }}><Icons.Close /></IconButton>
+                </DialogTitle>
+                <DialogContent sx={{ ...DESIGN_TOKENS.dialog.content.sx, mt: 2 }}>
+                    <Typography variant="body1" sx={{ color: PALETTE.text.secondary, lineHeight: 1.6 }}>
+                        {selectedDefinition?.description}
+                    </Typography>
+                </DialogContent>
+            </Dialog>
+
             </Container>
         </Box>
     );
