@@ -1,10 +1,8 @@
 import { createTheme } from '@mui/material/styles';
 import { m3Tokens } from './obsidianDesign';
 
-/**
- * ANDROID 16 / MATERIAL DESIGN 3 - TEXTILE UI (NYLON, LACE, SATIN)
- * Importiert die m3Tokens aus obsidianDesign.js, um das Grid stabil zu halten.
- */
+// ARCHITEKTUR-FIX: Expliziter Import des Assets für die Vite Build-Pipeline
+import bgLeg from '../assets/bg-leg.jpg';
 
 export const materialTheme = createTheme({
   palette: {
@@ -42,15 +40,17 @@ export const materialTheme = createTheme({
       styleOverrides: {
         body: {
           backgroundColor: '#050505',
+          // KORRIGIERTE LAYER-REIHENFOLGE: 1. Noise (Top), 2. Gradient (Middle), 3. Bild (Bottom)
           backgroundImage: `
-            linear-gradient(rgba(5, 5, 5, 0.88), rgba(5, 5, 5, 0.96)),
-            url('/bg-leg.jpg'),
-            url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.06'/%3E%3C/svg%3E")
+            url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.08'/%3E%3C/svg%3E"),
+            linear-gradient(rgba(5, 5, 5, 0.75), rgba(5, 5, 5, 0.92)),
+            url(${bgLeg})
           `,
           backgroundAttachment: 'fixed',
-          backgroundSize: 'cover, cover, 3px 3px',
-          backgroundPosition: 'center, right center, top left',
-          backgroundRepeat: 'no-repeat, no-repeat, repeat',
+          // Sizing und Positionierung müssen exakt den Ebenen oben entsprechen
+          backgroundSize: '3px 3px, cover, cover',
+          backgroundPosition: 'top left, center, right center',
+          backgroundRepeat: 'repeat, no-repeat, no-repeat',
           color: '#FFFFFF',
         }
       }
