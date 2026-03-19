@@ -1,3 +1,4 @@
+// src/components/dashboard/ActiveSessionsList.jsx
 import React, { useState, useEffect } from 'react';
 import { 
     Card, CardContent, Typography, Box, Button, Chip, LinearProgress, Avatar 
@@ -23,16 +24,18 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
       return `${m} min`;
   };
 
+  const safeItems = items || [];
+
   return (
     <Box sx={{ mb: 4 }}>
       <AnimatePresence>
-        {activeSessions.map((session) => {
+        {(activeSessions || []).map((session) => {
             // KORREKTUR: Strikte Validierung von itemIds als Array zur Vermeidung des .map() undefined Fehlers.
             let sessionItems = [];
             if (Array.isArray(session.itemIds) && session.itemIds.length > 0) {
-                sessionItems = session.itemIds.map(id => items.find(i => i.id === id)).filter(Boolean);
+                sessionItems = (session.itemIds || []).map(id => safeItems.find(i => i.id === id)).filter(Boolean);
             } else if (session.itemId) {
-                const singleItem = items.find(i => i.id === session.itemId);
+                const singleItem = safeItems.find(i => i.id === session.itemId);
                 if (singleItem) sessionItems = [singleItem];
             }
 
@@ -119,7 +122,7 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
                             {/* ITEM LISTE */}
                             {sessionItems.length > 0 && (
                                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 2 }}>
-                                    {sessionItems.map((item, idx) => (
+                                    {(sessionItems || []).map((item, idx) => (
                                         <Box 
                                             key={item.id || idx} 
                                             onClick={() => onNavigateItem(item.id)}
