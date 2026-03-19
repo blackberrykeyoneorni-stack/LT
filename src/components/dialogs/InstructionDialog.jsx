@@ -65,7 +65,7 @@ export default function InstructionDialog({
   const [insolvencyData, setInsolvencyData] = useState({ isBlocked: false, currentDebt: 0, remainingCredit: 0 });
 
   // Calculation State für UI
-  const [projectedCost, setProjectedCost] = useState(0);
+  const [projectedCost, setProjectedCost] = useState({ nc: 0, lc: 0 });
   const [isOverdraft, setIsOverdraft] = useState(false);
 
   // Countdown State
@@ -332,24 +332,47 @@ export default function InstructionDialog({
             setCreditReduction(0); 
             
             let type = 'lingerie';
+            let hasNylon = false;
+            let hasLingerie = false;
+
             if (instruction.items && instruction.items.length > 0) {
-                const hasNylon = instruction.items.some(instrItem => {
+                instruction.items.forEach(instrItem => {
                     const fullItem = items.find(i => i.id === instrItem.id);
                     if (fullItem) {
                         const sub = (fullItem.subCategory || '').toLowerCase();
                         const cat = (fullItem.mainCategory || '').toLowerCase();
-                        return sub.includes('strumpfhose') || sub.includes('tights') || 
-                               sub.includes('halterlose') || sub.includes('stockings') || 
-                               cat.includes('nylons');
+                        const name = (fullItem.name || '').toLowerCase();
+                        
+                        if (sub.includes('strumpf') || sub.includes('tights') || 
+                            sub.includes('halterlose') || sub.includes('stockings') || 
+                            cat.includes('nylon')) {
+                            hasNylon = true;
+                        }
+                        if (cat.includes('dessous') || sub.includes('höschen') || 
+                            cat.includes('lingerie') || cat.includes('wäsche') || name.includes('höschen')) {
+                            hasLingerie = true;
+                        }
                     }
-                    return false;
                 });
-                if (hasNylon) type = 'nylon';
+
+                if (hasNylon && hasLingerie) type = 'both';
+                else if (hasNylon) type = 'nylon';
+                else if (hasLingerie) type = 'lingerie';
             }
             setCreditType(type);
             
-            const insCheck = await checkInsolvency(currentUser.uid, type);
-            setInsolvencyData(insCheck);
+            const insCheckN = await checkInsolvency(currentUser.uid, 'nylon');
+            const insCheckL = await checkInsolvency(currentUser.uid, 'lingerie');
+            
+            let isBlocked = false;
+            if (type === 'both') isBlocked = insCheckN.isBlocked || insCheckL.isBlocked;
+            else if (type === 'nylon') isBlocked = insCheckN.isBlocked;
+            else isBlocked = insCheckL.isBlocked;
+
+            setInsolvencyData({ 
+                isBlocked, 
+                currentDebt: Math.max(insCheckN.currentDebt, insCheckL.currentDebt) 
+            });
         }
     };
     loadData();
@@ -375,28 +398,33 @@ export default function InstructionDialog({
   }, [canSpendCredits, instruction, insolvencyData]);
 
   useEffect(() => {
-      const currentBalance = creditType === 'nylon' ? credits.nc : credits.lc;
-      
-      let cost = creditReduction;
-      let overdraft = false;
+      let costNc = 0; let costLc = 0;
+      let overdraftNc = false; let overdraftLc = false;
 
-      if (currentBalance >= creditReduction) {
-          cost = creditReduction;
-      } else {
-          overdraft = true;
-          const covered = Math.max(0, currentBalance);
-          const remainder = creditReduction - covered;
-          const penaltyPart = Math.round(remainder * OVERDRAFT_PENALTY);
-          cost = covered + penaltyPart;
+      if (creditType === 'nylon' || creditType === 'both') {
+          if (credits.nc >= creditReduction) costNc = creditReduction;
+          else { 
+              overdraftNc = true; 
+              const covered = Math.max(0, credits.nc);
+              const remainder = creditReduction - covered;
+              costNc = covered + Math.round(remainder * OVERDRAFT_PENALTY); 
+          }
       }
 
-      setProjectedCost(cost);
-      setIsOverdraft(overdraft);
+      if (creditType === 'lingerie' || creditType === 'both') {
+          if (credits.lc >= creditReduction) costLc = creditReduction;
+          else { 
+              overdraftLc = true; 
+              const covered = Math.max(0, credits.lc);
+              const remainder = creditReduction - covered;
+              costLc = covered + Math.round(remainder * OVERDRAFT_PENALTY); 
+          }
+      }
+
+      setProjectedCost({ nc: costNc, lc: costLc });
+      setIsOverdraft(overdraftNc || overdraftLc);
 
   }, [creditReduction, credits, creditType]);
-
-  const projectedBalance = (creditType === 'nylon' ? credits.nc : credits.lc) - projectedCost;
-  const isInsolvencyRisk = projectedBalance < -2880;
 
   const triggerHardcoreCheck = (actionToExecute) => {
       if (!isNight || !hcPrefs.enabled) { actionToExecute(); return; }
@@ -481,7 +509,17 @@ export default function InstructionDialog({
   const renderOathPhase = () => {
       const originalDuration = instruction.durationMinutes || 0;
       const currentDuration = originalDuration - creditReduction;
-      const currentBalance = creditType === 'nylon' ? credits.nc : credits.lc;
+      
+      const projectedBalanceNc = credits.nc - projectedCost.nc;
+      const projectedBalanceLc = credits.lc - projectedCost.lc;
+      const isInsolvencyRisk = (creditType === 'both' || creditType === 'nylon' ? projectedBalanceNc < -2880 : false) || 
+                               (creditType === 'both' || creditType === 'lingerie' ? projectedBalanceLc < -2880 : false);
+
+      const currentBalanceForColor = creditType === 'both' ? Math.min(credits.nc, credits.lc) : (creditType === 'nylon' ? credits.nc : credits.lc);
+      const getChipLabel = () => {
+          if (creditType === 'both') return `NC: ${credits.nc} | LC: ${credits.lc}`;
+          return `${creditType === 'nylon' ? 'NC' : 'LC'}: ${creditType === 'nylon' ? credits.nc : credits.lc} min`;
+      };
 
       const formatTime = (mins) => {
           if (mins <= 0) return "0m";
@@ -546,10 +584,10 @@ export default function InstructionDialog({
                                 </Typography>
                             </Box>
                             <Chip 
-                                label={`${creditType === 'nylon' ? 'NC' : 'LC'}: ${currentBalance} min`} 
+                                label={getChipLabel()} 
                                 size="small" 
                                 sx={{ 
-                                    bgcolor: currentBalance < 0 ? PALETTE.accents.red : PALETTE.accents.gold, 
+                                    bgcolor: currentBalanceForColor < 0 ? PALETTE.accents.red : PALETTE.accents.gold, 
                                     color: '#000', fontWeight: 'bold', fontSize: '0.7rem' 
                                 }} 
                             />
@@ -585,14 +623,16 @@ export default function InstructionDialog({
                                         </Typography>
                                         {creditReduction > 0 && (
                                             <Typography variant="caption" sx={{ color: isOverdraft ? PALETTE.accents.red : 'text.secondary' }}>
-                                                Kosten: {projectedCost} Credits
+                                                Kosten: {creditType === 'both' 
+                                                    ? `${projectedCost.nc} NC + ${projectedCost.lc} LC` 
+                                                    : `${creditType === 'nylon' ? projectedCost.nc + ' NC' : projectedCost.lc + ' LC'}`}
                                             </Typography>
                                         )}
                                     </Box>
                                 </Box>
                                 {isInsolvencyRisk && (
                                     <Typography variant="caption" color="error" sx={{ mt: 1, display: 'block', fontWeight: 'bold' }}>
-                                        LIMIT ÜBERSCHRITTEN! ({projectedBalance} min)
+                                        LIMIT ÜBERSCHRITTEN! ({creditType === 'both' ? `NC: ${projectedBalanceNc}, LC: ${projectedBalanceLc}` : `${creditType === 'nylon' ? projectedBalanceNc : projectedBalanceLc} min`})
                                     </Typography>
                                 )}
                             </>

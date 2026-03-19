@@ -50,8 +50,9 @@ export const checkInsolvency = async (userId, type) => {
 };
 
 /**
- * Zieht Credits ab (Spending) und registriert den Discount für den Balken.
- * HYBRID-LOGIK: Prüft die aktuelle Tagesanweisung und zieht ggf. beide Konten ab.
+ * Zieht Credits ab (Spending).
+ * KORREKTUR: Strikte Trennung. Nutzt nur noch den requestedType ('nylon', 'lingerie', 'both').
+ * Kombinierte Währungspflicht bei 'both'. Entfernung der doppelten discountMinutes.
  */
 export const spendCredits = async (userId, amountMinutes, requestedType) => {
     if (amountMinutes <= 0) return true;
@@ -60,37 +61,20 @@ export const spendCredits = async (userId, amountMinutes, requestedType) => {
     const balanceSnap = await getDoc(docRef);
     const data = balanceSnap.exists() ? balanceSnap.data() : { nc: 0, lc: 0 };
 
-    // 1. Kontext-Prüfung: Welche Items werden heute getragen?
-    const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
-    const instrSnap = await getDoc(instrRef);
-    
-    let chargeNc = false;
-    let chargeLc = false;
-
-    if (instrSnap.exists() && instrSnap.data().items) {
-        const items = instrSnap.data().items;
-        items.forEach(i => {
-            const cat = (i.mainCategory || '').toLowerCase();
-            const sub = (i.subCategory || '').toLowerCase();
-            const name = (i.name || '').toLowerCase();
-            if (cat.includes('nylon') || sub.includes('strumpf') || name.includes('strumpf')) chargeNc = true;
-            if (cat.includes('dessous') || sub.includes('höschen') || cat.includes('lingerie') || cat.includes('wäsche') || name.includes('höschen')) chargeLc = true;
-        });
-    }
-
-    // Fallback, falls keine Items da sind (dann nutzen wir den Button-Typ aus der UI)
-    if (!chargeNc && !chargeLc) {
-        if (requestedType === 'nylon') chargeNc = true;
-        else chargeLc = true;
-    }
+    let chargeNc = requestedType === 'nylon' || requestedType === 'both';
+    let chargeLc = requestedType === 'lingerie' || requestedType === 'both';
 
     let finalCost = amountMinutes;
     const updates = {};
 
-    // Helper: Berechnet Aufschlag bei Dispo-Nutzung
+    // Helper: Berechnet Aufschlag bei Dispo-Nutzung exakt für den negativen Anteil
     const calcCost = (balance) => {
-        if (balance < 0 || (balance - amountMinutes) < 0) {
+        if (balance < 0) {
             return Math.round(amountMinutes * DEBT_CONFIG.OVERDRAFT_PENALTY);
+        } else if ((balance - amountMinutes) < 0) {
+            const covered = balance;
+            const remainder = amountMinutes - covered;
+            return covered + Math.round(remainder * DEBT_CONFIG.OVERDRAFT_PENALTY);
         }
         return amountMinutes;
     };
@@ -108,15 +92,8 @@ export const spendCredits = async (userId, amountMinutes, requestedType) => {
 
     updates.lastTransaction = serverTimestamp();
 
-    // 2. Atomares Update der TimeBank
+    // Atomares Update der TimeBank
     await updateDoc(docRef, updates);
-
-    // 3. Discount an den Fortschrittsbalken melden (dailyInstruction)
-    if (instrSnap.exists()) {
-        await updateDoc(instrRef, {
-            discountMinutes: increment(amountMinutes)
-        });
-    }
     
     return finalCost; 
 };
