@@ -27,14 +27,18 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
     <Box sx={{ mb: 4 }}>
       <AnimatePresence>
         {activeSessions.map((session) => {
-            const sessionItems = session.itemIds 
-                ? session.itemIds.map(id => items.find(i => i.id === id)).filter(Boolean)
-                : [items.find(i => i.id === session.itemId)].filter(Boolean);
+            // KORREKTUR: Strikte Validierung von itemIds als Array zur Vermeidung des .map() undefined Fehlers.
+            let sessionItems = [];
+            if (Array.isArray(session.itemIds) && session.itemIds.length > 0) {
+                sessionItems = session.itemIds.map(id => items.find(i => i.id === id)).filter(Boolean);
+            } else if (session.itemId) {
+                const singleItem = items.find(i => i.id === session.itemId);
+                if (singleItem) sessionItems = [singleItem];
+            }
 
             const startTime = session.startTime?.toDate ? session.startTime.toDate() : new Date(session.startTime);
             const durationMinutes = Math.floor((new Date() - startTime) / 60000);
             
-            // KORREKTUR: Dynamische minDuration anstelle von fixierten 30 Minuten
             const minDuration = session.minDuration || 0;
             const isPunishment = session.type === 'punishment';
             const isTZD = session.type === 'tzd' || session.tzdExecuted; 
@@ -160,7 +164,7 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
                                 </Box>
                             )}
 
-                            {/* PROGRESS BAR - Nun auch für Strafen visualisiert */}
+                            {/* PROGRESS BAR */}
                             {(session.isDebtSession || isPunishment) && minDuration > 0 && (
                                 <Box sx={{ mt: 1, mb: 2 }}>
                                     <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
@@ -178,7 +182,7 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
                                 </Box>
                             )}
 
-                            {/* ACTIONS - Korrigierte Button Farbigkeit & Sperrung */}
+                            {/* ACTIONS */}
                             <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
                                 {(isTZD || isPunishment || session.isDebtSession) ? (
                                     <Button 

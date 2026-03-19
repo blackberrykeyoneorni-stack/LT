@@ -217,7 +217,6 @@ export default function Inventory() {
     <Container maxWidth="md" disableGutters sx={{ pt: 1, pb: 10 }}> 
       <motion.div initial="hidden" animate="show" variants={MOTION.listContainer}>
           
-          {/* HEADER */}
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, px: 2 }}>
                 <Typography variant="h4" sx={DESIGN_TOKENS.textGradient}>Inventar ({filteredItems.length})</Typography>
                 <Box>
@@ -228,7 +227,6 @@ export default function Inventory() {
                 </Box>
           </Box>
 
-          {/* ACTIVE FILTERS */}
           <Box sx={{ mb: 2, px: 2, display: 'flex', gap: 1, overflowX: 'auto', pb: 1 }}>
                 {scannedLocation && <Chip icon={<Inventory2Icon />} label={`Ort: ${scannedLocation}`} onDelete={() => { setScannedLocation(null); }} sx={DESIGN_TOKENS.chip.active}/>}
                 
@@ -243,7 +241,6 @@ export default function Inventory() {
                 )}
           </Box>
 
-          {/* GRID (THE CATALOG OF OBJECTIFICATION) */}
           <Grid container spacing={2} sx={{ px: 2 }}>
             {filteredItems.map((item) => {
             const recoveryInfo = getRecoveryInfo(item);
@@ -252,11 +249,10 @@ export default function Inventory() {
             const isWashing = item.status === 'washing';
             const isArchived = item.status === 'archived';
 
-            // Base Style for "Sheer Nylon" Cards
-            let borderColor = 'rgba(255, 0, 127, 0.3)'; // Sheer pink seam
+            let borderColor = 'rgba(255, 0, 127, 0.3)'; 
             let imgFilter = 'none';
             let idChipBg = 'rgba(0,0,0,0.6)';
-            let idChipColor = PALETTE.accents.blue; // Synthetic Cyan
+            let idChipColor = PALETTE.accents.blue; 
 
             if (isArchived) {
                 idChipBg = PALETTE.accents.red;
@@ -287,7 +283,6 @@ export default function Inventory() {
                                 <CardMedia component="img" image={imgUrl} alt={getDisplayName(item)} sx={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', objectFit: 'cover', filter: imgFilter }} />
                             ) : (<CheckroomIcon sx={{ position: 'absolute', top: '35%', left: '35%', fontSize: 40, opacity: 0.3, color: PALETTE.primary.main }} />)}
                             
-                            {/* --- NEON BARCODE ID CHIP --- */}
                             {item.customId && (
                                 <Chip 
                                     icon={<FingerprintIcon style={{ fontSize: 14, color: idChipColor }} />} 
@@ -311,12 +306,12 @@ export default function Inventory() {
 
                             {isWashing && <LocalLaundryServiceIcon sx={{ position: 'absolute', bottom: 8, right: 8, color: PALETTE.accents.blue, filter: `drop-shadow(0 0 6px ${PALETTE.accents.blue})` }} />}
                             
-                            {/* --- RECOVERY CHIP --- */}
+                            {/* KORREKTUR: Synchronisierte Timer-Anzeige in Minuten */}
                             {isResting && item.status === 'active' && (
-                                <Tooltip title={`Erholung: noch ${formatDuration(recoveryInfo.remainingHours * 60)}`}>
+                                <Tooltip title={`Erholung: noch ${formatDuration(Math.round(recoveryInfo.remainingHours * 60))}`}>
                                     <Chip 
                                         icon={<SnoozeIcon style={{ fontSize: 16, color: '#000' }} />} 
-                                        label={formatDuration(recoveryInfo.remainingHours * 60)} 
+                                        label={formatDuration(Math.round(recoveryInfo.remainingHours * 60))} 
                                         size="small" 
                                         sx={{ 
                                             position: 'absolute', 
@@ -351,14 +346,12 @@ export default function Inventory() {
           </Grid>
       </motion.div>
       
-      {/* PERFORMANCE FIX: AddItemDrawer Kapselung verhindert Re-Rendering des gesamten Inventars beim Tippen */}
       <AddItemDrawer 
           open={addItemOpen} 
           onClose={() => setAddItemOpen(false)} 
           dropdowns={dropdowns} 
       />
 
-      {/* --- FILTER DRAWER --- */}
       <Drawer anchor="right" open={filterOpen} onClose={() => setFilterOpen(false)} PaperProps={{ sx: { bgcolor: 'rgba(17, 13, 16, 0.95)', backdropFilter: 'blur(16px)', borderLeft: `1px solid rgba(255,0,127,0.3)` } }}>
         <Box sx={{ width: 280, p: 3, pt: 8, height: '100%', overflowY: 'auto' }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
@@ -396,7 +389,6 @@ export default function Inventory() {
               {categories.map(c => <MenuItem key={c} value={c}>{c}</MenuItem>)}
           </TextField>
 
-          {/* NEU: Subkategorie Filter Dropdown */}
           <TextField select fullWidth label="Subkategorie" margin="dense" size="small" value={filterSubCategory} onChange={e => setFilterSubCategory(e.target.value)} sx={DESIGN_TOKENS.inputField}>
               <MenuItem value="All">Alle</MenuItem>
               {subCategories.map(sc => <MenuItem key={sc} value={sc}>{sc}</MenuItem>)}
