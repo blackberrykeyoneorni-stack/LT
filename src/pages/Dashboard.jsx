@@ -1,3 +1,4 @@
+// src/pages/Dashboard.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
@@ -76,9 +77,9 @@ export default function Dashboard() {
   const [weeklyReport, setWeeklyReport] = useState(null);
 
   // Derived State
-  const isPunishmentRunning = activeSessions.some(s => s.type === 'punishment');
+  const isPunishmentRunning = (activeSessions || []).some(s => s.type === 'punishment');
   const isDailyGoalMet = progress.isDailyGoalMet;
-  const hasVoluntarySession = activeSessions.some(s => s.type === 'voluntary' && !s.endTime);
+  const hasVoluntarySession = (activeSessions || []).some(s => s.type === 'voluntary' && !s.endTime);
   const budgetBalance = monthlyBudget - currentSpent;
   const isStealthActive = activeSuspension?.type === 'stealth_travel';
 
@@ -186,7 +187,7 @@ export default function Dashboard() {
 
   // 2. Punishment Item Load
   useEffect(() => {
-      if (items.length > 0) setPunishmentItem(findPunishmentItem(items));
+      if (items && items.length > 0) setPunishmentItem(findPunishmentItem(items));
   }, [items]);
 
   // HANDLERS
@@ -228,7 +229,7 @@ export default function Dashboard() {
                   executeStartPunishment(); 
               } else if (scanMode === 'stop') { 
                   useUIStore.getState().setPunishmentScanOpen(false); 
-                  const pSession = activeSessions.find(s => s.type === 'punishment');
+                  const pSession = (activeSessions || []).find(s => s.type === 'punishment');
                   if (pSession) {
                       handleRequestStopSession(pSession); 
                   }
@@ -336,7 +337,7 @@ export default function Dashboard() {
       );
   }
 
-  const laundryCount = items.filter(i => i.status === 'washing').length;
+  const laundryCount = (items || []).filter(i => i.status === 'washing').length;
 
   return (
     <Box sx={DESIGN_TOKENS.bottomNavSpacer}>
@@ -403,8 +404,8 @@ export default function Dashboard() {
             />
 
             <ActiveSessionsList 
-                activeSessions={activeSessions} 
-                items={items}
+                activeSessions={activeSessions || []} 
+                items={items || []}
                 punishmentStatus={punishmentStatus}
                 onNavigateItem={(id) => navigate(`/item/${id}`)}
                 onStopSession={handleRequestStopSession} 
@@ -489,7 +490,7 @@ export default function Dashboard() {
       </Container>
 
       <DashboardDialogManager
-          tzdActive={tzdActive} items={items} 
+          tzdActive={tzdActive} items={items || []} 
           handleConfirmForcedRelease={handleConfirmForcedRelease} handleFailForcedRelease={handleFailForcedRelease} handleRefuseForcedRelease={handleRefuseForcedRelease}
           timeBankData={timeBankData} handleAcknowledgeInflation={handleAcknowledgeInflation} offerOpen={offerOpen} gambleStake={gambleStake} 
           handleGambleAccept={handleGambleAccept} handleGambleDecline={handleGambleDecline} hasVoluntarySession={hasVoluntarySession} isForcedGamble={isForcedGamble}
@@ -502,7 +503,7 @@ export default function Dashboard() {
           handleStartReleaseTimer={handleStartReleaseTimer} handleSkipTimer={handleSkipTimer} 
           handleReleaseDecision={handleReleaseDecision} 
           handleConfirmAuditItem={handleConfirmAuditItem} 
-          indexDetails={indexDetails} activeSessions={activeSessions} 
+          indexDetails={indexDetails} activeSessions={activeSessions || []} 
       />
     </Box>
   );

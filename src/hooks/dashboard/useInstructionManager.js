@@ -1,3 +1,4 @@
+// src/hooks/dashboard/useInstructionManager.js
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { collection, doc, updateDoc, writeBatch, query, where, getDocs, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../firebase';
@@ -66,7 +67,9 @@ export default function useInstructionManager({
     const isJustStartedRef = useRef(false);
 
     // --- ABGELEITETE STATES ---
-    const isInstructionActive = activeSessions.some(s => s.type === 'instruction');
+    const safeActiveSessions = activeSessions || [];
+    const safeItems = items || [];
+    const isInstructionActive = safeActiveSessions.some(s => s.type === 'instruction');
     const isNight = currentPeriod ? currentPeriod.includes('night') : false;
 
     // --- EFFECT 1: ZEIT-TICKER (Perioden und Feiertage berechnen) ---
@@ -87,7 +90,7 @@ export default function useInstructionManager({
 
     // --- EFFECT 2: INSTRUCTION LADEN ODER GENERIEREN ---
     useEffect(() => {
-        if (!currentUser || items.length === 0 || sessionsLoading || !currentPeriod) return;
+        if (!currentUser || safeItems.length === 0 || sessionsLoading || !currentPeriod) return;
 
         const isIdle = instructionStatus === 'idle';
         const wrongPeriod = currentInstruction && currentInstruction.periodId !== currentPeriod;
@@ -137,7 +140,7 @@ export default function useInstructionManager({
                         }
                         if (instr) setCurrentInstruction(instr);
                     } else if (!isFreeDay || currentPeriod.includes('night') || isStealthActive) {
-                        const newInstr = await generateAndSaveInstruction(currentUser.uid, items, activeSessions, currentPeriod);
+                        const newInstr = await generateAndSaveInstruction(currentUser.uid, safeItems, safeActiveSessions, currentPeriod);
                         setCurrentInstruction(newInstr);
                     } else {
                         setCurrentInstruction(null);
@@ -150,13 +153,13 @@ export default function useInstructionManager({
             };
             check();
         }
-    }, [currentUser, items.length, sessionsLoading, currentPeriod, currentInstruction, instructionStatus, isFreeDay, activeSessions, isStealthActive, setTzdActive, setInstructionOpen]);
+    }, [currentUser, safeItems.length, sessionsLoading, currentPeriod, currentInstruction, instructionStatus, isFreeDay, safeActiveSessions, isStealthActive, setTzdActive, setInstructionOpen]);
 
     // --- EFFECT 3: LIVE-WATCHER (Post-Oath Flucht) ---
     useEffect(() => {
         if (!currentUser || !currentInstruction || !currentInstruction.isAccepted || currentInstruction.evasionPenaltyTriggered) return;
         
-        const isThisInstructionRunning = activeSessions.some(s => s.type === 'instruction' && s.periodId === currentInstruction.periodId);
+        const isThisInstructionRunning = safeActiveSessions.some(s => s.type === 'instruction' && s.periodId === currentInstruction.periodId);
         if (isThisInstructionRunning) return; 
 
         const timer = setInterval(async () => {
@@ -191,12 +194,12 @@ export default function useInstructionManager({
         }, 60000); 
 
         return () => clearInterval(timer);
-    }, [currentUser, currentInstruction, activeSessions, setTzdActive, showToast, setInstructionOpen]);
+    }, [currentUser, currentInstruction, safeActiveSessions, setTzdActive, showToast, setInstructionOpen]);
 
     // --- EFFECT 4: FORCED RELEASE VERZÖGERUNGS-TRIGGER ---
     useEffect(() => {
         if (currentInstruction) {
-            const activeInstSession = activeSessions.find(s => 
+            const activeInstSession = safeActiveSessions.find(s => 
                 s.type === 'instruction' && 
                 s.periodId === currentInstruction.periodId
             );
@@ -219,7 +222,7 @@ export default function useInstructionManager({
                 }
             }
         }
-    }, [currentInstruction, forcedReleaseOpen, activeSessions, setForcedReleaseMethod, setForcedReleaseOpen]);
+    }, [currentInstruction, forcedReleaseOpen, safeActiveSessions, setForcedReleaseMethod, setForcedReleaseOpen]);
 
     // --- HANDLER: SESSION START ---
     const handleStartRequest = useCallback(async (itemsToStart) => { 
@@ -289,7 +292,7 @@ export default function useInstructionManager({
     const handleConfirmForcedRelease = useCallback(async (outcome) => {
         if (!currentUser) return;
         try {
-            const activeInstSession = activeSessions.find(s => s.type === 'instruction');
+            const activeInstSession = safeActiveSessions.find(s => s.type === 'instruction');
             await apiRegisterRelease(currentUser.uid, 'maintained', 5, 'clean');
             
             const batch = writeBatch(db);
@@ -310,7 +313,7 @@ export default function useInstructionManager({
             console.error("Error confirming forced release:", e);
             if (showToast) showToast("Fehler beim Speichern.", "error");
         }
-    }, [currentUser, activeSessions, showToast, setForcedReleaseOpen]);
+    }, [currentUser, safeActiveSessions, showToast, setForcedReleaseOpen]);
 
     const handleFailForcedRelease = useCallback(async () => {
         if (!currentUser) return;
