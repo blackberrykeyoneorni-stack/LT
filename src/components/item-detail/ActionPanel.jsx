@@ -4,11 +4,14 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import HotelIcon from '@mui/icons-material/Hotel'; 
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'; 
 import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
+import { formatDuration } from '../../utils/formatters';
 
 export default function ActionPanel({ isBusy, recoveryInfo, onStartSession }) {
     
     // Fall 1: Recovery Mode
     if (recoveryInfo?.isResting && !isBusy) {
+        const remainingMins = Math.max(0, recoveryInfo.remainingHours * 60);
+
         return (
             <Box sx={{ mb: 4 }}>
                 <Paper sx={{ 
@@ -26,7 +29,7 @@ export default function ActionPanel({ isBusy, recoveryInfo, onStartSession }) {
                                 Recovery Mode
                             </Typography>
                             <Typography variant="body2" sx={{ color: PALETTE.text.secondary }}>
-                                Material-Erholung. Verbleibend: <strong style={{ color: '#FFF' }}>{recoveryInfo.remainingHours} Std.</strong>
+                                Material-Erholung. Verbleibend: <strong style={{ color: '#FFF' }}>{formatDuration(remainingMins)}</strong>
                             </Typography>
                         </Box>
                     </Stack>

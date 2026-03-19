@@ -1,35 +1,40 @@
 import React, { useState, useEffect } from 'react';
 import { 
     Dialog, DialogTitle, DialogContent, DialogActions, 
-    Button, Stack, FormControl, InputLabel, Select, MenuItem, TextField, Typography 
+    Button, Stack, FormControl, InputLabel, Select, MenuItem, Typography 
 } from '@mui/material';
 import { DESIGN_TOKENS } from '../../theme/obsidianDesign';
 
 export default function PlanSessionDialog({ open, onClose, date, items, onSave }) {
     const [selectedItemId, setSelectedItemId] = useState('');
-    const [time, setTime] = useState('20:00');
-    const [duration, setDuration] = useState(60);
+    const [plannedPeriod, setPlannedPeriod] = useState('day'); // 'day' oder 'night'
 
     // BUGFIX: Hard-Reset des Formulars, sobald der Dialog geöffnet wird
     useEffect(() => {
         if (open) {
             setSelectedItemId('');
-            setTime('20:00');
-            setDuration(60);
+            setPlannedPeriod('day');
         }
     }, [open]);
 
     const handleSave = () => {
         if (!selectedItemId) return;
-        const [hours, minutes] = time.split(':');
+        
         const startDateTime = new Date(date);
-        startDateTime.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+        
+        // Optische Zeiten für den Kalender setzen, damit die Blöcke richtig gerendert werden
+        if (plannedPeriod === 'day') {
+            startDateTime.setHours(8, 0, 0, 0); 
+        } else {
+            startDateTime.setHours(20, 0, 0, 0);
+        }
         
         onSave({
             itemId: selectedItemId,
             startTime: startDateTime,
-            durationMinutes: parseInt(duration),
-            type: 'planned'
+            durationMinutes: 720, // 12 Stunden optischer Block im Kalender
+            type: 'planned',
+            plannedPeriod: plannedPeriod // WICHTIG: Neues Feld für die Instruction-Zuweisung
         });
         onClose();
     };
@@ -59,24 +64,22 @@ export default function PlanSessionDialog({ open, onClose, date, items, onSave }
                         </Select>
                     </FormControl>
 
-                    <TextField
-                        label="Startzeit"
-                        type="time"
-                        value={time}
-                        onChange={(e) => setTime(e.target.value)}
-                        fullWidth
-                        InputLabelProps={{ shrink: true, sx: { color: 'text.secondary' } }}
-                        sx={DESIGN_TOKENS.inputField}
-                    />
-
-                    <TextField
-                        label="Geplante Dauer (Minuten)"
-                        type="number"
-                        value={duration}
-                        onChange={(e) => setDuration(e.target.value)}
-                        fullWidth
-                        sx={DESIGN_TOKENS.inputField}
-                    />
+                    <FormControl fullWidth>
+                        <InputLabel sx={{ color: 'text.secondary' }}>Tageszeit</InputLabel>
+                        <Select 
+                            value={plannedPeriod} 
+                            label="Tageszeit" 
+                            onChange={(e) => setPlannedPeriod(e.target.value)}
+                            sx={{ 
+                                color: 'text.primary',
+                                '.MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.2)' }
+                            }}
+                            MenuProps={{ PaperProps: { sx: { bgcolor: '#1a1a1a' } } }}
+                        >
+                            <MenuItem value="day">Tag (Tagtrageanweisung)</MenuItem>
+                            <MenuItem value="night">Nacht (Nachttrageanweisung)</MenuItem>
+                        </Select>
+                    </FormControl>
                 </Stack>
             </DialogContent>
             <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}>

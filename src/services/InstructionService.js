@@ -67,12 +67,14 @@ const getFutureBlockedItemIds = async (uid, restingHours) => {
     try {
         const now = new Date();
         const futureLimit = new Date();
-        futureLimit.setDate(now.getDate() + 2);
+        // Blockiere für die nächsten 48 Stunden, um Wasch- und Erholungszeiten zu garantieren.
+        futureLimit.setHours(futureLimit.getHours() + 48);
 
         const q = query(
-            collection(db, `users/${uid}/planning`),
-            where('date', '>', now),
-            where('date', '<=', futureLimit)
+            collection(db, `users/${uid}/sessions`),
+            where('type', '==', 'planned'),
+            where('startTime', '>', now),
+            where('startTime', '<=', futureLimit)
         );
 
         const snap = await getDocs(q);
@@ -80,6 +82,7 @@ const getFutureBlockedItemIds = async (uid, restingHours) => {
 
         snap.forEach(doc => {
             const data = doc.data();
+            if (data.itemId) blockedIds.push(data.itemId);
             if (data.itemIds && Array.isArray(data.itemIds)) {
                 blockedIds = [...blockedIds, ...data.itemIds];
             }
@@ -93,27 +96,49 @@ const getFutureBlockedItemIds = async (uid, restingHours) => {
 };
 
 /**
- * Prüft, ob es für HEUTE einen expliziten Plan im Kalender gibt.
+ * Prüft, ob es für HEUTE und diese periodId einen expliziten Plan im Kalender gibt.
  * Falls ja, werden diese Items priorisiert behandelt.
  */
-const checkTodayPlan = async (uid, allItems) => {
+const checkTodayPlan = async (uid, allItems, periodId) => {
     try {
-        // Wir nutzen das Datum im Format YYYY-MM-DD als ID (wie im CalendarService)
-        const today = new Date();
-        const offset = today.getTimezoneOffset() * 60000;
-        const localDateStr = new Date(today.getTime() - offset).toISOString().split('T')[0];
+        if (!periodId) return null;
+        const isNight = periodId.includes('night');
+        const targetPeriod = isNight ? 'night' : 'day';
 
-        const planRef = doc(db, `users/${uid}/planning`, localDateStr);
-        const planSnap = await getDoc(planRef);
+        // Konstruiere Mitternachtsgrenzen für das Datum aus periodId (z.B. "2026-03-19-day")
+        const dateParts = periodId.split('-');
+        if (dateParts.length < 3) return null;
+        
+        const year = parseInt(dateParts[0]);
+        const month = parseInt(dateParts[1]) - 1; // JS months are 0-indexed
+        const day = parseInt(dateParts[2]);
 
-        if (planSnap.exists()) {
-            const data = planSnap.data();
-            if (data.itemIds && data.itemIds.length > 0) {
-                console.log(`InstructionService: Plan für heute (${localDateStr}) gefunden!`, data.itemIds);
-                // Wir filtern die echten Item-Objekte heraus
-                const plannedItems = allItems.filter(i => data.itemIds.includes(i.id));
-                return plannedItems;
+        const targetDateStart = new Date(year, month, day, 0, 0, 0, 0);
+        const targetDateEnd = new Date(year, month, day, 23, 59, 59, 999);
+
+        const q = query(
+            collection(db, `users/${uid}/sessions`),
+            where('type', '==', 'planned'),
+            where('startTime', '>=', targetDateStart),
+            where('startTime', '<=', targetDateEnd)
+        );
+
+        const snap = await getDocs(q);
+        let plannedItemIds = [];
+
+        snap.forEach(doc => {
+            const data = doc.data();
+            if (data.plannedPeriod === targetPeriod) {
+                if (data.itemId) plannedItemIds.push(data.itemId);
+                if (data.itemIds && Array.isArray(data.itemIds)) {
+                    plannedItemIds.push(...data.itemIds);
+                }
             }
+        });
+
+        if (plannedItemIds.length > 0) {
+            console.log(`InstructionService: Plan für ${periodId} gefunden!`, plannedItemIds);
+            return allItems.filter(i => plannedItemIds.includes(i.id));
         }
         return null;
     } catch (e) {
@@ -343,7 +368,7 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
         }
 
         // 2. CHECK: GIBT ES EINEN PLAN FÜR HEUTE?
-        const plannedItems = await checkTodayPlan(uid, items);
+        const plannedItems = await checkTodayPlan(uid, items, periodId);
 
         if (plannedItems && plannedItems.length > 0) {
             console.log("InstructionService: Führe geplanten Plan aus.");
