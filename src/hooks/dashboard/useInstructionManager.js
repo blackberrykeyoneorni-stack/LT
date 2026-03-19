@@ -99,6 +99,18 @@ export default function useInstructionManager({
                     let instr = await getLastInstruction(currentUser.uid);
                     
                     if (instr && instr.periodId === currentPeriod) {
+                        
+                        // --- KEVLAR VERSTÄRKUNG ---
+                        // Strikte Normalisierung von defekten Legacy-Daten, um UI-Crashes zu verhindern
+                        if (!instr.items || !Array.isArray(instr.items)) {
+                            if (instr.itemId) {
+                                instr.items = [{ id: instr.itemId }];
+                            } else {
+                                instr.items = [];
+                            }
+                        }
+                        // --------------------------
+
                         if (instr.isAccepted && !instr.evasionPenaltyTriggered) {
                             const acceptedDate = instr.acceptedAt?.toDate ? instr.acceptedAt.toDate() : new Date(instr.acceptedAt);
                             const ageInMinutes = (new Date() - acceptedDate) / 60000;
@@ -341,7 +353,6 @@ export default function useInstructionManager({
         }
     }, [currentUser, setPunishmentStatus, showToast, setForcedReleaseOpen]);
 
-    // Rückgabe OHNE die UI-States, um Re-Renders im Dashboard zu unterbinden
     return {
         currentPeriod,
         isNight,

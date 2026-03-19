@@ -227,7 +227,7 @@ export default function InstructionDialog({
 
           if (scannedItem.id === expectedItemId) {
               isValid = true;
-          } else if (instruction.items.some(i => i.id === scannedItem.id && i.id !== transit.primaryItemId)) {
+          } else if ((instruction?.items || []).some(i => i.id === scannedItem.id && i.id !== transit.primaryItemId)) {
               isValid = true; 
           }
 
@@ -241,7 +241,7 @@ export default function InstructionDialog({
               }
           }
       } else {
-          isValid = instruction.items.some(instrItem => instrItem.id === scannedItem.id);
+          isValid = (instruction?.items || []).some(instrItem => instrItem.id === scannedItem.id);
       }
 
       if (isValid) {
@@ -289,7 +289,7 @@ export default function InstructionDialog({
 
   // PHASE 2 ACTION: SESSION START (Die Ausführung)
   const handleSessionStart = async (viaNfc = false) => {
-      const itemsToStart = instruction.items.map(instrItem => items.find(i => i.id === instrItem.id)).filter(Boolean);
+      const itemsToStart = (instruction?.items || []).map(instrItem => items.find(i => i.id === instrItem.id)).filter(Boolean);
       
       if (itemsToStart.length > 0) {
           try {
@@ -660,13 +660,13 @@ export default function InstructionDialog({
   };
 
   const renderPreparationPhase = () => {
-      const displayItems = instruction.items.map(instrItem => 
+      const displayItems = (instruction?.items || []).map(instrItem => 
           items.find(i => i.id === instrItem.id) || instrItem
       );
       const primaryTransitItem = instruction?.transitProtocol?.active ? items.find(i => i.id === instruction.transitProtocol.primaryItemId) : null;
 
       const itemsSelectedCount = verifiedItemIds.length;
-      const totalRequired = instruction.items.length;
+      const totalRequired = (instruction?.items || []).length;
       const isColdFeetAllowed = itemsSelectedCount > 0 && itemsSelectedCount < totalRequired;
 
       return (
