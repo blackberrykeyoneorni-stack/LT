@@ -1,5 +1,0 @@
-<<<<<<<< HEAD:dist/assets/Warning-Ckukjta9.js
-import{i as r,j as a}from"./vendor-Bv45WOlh.js";import{r as t}from"./index-BGVwsK__.js";var e={},i=r;Object.defineProperty(e,"__esModule",{value:!0});var o=e.default=void 0,u=i(t()),n=a;o=e.default=(0,u.default)((0,n.jsx)("path",{d:"M1 21h22L12 2zm12-3h-2v-2h2zm0-4h-2v-4h2z"}),"Warning");export{o as d};
-========
-import{i as r,j as a}from"./vendor-Bv45WOlh.js";import{r as t}from"./index-BEcMo6GD.js";var e={},i=r;Object.defineProperty(e,"__esModule",{value:!0});var o=e.default=void 0,u=i(t()),n=a;o=e.default=(0,u.default)((0,n.jsx)("path",{d:"M1 21h22L12 2zm12-3h-2v-2h2zm0-4h-2v-4h2z"}),"Warning");export{o as d};
->>>>>>>> parent of 41a9f33 (fehlerhafter Fix):dist/assets/Warning-WIhdOdhe.js
