@@ -1,4 +1,3 @@
-// src/hooks/useKPIs.js
 import { useState, useEffect, useMemo } from 'react';
 import { doc, getDocs, getDoc, collection, query, where, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -24,7 +23,6 @@ const fmtHoursToDuration = (hours) => {
 };
 
 const calculateCoverage = (sessions) => {
-    if (!sessions || !Array.isArray(sessions)) return 0;
     const now = new Date();
     const startOfPeriod = new Date(now);
     startOfPeriod.setDate(now.getDate() - 7); 
@@ -35,7 +33,7 @@ const calculateCoverage = (sessions) => {
         return end > startOfPeriod && start < now;
     });
 
-    const intervals = (relevantSessions || []).map(s => {
+    const intervals = relevantSessions.map(s => {
         const start = s.startTime?.toDate ? s.startTime.toDate() : new Date(s.startTime);
         const end = s.endTime ? (s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime)) : new Date();
         return {
@@ -67,15 +65,14 @@ const calculateCoverage = (sessions) => {
 };
 
 const isNocturnalComplaint = (targetTime, sessions, items) => {
-    if (!sessions || !Array.isArray(sessions)) return false;
     return sessions.some(s => {
         const start = s.startTime?.toDate ? s.startTime.toDate() : new Date(s.startTime);
         const end = s.endTime ? (s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime)) : new Date(); 
         
         if (targetTime >= start && targetTime <= end) {
             const sessionItemIds = s.itemIds || (s.itemId ? [s.itemId] : []);
-            return (sessionItemIds || []).some(id => {
-                const item = (items || []).find(i => i.id === id);
+            return sessionItemIds.some(id => {
+                const item = items.find(i => i.id === id);
                 if (!item) return false;
                 const sub = (item.subCategory || '').toLowerCase();
                 return sub.includes('strumpfhose');
@@ -86,7 +83,6 @@ const isNocturnalComplaint = (targetTime, sessions, items) => {
 };
 
 const calculateDailyNylonMinutes = (dateObj, sessions, items) => {
-    if (!sessions || !Array.isArray(sessions)) return 0;
     const startOfDay = new Date(dateObj); startOfDay.setHours(0,0,0,0);
     const endOfDay = new Date(dateObj); endOfDay.setHours(23,59,59,999);
 
@@ -97,8 +93,8 @@ const calculateDailyNylonMinutes = (dateObj, sessions, items) => {
         if (sStart > endOfDay || sEnd < startOfDay) return false;
         
         const ids = s.itemIds || (s.itemId ? [s.itemId] : []);
-        return (ids || []).some(id => {
-            const item = (items || []).find(i => i.id === id);
+        return ids.some(id => {
+            const item = items.find(i => i.id === id);
             if (!item) return false;
             const cat = (item.mainCategory || '').toLowerCase();
             const sub = (item.subCategory || '').toLowerCase();
@@ -106,7 +102,7 @@ const calculateDailyNylonMinutes = (dateObj, sessions, items) => {
         });
     });
 
-    const intervals = (relevantSessions || []).map(s => {
+    const intervals = relevantSessions.map(s => {
         const sStart = s.startTime?.toDate ? s.startTime.toDate() : new Date(s.startTime);
         const sEnd = s.endTime ? (s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime)) : new Date();
         return {
@@ -134,7 +130,7 @@ const calculateDailyNylonMinutes = (dateObj, sessions, items) => {
     return Math.floor(totalMs / 60000);
 };
 
-export default function useKPIs(items = [], activeSessionsInput = [], historySessionsInput = []) {
+export default function useKPIs(items = [], activeSessionsInput, historySessionsInput) {
     const { currentUser } = useAuth();
     
     const [refreshTrigger, setRefreshTrigger] = useState(0);
@@ -142,22 +138,20 @@ export default function useKPIs(items = [], activeSessionsInput = [], historySes
     const [rawSessions, setRawSessions] = useState([]);
     const [releaseStats, setReleaseStats] = useState({ totalReleases: 0, cleanReleases: 0, keptOn: 0 });
 
-    const safeItems = items || [];
-
     useEffect(() => {
         if (!currentUser) return;
         
         const fetchData = async () => {
             setLoading(true);
             try {
-                if (!historySessionsInput || historySessionsInput.length === 0) {
+                if (!historySessionsInput) {
                     const q = query(
                         collection(db, `users/${currentUser.uid}/sessions`),
                         where('startTime', '>=', HISTORY_START_DATE),
                         orderBy('startTime', 'desc')
                     );
                     const snapshot = await getDocs(q);
-                    const fetchedSessions = (snapshot?.docs || []).map(doc => ({ id: doc.id, ...doc.data() }));
+                    const fetchedSessions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                     setRawSessions(fetchedSessions);
                 }
 
@@ -186,38 +180,38 @@ export default function useKPIs(items = [], activeSessionsInput = [], historySes
     }, [currentUser, refreshTrigger, historySessionsInput]);
 
     const allSessions = useMemo(() => {
-        if (historySessionsInput && historySessionsInput.length > 0) {
-            return [...(historySessionsInput || []), ...(activeSessionsInput || [])];
+        if (historySessionsInput) {
+            return [...historySessionsInput, ...(activeSessionsInput || [])];
         }
-        return [...(rawSessions || []), ...(activeSessionsInput || [])];
+        return [...rawSessions, ...(activeSessionsInput || [])];
     }, [historySessionsInput, rawSessions, activeSessionsInput]);
 
     const historySessions = useMemo(() => {
-        return (allSessions || []).filter(s => {
+        return allSessions.filter(s => {
             const d = s.startTime?.toDate ? s.startTime.toDate() : new Date(s.startTime);
             return d >= HISTORY_START_DATE;
         });
     }, [allSessions]);
 
     const itemStats = useMemo(() => {
-        const activeItems = safeItems.filter(i => i.status === 'active');
-        const washingItems = safeItems.filter(i => i.status === 'washing');
-        const archivedItems = safeItems.filter(i => i.status === 'archived');
+        const activeItems = items.filter(i => i.status === 'active');
+        const washingItems = items.filter(i => i.status === 'washing');
+        const archivedItems = items.filter(i => i.status === 'archived');
         const orphanCount = activeItems.filter(i => (!i.wearCount || i.wearCount === 0)).length;
 
         let totalCost = 0; 
         let totalWears = 0;
-        safeItems.forEach(i => { 
+        items.forEach(i => { 
             totalCost += (parseFloat(i.cost) || 0); 
             totalWears += (parseInt(i.wearCount) || 0); 
         });
         const avgCPWVal = totalWears > 0 ? (totalCost / totalWears) : 0;
 
         return { activeItems, washingItems, archivedItems, orphanCount, avgCPWVal };
-    }, [safeItems]);
+    }, [items]);
 
     const nylonStats = useMemo(() => {
-        const tightsItems = safeItems.filter(i => 
+        const tightsItems = items.filter(i => 
             i.status !== 'archived' && (
                 (i.mainCategory && i.mainCategory === 'Nylons') ||
                 (i.subCategory && i.subCategory.toLowerCase().includes('strumpfhose'))
@@ -227,11 +221,11 @@ export default function useKPIs(items = [], activeSessionsInput = [], historySes
         let totalLifetimeMinutes = 0;
         const uniqueNylonItemsWorn = new Set(); 
 
-        (historySessions || []).forEach(s => {
+        historySessions.forEach(s => {
             const sItemIds = s.itemIds || (s.itemId ? [s.itemId] : []);
             let sessionHasNylon = false;
-            (sItemIds || []).forEach(id => {
-                const item = safeItems.find(i => i.id === id);
+            sItemIds.forEach(id => {
+                const item = items.find(i => i.id === id);
                 if (!item) return;
                 const main = item.mainCategory || '';
                 const sub = (item.subCategory || '').toLowerCase();
@@ -260,11 +254,11 @@ export default function useKPIs(items = [], activeSessionsInput = [], historySes
         const cpnhVal = totalNylonHoursLifetime > 0 ? (totalNylonCost / totalNylonHoursLifetime) : 0;
 
         return { nylonIndexVal, cpnhVal };
-    }, [safeItems, historySessions]);
+    }, [items, historySessions]);
 
     const coreMetrics = useMemo(() => {
         const now = new Date();
-        const coverageVal = calculateCoverage(allSessions, safeItems);
+        const coverageVal = calculateCoverage(allSessions);
 
         let daysCount = 0;
         let nocturnalSuccessCount = 0;
@@ -273,7 +267,7 @@ export default function useKPIs(items = [], activeSessionsInput = [], historySes
             daysCount++;
             const checkTime = new Date(loopDate);
             checkTime.setHours(2, 0, 0, 0);
-            if (checkTime <= now && isNocturnalComplaint(checkTime, allSessions, safeItems)) { 
+            if (checkTime <= now && isNocturnalComplaint(checkTime, allSessions, items)) { 
                 nocturnalSuccessCount++;
             }
             loopDate.setDate(loopDate.getDate() + 1);
@@ -287,7 +281,7 @@ export default function useKPIs(items = [], activeSessionsInput = [], historySes
         const gapLoopDate = new Date(HISTORY_START_DATE);
         while (gapLoopDate <= now) {
             gapDaysCount++;
-            const wornMinutes = calculateDailyNylonMinutes(gapLoopDate, allSessions, safeItems);
+            const wornMinutes = calculateDailyNylonMinutes(gapLoopDate, allSessions, items);
             totalNylonMinutesHistory += wornMinutes;
             totalGapHours += ((1440 - wornMinutes) / 60);
             gapLoopDate.setDate(gapLoopDate.getDate() + 1);
@@ -304,7 +298,7 @@ export default function useKPIs(items = [], activeSessionsInput = [], historySes
         const fortyDaysAgo = new Date();
         fortyDaysAgo.setDate(now.getDate() - 40);
 
-        const recent40DaysSessions = (historySessions || []).filter(s => {
+        const recent40DaysSessions = historySessions.filter(s => {
             const d = s.startTime?.toDate ? s.startTime.toDate() : new Date(s.startTime);
             return d >= fortyDaysAgo;
         });
@@ -329,7 +323,7 @@ export default function useKPIs(items = [], activeSessionsInput = [], historySes
         const resistanceVal = recent40DaysSessions.length > 0 ? (recent40DaysSessions.filter(s => s.type === 'punishment').length / recent40DaysSessions.length) * 100 : 0;
         const avgLagVal = lagCount > 0 ? (totalLagMinutes / lagCount) : 0;
 
-        const relevantEnduranceSessions = (historySessions || []).filter(s => s.startTime);
+        const relevantEnduranceSessions = historySessions.filter(s => s.startTime);
         const sortedEnduranceSessions = [...relevantEnduranceSessions].sort((a, b) => {
             const startA = a.startTime?.toDate ? a.startTime.toDate() : new Date(a.startTime);
             const startB = b.startTime?.toDate ? b.startTime.toDate() : new Date(b.startTime);
@@ -370,8 +364,8 @@ export default function useKPIs(items = [], activeSessionsInput = [], historySes
         mergedEnduranceSessions.forEach(s => {
             const durationHours = Math.max(0, (s.parsedEnd - s.parsedStart) / 3600000);
             
-            const sessionItemIds = Array.from(s.mergedItemIds || []);
-            const sessionItems = sessionItemIds.map(id => safeItems.find(i => i.id === id)).filter(i => i);
+            const sessionItemIds = Array.from(s.mergedItemIds);
+            const sessionItems = sessionItemIds.map(id => items.find(i => i.id === id)).filter(i => i);
             if (sessionItems.length === 0) return;
 
             const hasNylon = sessionItems.some(i => {
@@ -398,7 +392,7 @@ export default function useKPIs(items = [], activeSessionsInput = [], historySes
         const enduranceDessousVal = dessousCount > 0 ? (dessousDuration / dessousCount) : 0;
 
         return { coverageVal, nocturnalVal, avgGapVal, nylonEnclosureVal, voluntarismVal, resistanceVal, avgLagVal, enduranceVal, enduranceNylonVal, enduranceDessousVal };
-    }, [safeItems, allSessions, historySessions]);
+    }, [items, allSessions, historySessions]);
 
     const chartData = useMemo(() => {
         const rawData = [];
@@ -419,7 +413,7 @@ export default function useKPIs(items = [], activeSessionsInput = [], historySes
             let monthlySumMins = 0;
             for (let d = 1; d <= daysInMonth; d++) {
                 const currentDate = new Date(y, m, d);
-                monthlySumMins += calculateDailyNylonMinutes(currentDate, allSessions, safeItems);
+                monthlySumMins += calculateDailyNylonMinutes(currentDate, allSessions, items);
             }
             
             const avgDailyMins = daysInMonth > 0 ? monthlySumMins / daysInMonth : 0;
@@ -431,7 +425,7 @@ export default function useKPIs(items = [], activeSessionsInput = [], historySes
 
         const n = rawData.length;
         let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
-        (rawData || []).forEach((d, idx) => {
+        rawData.forEach((d, idx) => {
             sumX += idx; sumY += d.val; sumXY += (idx * d.val); sumX2 += (idx * idx);
         });
         
@@ -439,12 +433,12 @@ export default function useKPIs(items = [], activeSessionsInput = [], historySes
         const m_slope = denominator === 0 ? 0 : (n * sumXY - sumX * sumY) / denominator;
         const b_intercept = denominator === 0 ? sumY / n : (sumY - m_slope * sumX) / n;
 
-        return (rawData || []).map((d, idx) => ({
+        return rawData.map((d, idx) => ({
             dateStr: d.dateStr,
             Stunden: Number(d.val.toFixed(2)),
             Trend: Math.max(0, Number((m_slope * idx + b_intercept).toFixed(2)))
         }));
-    }, [safeItems, allSessions]);
+    }, [items, allSessions]);
 
     const femIndexData = useMemo(() => {
         const { enduranceVal, nylonEnclosureVal, avgLagVal, voluntarismVal, resistanceVal, nocturnalVal, coverageVal } = coreMetrics;
@@ -466,11 +460,12 @@ export default function useKPIs(items = [], activeSessionsInput = [], historySes
         return { score: isNaN(femScore) ? 0 : Math.min(100, femScore), scorePhysis, scorePsyche, scoreInfiltration };
     }, [coreMetrics]);
 
+    // NEU: DEEP ANALYTICS MEMO (PSYCHO-PROFIL)
     const deepAnalytics = useMemo(() => {
         // 1. Krisen-Prädiktion
         const failureDays = {0:0, 1:0, 2:0, 3:0, 4:0, 5:0, 6:0};
         let totalFailures = 0;
-        (historySessions || []).forEach(s => {
+        historySessions.forEach(s => {
             if (s.type === 'punishment' || s.isDebtSession) {
                 const d = s.startTime?.toDate ? s.startTime.toDate() : new Date(s.startTime);
                 if (d && !isNaN(d)) { failureDays[d.getDay()]++; totalFailures++; }
@@ -483,20 +478,20 @@ export default function useKPIs(items = [], activeSessionsInput = [], historySes
         const riskLevel = totalFailures > 10 ? 'Hoch' : (totalFailures > 5 ? 'Moderat' : 'Gering');
 
         // 2. Unterbewusste Adaption
-        const nightSessions = (historySessions || []).filter(s => s.periodId && s.periodId.includes('night'));
+        const nightSessions = historySessions.filter(s => s.periodId && s.periodId.includes('night'));
         let undisturbedCount = 0;
         nightSessions.forEach(s => {
             const start = s.startTime?.toDate ? s.startTime.toDate() : new Date(s.startTime);
             const end = s.endTime ? (s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime)) : new Date();
             const diffMins = (end - start) / 60000;
-            if (diffMins >= 360) undisturbedCount++; 
+            if (diffMins >= 360) undisturbedCount++; // Mindestens 6 Stunden ununterbrochener Schlaf in Nylons
         });
         const adaptionScore = nightSessions.length > 0 ? (undisturbedCount / nightSessions.length) * 100 : 0;
 
         // 3. Willenskraft-Erschöpfung (Ego-Depletion)
         let totalMinsBeforeFailure = 0;
         let failureEvents = 0;
-        (historySessions || []).forEach((s, idx) => {
+        historySessions.forEach((s, idx) => {
             if (s.type === 'punishment' && idx < historySessions.length - 1) {
                 const prevS = historySessions[idx + 1]; 
                 const start = prevS.startTime?.toDate ? prevS.startTime.toDate() : new Date(prevS.startTime);
@@ -511,12 +506,12 @@ export default function useKPIs(items = [], activeSessionsInput = [], historySes
         const egoDepletionMins = failureEvents > 0 ? (totalMinsBeforeFailure / failureEvents) : 0; 
 
         // 4. Infiltrations-Eskalation
-        const daySessions = (historySessions || []).filter(s => s.periodId && s.periodId.includes('day'));
+        const daySessions = historySessions.filter(s => s.periodId && s.periodId.includes('day'));
         let complexDayCount = 0;
         daySessions.forEach(s => {
             const sItemIds = s.itemIds || (s.itemId ? [s.itemId] : []);
-            const hasComplex = (sItemIds || []).some(id => {
-                const item = safeItems.find(i => i.id === id);
+            const hasComplex = sItemIds.some(id => {
+                const item = items.find(i => i.id === id);
                 if (!item) return false;
                 const cat = (item.mainCategory || '').toLowerCase();
                 const sub = (item.subCategory || '').toLowerCase();
@@ -532,14 +527,14 @@ export default function useKPIs(items = [], activeSessionsInput = [], historySes
             egoDepletionHours: egoDepletionMins > 0 ? egoDepletionMins / 60 : 0, 
             infiltrationEskalation: infiltrationScore
         };
-    }, [historySessions, safeItems]);
+    }, [historySessions, items]);
 
     const finalKpis = useMemo(() => {
         const spermaRateVal = releaseStats.totalReleases > 0 
             ? (releaseStats.cleanReleases / releaseStats.totalReleases) * 100 : 0;
 
         const startOfToday = new Date(); startOfToday.setHours(0,0,0,0);
-        const sessionsToday = (allSessions || []).filter(s => {
+        const sessionsToday = allSessions.filter(s => {
             if(!s.startTime) return false;
             const d = s.startTime?.toDate ? s.startTime.toDate() : new Date(s.startTime);
             return d >= startOfToday;
@@ -595,5 +590,6 @@ export default function useKPIs(items = [], activeSessionsInput = [], historySes
 
     const refreshKPIs = () => setRefreshTrigger(prev => prev + 1);
 
+    // NEU: deepAnalytics im Hook Return hinzugefügt
     return { ...finalKpis, deepAnalytics, loading, refreshKPIs };
 }

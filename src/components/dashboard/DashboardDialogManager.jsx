@@ -1,4 +1,3 @@
-// src/components/dashboard/DashboardDialogManager.jsx
 import React from 'react';
 import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Typography, LinearProgress } from '@mui/material';
 import { DESIGN_TOKENS } from '../../theme/obsidianDesign';
@@ -19,6 +18,7 @@ import AuditDialog from '../dialogs/AuditDialog';
 import LaundryDialog from '../dialogs/LaundryDialog';
 import useUIStore from '../../store/uiStore';
 
+// RE-INTEGRIERT: Der reine UI-Dialog für die Fem-Index Details.
 const IndexDetailDialog = ({ open, onClose, details }) => {
     if (!details) return null;
     const renderMetricRow = (label, value, color, icon) => (
@@ -62,6 +62,7 @@ export default function DashboardDialogManager({
     handleConfirmAuditItem, 
     indexDetails, activeSessions 
 }) {
+    const transit = instructionStatus?.transitProtocol;
     const forcedRelease = instructionStatus?.forcedRelease;
 
     const {
@@ -73,14 +74,11 @@ export default function DashboardDialogManager({
         indexDialogOpen, setIndexDialogOpen
     } = useUIStore();
 
-    // KORREKTUR: Absicherung gegen undefinierte Store-Arrays beim Initial-Render, um .length Abstürze zu verhindern.
-    const safeAuditItems = pendingAuditItems || [];
-    const safeAuditIndex = currentAuditIndex || 0;
-
     return (
         <>
-            <TzdOverlay tzdActive={tzdActive} items={items || []} />
+            <TzdOverlay tzdActive={tzdActive} items={items} />
 
+            {/* GATEKEEPER KORREKTUR: Verhindert das verfrühte Rendern nach dem Blind Oath */}
             {instructionStatus?.isActive && forcedRelease?.required && !forcedRelease?.executed && (
                 <ForcedReleaseOverlay 
                     onConfirm={handleConfirmForcedRelease} 
@@ -99,7 +97,7 @@ export default function DashboardDialogManager({
 
             <OfferDialog 
                 open={offerOpen} 
-                gambleStake={gambleStake || []} 
+                gambleStake={gambleStake} 
                 onAccept={handleGambleAccept} 
                 onDecline={handleGambleDecline} 
                 hasVoluntarySession={hasVoluntarySession}
@@ -112,7 +110,7 @@ export default function DashboardDialogManager({
                 open={isInstructionOpen} 
                 onClose={() => setInstructionOpen(false)}
                 instruction={currentInstruction} 
-                items={items || []}
+                items={items}
                 isNight={isNight}
                 isFreeDay={isFreeDay}
                 freeDayReason={freeDayReason}
@@ -124,7 +122,7 @@ export default function DashboardDialogManager({
                 oathProgress={useUIStore.getState().oathProgress}
                 isHoldingOath={useUIStore.getState().isHoldingOath}
                 showToast={showToast}
-                activeSessions={activeSessions || []}
+                activeSessions={activeSessions}
             />
 
             <PunishmentDialog 
@@ -154,18 +152,19 @@ export default function DashboardDialogManager({
             <AuditDialog 
                 open={isAuditOpen} 
                 onClose={() => setAuditOpen(false)}
-                currentItem={safeAuditItems[safeAuditIndex]}
-                progress={{ current: safeAuditIndex + 1, total: safeAuditItems.length }}
+                currentItem={pendingAuditItems[currentAuditIndex]}
+                progress={{ current: currentAuditIndex + 1, total: pendingAuditItems.length }}
                 onConfirm={handleConfirmAuditItem}
             />
 
             <LaundryDialog
                 open={isLaundryOpen}
                 onClose={() => setLaundryOpen(false)}
-                items={items || []}
+                items={items}
                 userId={currentUser?.uid}
             />
 
+            {/* NEU: Einbindung des fehlenden Fem-Index Dialogs */}
             <IndexDetailDialog 
                 open={indexDialogOpen} 
                 onClose={() => setIndexDialogOpen(false)} 

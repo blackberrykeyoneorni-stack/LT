@@ -1,4 +1,3 @@
-// src/hooks/dashboard/useSessionProgress.js
 import { useState, useEffect } from 'react';
 import { collection, query, where, onSnapshot, doc, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
@@ -142,7 +141,7 @@ export default function useSessionProgress(currentUser, items) {
         );
 
         const unsubActive = onSnapshot(qActive, (snapshot) => {
-            const sessions = (snapshot?.docs || []).map(doc => ({
+            const sessions = snapshot.docs.map(doc => ({
                 id: doc.id,
                 ...doc.data(),
                 startTime: doc.data().startTime?.toDate() || new Date()
@@ -163,7 +162,7 @@ export default function useSessionProgress(currentUser, items) {
         const unsubHistory = onSnapshot(qHistory, (snapshot) => {
             let maxDuration = 0;
 
-            (snapshot?.docs || []).forEach(doc => {
+            snapshot.docs.forEach(doc => {
                 const data = doc.data();
                 const isNight = data.periodId && data.periodId.toLowerCase().includes('night');
 
