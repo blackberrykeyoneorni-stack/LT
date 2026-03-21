@@ -61,14 +61,13 @@ const isItemInRecovery = (item, restingHours = 24) => {
 
 /**
  * Zukünftige Pläne für Pre-Locking laden.
- * Verhindert, dass Items ausgewählt werden, die in den nächsten 48h fest eingeplant sind.
+ * Berechnet rückwirkend die Erholungszeit, um zu garantieren, dass geplante Items einsatzbereit sind.
  */
-const getFutureBlockedItemIds = async (uid, restingHours) => {
+const getFutureBlockedItemIds = async (uid, items, currentDurationMinutes, restingHours) => {
     try {
         const now = new Date();
         const futureLimit = new Date();
-        // Blockiere für die nächsten 48 Stunden, um Wasch- und Erholungszeiten zu garantieren.
-        futureLimit.setHours(futureLimit.getHours() + 48);
+        futureLimit.setDate(futureLimit.getDate() + 14); // 14 Tage maximaler Vorschau-Horizont
 
         const q = query(
             collection(db, `users/${uid}/sessions`),
@@ -82,13 +81,35 @@ const getFutureBlockedItemIds = async (uid, restingHours) => {
 
         snap.forEach(doc => {
             const data = doc.data();
-            if (data.itemId) blockedIds.push(data.itemId);
+            if (!data.startTime) return;
+            const plannedStart = data.startTime.toDate();
+            
+            let sessionItemIds = [];
+            if (data.itemId) sessionItemIds.push(data.itemId);
             if (data.itemIds && Array.isArray(data.itemIds)) {
-                blockedIds = [...blockedIds, ...data.itemIds];
+                sessionItemIds = [...sessionItemIds, ...data.itemIds];
             }
+
+            sessionItemIds.forEach(id => {
+                const item = items.find(i => i.id === id);
+                if (!item) return;
+
+                // Nur Nylons benötigen Recovery-Zeiten
+                const isNylon = item.mainCategory === 'Nylons';
+                const itemRestingMs = isNylon ? (restingHours * 60 * 60 * 1000) : 0;
+                const wearDurationMs = currentDurationMinutes * 60 * 1000;
+                
+                // Berechnet, wann das Item wieder verfügbar wäre, wenn wir es JETZT tragen
+                const availableAgainAt = new Date(now.getTime() + wearDurationMs + itemRestingMs);
+
+                // Blockiere das Item heute, wenn seine Wiederverfügbarkeit mit dem zukünftigen Plan kollidiert
+                if (availableAgainAt >= plannedStart) {
+                    blockedIds.push(id);
+                }
+            });
         });
 
-        return blockedIds;
+        return [...new Set(blockedIds)];
     } catch (e) {
         console.warn("Konnte zukünftige Pläne nicht laden (ignoriere):", e);
         return [];
@@ -101,13 +122,13 @@ const getFutureBlockedItemIds = async (uid, restingHours) => {
  */
 const checkTodayPlan = async (uid, allItems, periodId) => {
     try {
-        if (!periodId) return null;
+        if (!periodId) return [];
         const isNight = periodId.includes('night');
         const targetPeriod = isNight ? 'night' : 'day';
 
         // Konstruiere Mitternachtsgrenzen für das Datum aus periodId (z.B. "2026-03-19-day")
         const dateParts = periodId.split('-');
-        if (dateParts.length < 3) return null;
+        if (dateParts.length < 3) return [];
         
         const year = parseInt(dateParts[0]);
         const month = parseInt(dateParts[1]) - 1; // JS months are 0-indexed
@@ -140,10 +161,10 @@ const checkTodayPlan = async (uid, allItems, periodId) => {
             console.log(`InstructionService: Plan für ${periodId} gefunden!`, plannedItemIds);
             return allItems.filter(i => plannedItemIds.includes(i.id));
         }
-        return null;
+        return [];
     } catch (e) {
         console.error("Fehler beim Prüfen des Tagesplans:", e);
-        return null;
+        return [];
     }
 };
 
@@ -244,8 +265,6 @@ const getRecentSessionsMap = async (uid, lookbackHours = 48) => {
  * Prüft um 01:30, 03:00, 04:30 und 06:00 Uhr.
  */
 export const verifyNightCompliance = async (userId, referenceDate = new Date()) => {
-    // referenceDate ist standardmäßig "Jetzt" (der aktuelle Tag).
-
     try {
         const year = referenceDate.getFullYear();
         const month = referenceDate.getMonth();
@@ -282,7 +301,7 @@ export const verifyNightCompliance = async (userId, referenceDate = new Date()) 
             });
         });
 
-        // NEU: Sessions sortieren und lückenlose Ketten (Toleranz 15 Min) verschmelzen
+        // Sessions sortieren und lückenlose Ketten (Toleranz 15 Min) verschmelzen
         rawSessions.sort((a, b) => a.start - b.start);
         const sessions = [];
         if (rawSessions.length > 0) {
@@ -342,21 +361,16 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
         const prefsSnap = await getDoc(doc(db, `users/${uid}/settings/preferences`));
         const prefs = prefsSnap.exists() ? prefsSnap.data() : {};
 
-        // NEU: Hole Protokoll-Einstellungen für Forced Release
         const protocolSettings = await getProtocolSettings(uid);
-
-        // Dynamische Berechnung der Dauer (inkl. Recovery & Suspensions)
         const durationMinutes = await calculateTargetDuration(uid, prefs, periodId);
 
-        // SICHERHEIT: Parse als Integer, um String-Vergleiche zu vermeiden
         const maxItems = parseInt(prefs.maxInstructionItems || 1, 10);
         const restingHours = prefs.nylonRestingHours || 24;
         const userWeights = prefs.categoryWeights || {}; 
 
-        // 1b. NEU: Hole echte Session-Daten für robusten Recovery-Check
         const recentSessionsMap = await getRecentSessionsMap(uid, restingHours + 5);
 
-        // --- NEU: STEALTH MODUS KOFFER PRÜFUNG ---
+        // --- STEALTH MODUS KOFFER PRÜFUNG ---
         let isStealth = false;
         let packedItemIds = [];
         const suspQ = query(collection(db, `users/${uid}/suspensions`), where('status', '==', 'active'), where('type', '==', 'stealth_travel'));
@@ -369,38 +383,18 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
 
         // 2. CHECK: GIBT ES EINEN PLAN FÜR HEUTE?
         const plannedItems = await checkTodayPlan(uid, items, periodId);
+        let selectedItems = [...plannedItems];
+        let isPlannedInstruction = plannedItems.length > 0;
 
-        if (plannedItems && plannedItems.length > 0) {
-            console.log("InstructionService: Führe geplanten Plan aus.");
-
-            const titleNames = plannedItems.map(i => i.subCategory || i.name || 'Item').join(' & ');
-
-            const instructionData = {
-                periodId,
-                generatedAt: serverTimestamp(),
-                isAccepted: false,
-                isPlanned: true,
-                itemName: titleNames,
-                durationMinutes, 
-                stealthModeActive: isStealth,
-                forcedRelease: { required: false, executed: false, method: null },
-                items: plannedItems.map(i => ({
-                    id: i.id,
-                    name: i.subCategory || i.name || 'Unbenanntes Item',
-                    brand: i.brand || '',
-                    img: i.imageUrl || (i.images && i.images[0]) || null,
-                    subCategory: i.subCategory || ''
-                }))
-            };
-            await setDoc(doc(db, `users/${uid}/status/dailyInstruction`), instructionData);
-            return instructionData;
+        if (isPlannedInstruction) {
+            console.log("InstructionService: Plan für heute gefunden. Setze Anker-Items:", plannedItems.map(i => i.id));
         }
 
-        // --- AB HIER: SMART HYBRID SELECTION (WURZEL-DÄMPFUNG) ---
+        // --- SMART HYBRID SELECTION (WURZEL-DÄMPFUNG) ---
 
         const safeActiveSessions = Array.isArray(activeSessions) ? activeSessions : [];
         const allActiveIds = new Set();
-        const activeCategoryKeys = new Set(); // NEU: Kategorie-Blocker
+        const activeCategoryKeys = new Set(); 
 
         safeActiveSessions.forEach(s => {
             const sessionIds = [];
@@ -417,16 +411,24 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
             });
         });
 
-        const futureBlockedIds = await getFutureBlockedItemIds(uid, restingHours);
+        // Blockiere zusätzlich die Kategorien der heute fest geplanten Anker-Items
+        selectedItems.forEach(item => {
+            const key = item.subCategory || item.mainCategory || 'Sonstiges';
+            activeCategoryKeys.add(key);
+        });
+
+        // Predictive Pre-Locking für zukünftige Pläne
+        const futureBlockedIds = await getFutureBlockedItemIds(uid, items, durationMinutes, restingHours);
 
         const isNightInstruction = periodId && periodId.includes('night');
 
         // 3. Filterung der verfügbaren Items
         const availableItems = items.filter(i => {
-            // Nur aktive Items
+            // Bereits gesetzte Plan-Items aus dem Pool nehmen
+            if (selectedItems.some(si => si.id === i.id)) return false;
+
             if (i.status !== 'active') return false;
 
-            // --- NEU: HARTE WEICHE FÜR STEALTH (REISE) ---
             if (isStealth) {
                 if (!packedItemIds.includes(i.id)) return false;
                 
@@ -437,14 +439,11 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                 }
             }
 
-            // Nicht, wenn genau dieses Item bereits getragen
             if (allActiveIds.has(i.id)) return false;
 
-            // NEU: Nicht, wenn Kategorie bereits am Körper (Blockiert Doppelungen wie 2x Strumpfhose)
             const itemKey = i.subCategory || i.mainCategory || 'Sonstiges';
             if (activeCategoryKeys.has(itemKey)) return false;
 
-            // Nicht, wenn in Recovery (Elasthan-Ruhe)
             let effectiveItem = i;
             if (recentSessionsMap[i.id]) {
                 const sessionDate = recentSessionsMap[i.id];
@@ -457,15 +456,12 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
 
             if (isItemInRecovery(effectiveItem, restingHours)) return false;
 
-            // Verschärfter Filter: Penetrations-Toys sind strikt für Bestrafungen reserviert und für reguläre Instructions gesperrt
             const itemSub = (i.subCategory || '').toLowerCase();
             if (i.mainCategory === 'Accessoires' && (itemSub.includes('buttplug') || itemSub.includes('dildo'))) { return false;
             }
 
-            // Nicht, wenn für die Zukunft geplant
             if (futureBlockedIds.includes(i.id)) return false;
 
-            // Zeit-Check (Tag/Nacht Eignung)
             const itemPeriod = i.suitablePeriod || 'Beide';
 
             if (isNightInstruction) {
@@ -477,8 +473,6 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
             return true;
         });
 
-        if (availableItems.length === 0) return null;
-
         // 4. SMART HYBRID SELECTOR
         const groups = {};
         availableItems.forEach(item => {
@@ -488,15 +482,11 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
         });
 
         let availableGroupKeys = Object.keys(groups);
-        const selectedItems = [];
 
-        // --- Wahrscheinlichkeits-Logik für Item-Anzahl ---
         let targetItemCount = 1;
         const rndCount = Math.random();
 
         if (isNightInstruction) {
-            // NEU: Nacht-Anweisung überschreibt maxItems und nutzt feste Wahrscheinlichkeiten
-            // 45% für 3 Items, 45% für 2 Items, 10% für 1 Item
             if (rndCount < 0.45) {
                 targetItemCount = 3;
             } else if (rndCount < 0.90) { 
@@ -506,7 +496,6 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
             }
             console.log(`InstructionService: Nacht-Modus aktiv. Random=${rndCount.toFixed(2)} -> TargetCount=${targetItemCount}`);
         } else {
-            // Bisherige Logik für den Tag
             if (maxItems === 1) {
                 targetItemCount = 1;
             } else if (maxItems === 2) {
@@ -527,87 +516,86 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
             console.log(`InstructionService: Tag-Modus. MaxItems=${maxItems}, Random=${rndCount.toFixed(2)} -> TargetCount=${targetItemCount}`);
         }
 
-        // Schleife zum Ziehen der Items
-        for (let k = 0; k < targetItemCount; k++) {
-            if (availableGroupKeys.length === 0) break;
+        // Dynamische Auffüllung der Slots (Ignoriert Limits, falls Plan-Items das Limit bereits überschreiten)
+        const slotsToFill = targetItemCount - selectedItems.length;
 
-            let totalWeight = 0;
-            const weightedGroups = availableGroupKeys.map(key => {
-                const count = groups[key].length;
-                const rootScore = Math.sqrt(count);
-                const manualWeight = parseInt(userWeights[key] || 1);
+        if (slotsToFill > 0) {
+            for (let k = 0; k < slotsToFill; k++) {
+                if (availableGroupKeys.length === 0) break;
 
-                const finalScore = rootScore * manualWeight;
-                totalWeight += finalScore;
+                let totalWeight = 0;
+                const weightedGroups = availableGroupKeys.map(key => {
+                    const count = groups[key].length;
+                    const rootScore = Math.sqrt(count);
+                    const manualWeight = parseInt(userWeights[key] || 1);
 
-                return { key, score: finalScore };
-            });
+                    const finalScore = rootScore * manualWeight;
+                    totalWeight += finalScore;
 
-            let randomValue = Math.random() * totalWeight;
-            let chosenCategoryKey = null;
+                    return { key, score: finalScore };
+                });
 
-            for (const group of weightedGroups) {
-                randomValue -= group.score;
-                if (randomValue <= 0) {
-                    chosenCategoryKey = group.key;
-                    break;
-                }
-            }
-            if (!chosenCategoryKey && weightedGroups.length > 0) {
-                chosenCategoryKey = weightedGroups[weightedGroups.length - 1].key;
-            }
+                let randomValue = Math.random() * totalWeight;
+                let chosenCategoryKey = null;
 
-            const itemsInGroup = groups[chosenCategoryKey];
-            
-            // --- NEU: NEGLECT-WEIGHTING ALGORITHMUS (Nur für Nylons) ---
-            let groupTotalItemWeight = 0;
-            const weightedItemsInGroup = itemsInGroup.map(item => {
-                let itemWeight = 1; // Standard-Gewicht
-                
-                // Prüfen, ob es ein Nylon ist
-                const isNylon = item.mainCategory === 'Nylons' || 
-                                (item.subCategory || '').toLowerCase().includes('strumpfhose') || 
-                                (item.subCategory || '').toLowerCase().includes('stockings') ||
-                                (item.subCategory || '').toLowerCase().includes('tights');
-                
-                if (isNylon) {
-                    // Ermittle den echten letzten Tragezeitpunkt (inkl. recentSessionsMap für maximale Genauigkeit)
-                    let lastWornDate = item.lastWorn && item.lastWorn.toDate ? item.lastWorn.toDate() : (item.lastWorn ? new Date(item.lastWorn) : null);
-                    if (recentSessionsMap[item.id] && (!lastWornDate || recentSessionsMap[item.id] > lastWornDate)) {
-                        lastWornDate = recentSessionsMap[item.id];
-                    }
-
-                    if (!item.wearCount || item.wearCount === 0 || !lastWornDate) {
-                        // Orphan Boost: Extrem hohe Priorität für ungetragene/neue Nylons
-                        itemWeight = 10;
-                    } else {
-                        // Multiplikator: 5% (0.05) pro Tag der Nichtbeachtung
-                        const daysSince = Math.max(0, Math.floor((Date.now() - lastWornDate.getTime()) / (1000 * 60 * 60 * 24)));
-                        itemWeight = 1 + (daysSince * 0.05); 
+                for (const group of weightedGroups) {
+                    randomValue -= group.score;
+                    if (randomValue <= 0) {
+                        chosenCategoryKey = group.key;
+                        break;
                     }
                 }
-                
-                groupTotalItemWeight += itemWeight;
-                return { item, weight: itemWeight };
-            });
-
-            // Gewichtete Zufallsauswahl innerhalb der Kategorie
-            let randomItemValue = Math.random() * groupTotalItemWeight;
-            let selectedItem = null;
-
-            for (const wi of weightedItemsInGroup) {
-                randomItemValue -= wi.weight;
-                if (randomItemValue <= 0) {
-                    selectedItem = wi.item;
-                    break;
+                if (!chosenCategoryKey && weightedGroups.length > 0) {
+                    chosenCategoryKey = weightedGroups[weightedGroups.length - 1].key;
                 }
-            }
-            if (!selectedItem && weightedItemsInGroup.length > 0) {
-                selectedItem = weightedItemsInGroup[weightedItemsInGroup.length - 1].item;
-            }
 
-            selectedItems.push(selectedItem);
-            availableGroupKeys = availableGroupKeys.filter(key => key !== chosenCategoryKey);
+                const itemsInGroup = groups[chosenCategoryKey];
+                
+                // --- NEGLECT-WEIGHTING ALGORITHMUS (Nur für Nylons) ---
+                let groupTotalItemWeight = 0;
+                const weightedItemsInGroup = itemsInGroup.map(item => {
+                    let itemWeight = 1; 
+                    
+                    const isNylon = item.mainCategory === 'Nylons' || 
+                                    (item.subCategory || '').toLowerCase().includes('strumpfhose') || 
+                                    (item.subCategory || '').toLowerCase().includes('stockings') ||
+                                    (item.subCategory || '').toLowerCase().includes('tights');
+                    
+                    if (isNylon) {
+                        let lastWornDate = item.lastWorn && item.lastWorn.toDate ? item.lastWorn.toDate() : (item.lastWorn ? new Date(item.lastWorn) : null);
+                        if (recentSessionsMap[item.id] && (!lastWornDate || recentSessionsMap[item.id] > lastWornDate)) {
+                            lastWornDate = recentSessionsMap[item.id];
+                        }
+
+                        if (!item.wearCount || item.wearCount === 0 || !lastWornDate) {
+                            itemWeight = 10;
+                        } else {
+                            const daysSince = Math.max(0, Math.floor((Date.now() - lastWornDate.getTime()) / (1000 * 60 * 60 * 24)));
+                            itemWeight = 1 + (daysSince * 0.05); 
+                        }
+                    }
+                    
+                    groupTotalItemWeight += itemWeight;
+                    return { item, weight: itemWeight };
+                });
+
+                let randomItemValue = Math.random() * groupTotalItemWeight;
+                let selectedItem = null;
+
+                for (const wi of weightedItemsInGroup) {
+                    randomItemValue -= wi.weight;
+                    if (randomItemValue <= 0) {
+                        selectedItem = wi.item;
+                        break;
+                    }
+                }
+                if (!selectedItem && weightedItemsInGroup.length > 0) {
+                    selectedItem = weightedItemsInGroup[weightedItemsInGroup.length - 1].item;
+                }
+
+                selectedItems.push(selectedItem);
+                availableGroupKeys = availableGroupKeys.filter(key => key !== chosenCategoryKey);
+            }
         }
 
         if (selectedItems.length === 0) return null;
@@ -706,6 +694,7 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
             periodId,
             generatedAt: serverTimestamp(),
             isAccepted: false,
+            isPlanned: isPlannedInstruction,
             itemName: titleNames,
             durationMinutes, 
             stealthModeActive: isStealth, 

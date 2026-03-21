@@ -26,7 +26,6 @@ import {
 import AddIcon from '@mui/icons-material/Add';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import CloseIcon from '@mui/icons-material/Close';
-import SnoozeIcon from '@mui/icons-material/Snooze'; 
 import NfcIcon from '@mui/icons-material/Nfc';
 import Inventory2Icon from '@mui/icons-material/Inventory2';
 import CheckroomIcon from '@mui/icons-material/Checkroom'; 
@@ -148,9 +147,24 @@ export default function Inventory() {
 
       if (!lastWornDate || isNaN(lastWornDate.getTime())) return null;
       
+      // --- NEU: Dynamische Recovery-Zeit anwenden, synchron mit ItemDetail ---
+      let requiredRestingHours = restingHours; // Fallback auf Settings
+      if (item.lastSessionDurationMinutes) {
+          const wornHours = item.lastSessionDurationMinutes / 60;
+          if (wornHours <= 2) {
+              requiredRestingHours = 6 * 1.1;
+          } else if (wornHours <= 6) {
+              requiredRestingHours = 12 * 1.1;
+          } else if (wornHours <= 12) {
+              requiredRestingHours = 24 * 1.1;
+          } else {
+              requiredRestingHours = 48 * 1.1;
+          }
+      }
+
       const hoursSince = (new Date() - lastWornDate) / (1000 * 60 * 60);
-      if (hoursSince < restingHours) {
-          const remainingHours = restingHours - hoursSince;
+      if (hoursSince < requiredRestingHours) {
+          const remainingHours = requiredRestingHours - hoursSince;
           return { isResting: true, remainingHours: remainingHours };
       }
       return null;
@@ -306,27 +320,6 @@ export default function Inventory() {
 
                             {isWashing && <LocalLaundryServiceIcon sx={{ position: 'absolute', bottom: 8, right: 8, color: PALETTE.accents.blue, filter: `drop-shadow(0 0 6px ${PALETTE.accents.blue})` }} />}
                             
-                            {/* KORREKTUR: Synchronisierte Timer-Anzeige in Minuten */}
-                            {isResting && item.status === 'active' && (
-                                <Tooltip title={`Erholung: noch ${formatDuration(Math.round(recoveryInfo.remainingHours * 60))}`}>
-                                    <Chip 
-                                        icon={<SnoozeIcon style={{ fontSize: 16, color: '#000' }} />} 
-                                        label={formatDuration(Math.round(recoveryInfo.remainingHours * 60))} 
-                                        size="small" 
-                                        sx={{ 
-                                            position: 'absolute', 
-                                            top: 8, 
-                                            right: 8, 
-                                            bgcolor: '#ffc107', 
-                                            color: '#000',      
-                                            fontWeight: 'bold',
-                                            border: `1px solid #e0a800`,
-                                            backdropFilter: 'blur(4px)',
-                                            boxShadow: '0 2px 4px rgba(0,0,0,0.3)'
-                                        }} 
-                                    />
-                                </Tooltip>
-                            )}
                         </Box>
                         <CardContent sx={{ flexGrow: 1, p: 1.5 }}>
                             <Typography variant="subtitle2" noWrap sx={{ fontWeight: 800, color: '#FFF' }}>{getDisplayName(item)}</Typography>

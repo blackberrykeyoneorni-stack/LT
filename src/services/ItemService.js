@@ -157,7 +157,8 @@ export const updateWearStats = async (userId, itemId, durationMinutes) => {
     await updateDoc(itemRef, {
         wearCount: increment(1),
         totalMinutes: increment(durationMinutes),
-        lastWorn: serverTimestamp()
+        lastWorn: serverTimestamp(),
+        lastSessionDurationMinutes: durationMinutes // NEU: Synchrone Erfassung für das Inventory
     });
 };
 

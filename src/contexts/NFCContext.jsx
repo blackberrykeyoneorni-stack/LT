@@ -11,7 +11,6 @@ const NFCContext = createContext();
 
 export const useNFCGlobal = () => useContext(NFCContext);
 
-// UMBENANNT: NFCGlobalProvider (passend zu App.jsx)
 export const NFCGlobalProvider = ({ children }) => {
     const { currentUser } = useAuth();
     const navigate = useNavigate();
@@ -21,6 +20,7 @@ export const NFCGlobalProvider = ({ children }) => {
     const [isScanning, setIsScanning] = useState(false);
     const [scanMode, setScanMode] = useState('GLOBAL'); // 'GLOBAL' oder 'BIND' (Verknüpfen)
     const [bindCallback, setBindCallback] = useState(null);
+    const [isContinuous, setIsContinuous] = useState(false); // NEU: Steuert den durchgehenden Scan
     const [feedback, setFeedback] = useState({ open: false, msg: '', severity: 'info' });
 
     // --- SCAN LOGIK ---
@@ -31,7 +31,11 @@ export const NFCGlobalProvider = ({ children }) => {
         if (scanMode === 'BIND' && bindCallback) {
             bindCallback(tagId); 
             setFeedback({ open: true, msg: 'Tag erfolgreich erfasst.', severity: 'success' });
-            stopScan(); 
+            
+            // NEU: Nur stoppen, wenn es kein kontinuierlicher Scan ist
+            if (!isContinuous) {
+                stopScan(); 
+            }
             return;
         }
 
@@ -42,7 +46,6 @@ export const NFCGlobalProvider = ({ children }) => {
             try {
                 const itemsRef = collection(db, `users/${currentUser.uid}/items`);
 
-                // 1. PRIO CHECK: Ist es ein Item via nfcTagId? (Hardware ID)
                 const q1 = query(itemsRef, where('nfcTagId', '==', tagId));
                 const snap1 = await getDocs(q1);
 
@@ -53,8 +56,6 @@ export const NFCGlobalProvider = ({ children }) => {
                     return;
                 }
 
-                // 2. PRIO CHECK: Ist es ein Item via customId? (Manuelle ID)
-                // Dies behebt den logischen Bruch: Item gewinnt immer vor Lagerort.
                 const q2 = query(itemsRef, where('customId', '==', tagId));
                 const snap2 = await getDocs(q2);
 
@@ -65,16 +66,13 @@ export const NFCGlobalProvider = ({ children }) => {
                     return;
                 }
 
-                // 3. FALLBACK: Router Logic (Checkt Lagerorte & Sonstiges)
                 const action = await resolveTagAction(currentUser.uid, tagId);
 
                 if (action.type === 'NAVIGATE_ITEM') {
-                    // Fallback, falls resolveTagAction doch noch ein Item findet
                     navigate(action.target, { state: { nfcAction: 'start_session' } });
                     setFeedback({ open: true, msg: action.message, severity: 'success' });
                 } 
                 else if (action.type === 'FILTER_INVENTORY') {
-                    // Lagerort gefunden -> Filter Inventar
                     navigate(action.target, { state: { filterLocation: action.payload.location } });
                     setFeedback({ open: true, msg: action.message, severity: 'success' });
                 }
@@ -86,19 +84,21 @@ export const NFCGlobalProvider = ({ children }) => {
                 setFeedback({ open: true, msg: 'Fehler beim Verarbeiten des Tags.', severity: 'error' });
             }
         }
-    }, [scanMode, bindCallback, currentUser, navigate]);
+    }, [scanMode, bindCallback, isContinuous, currentUser, navigate]);
 
     // --- ACTIONS ---
 
     const startGlobalScan = () => {
         setScanMode('GLOBAL');
         setBindCallback(null);
+        setIsContinuous(false);
         activateReader();
     };
 
-    const startBindingScan = (callback) => {
+    const startBindingScan = (callback, continuous = false) => {
         setScanMode('BIND');
         setBindCallback(() => callback);
+        setIsContinuous(continuous);
         activateReader();
     };
 
@@ -120,6 +120,7 @@ export const NFCGlobalProvider = ({ children }) => {
         setIsScanning(false);
         setScanMode('GLOBAL');
         setBindCallback(null);
+        setIsContinuous(false);
     };
 
     const writeTag = async (text) => {
@@ -134,7 +135,6 @@ export const NFCGlobalProvider = ({ children }) => {
     };
 
     useEffect(() => {
-        // Optional: stopScan bei Unmount/Wechsel
     }, [location]);
 
     return (

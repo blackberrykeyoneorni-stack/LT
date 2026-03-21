@@ -1,40 +1,40 @@
 import React, { useState, useEffect } from 'react';
 import { 
     Dialog, DialogTitle, DialogContent, DialogActions, 
-    Button, Stack, FormControl, InputLabel, Select, MenuItem, Typography 
+    Button, Stack, FormControl, InputLabel, Select, MenuItem, Typography, Checkbox, ListItemText 
 } from '@mui/material';
 import { DESIGN_TOKENS } from '../../theme/obsidianDesign';
 
 export default function PlanSessionDialog({ open, onClose, date, items, onSave }) {
-    const [selectedItemId, setSelectedItemId] = useState('');
+    const [selectedItemIds, setSelectedItemIds] = useState([]);
     const [plannedPeriod, setPlannedPeriod] = useState('day'); // 'day' oder 'night'
 
-    // BUGFIX: Hard-Reset des Formulars, sobald der Dialog geöffnet wird
+    // Hard-Reset des Formulars, sobald der Dialog geöffnet wird
     useEffect(() => {
         if (open) {
-            setSelectedItemId('');
+            setSelectedItemIds([]);
             setPlannedPeriod('day');
         }
     }, [open]);
 
     const handleSave = () => {
-        if (!selectedItemId) return;
+        if (selectedItemIds.length === 0) return;
         
         const startDateTime = new Date(date);
         
-        // Optische Zeiten für den Kalender setzen, damit die Blöcke richtig gerendert werden
+        // Optische Zeiten für den Kalender basierend auf defaultRules (07:30 und 23:00)
         if (plannedPeriod === 'day') {
-            startDateTime.setHours(8, 0, 0, 0); 
+            startDateTime.setHours(7, 30, 0, 0); 
         } else {
-            startDateTime.setHours(20, 0, 0, 0);
+            startDateTime.setHours(23, 0, 0, 0);
         }
         
         onSave({
-            itemId: selectedItemId,
+            itemIds: selectedItemIds,
             startTime: startDateTime,
-            durationMinutes: 720, // 12 Stunden optischer Block im Kalender
+            durationMinutes: plannedPeriod === 'day' ? 930 : 510, // 15.5h oder 8.5h Block
             type: 'planned',
-            plannedPeriod: plannedPeriod // WICHTIG: Neues Feld für die Instruction-Zuweisung
+            plannedPeriod: plannedPeriod
         });
         onClose();
     };
@@ -45,11 +45,18 @@ export default function PlanSessionDialog({ open, onClose, date, items, onSave }
             <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
                 <Stack spacing={3} sx={{ mt: 1 }}>
                     <FormControl fullWidth>
-                        <InputLabel sx={{ color: 'text.secondary' }}>Item auswählen</InputLabel>
+                        <InputLabel sx={{ color: 'text.secondary' }}>Items auswählen</InputLabel>
                         <Select 
-                            value={selectedItemId} 
-                            label="Item auswählen" 
-                            onChange={(e) => setSelectedItemId(e.target.value)}
+                            multiple
+                            value={selectedItemIds} 
+                            label="Items auswählen" 
+                            onChange={(e) => {
+                                const value = e.target.value;
+                                setSelectedItemIds(typeof value === 'string' ? value.split(',') : value);
+                            }}
+                            renderValue={(selected) => {
+                                return items.filter(i => selected.includes(i.id)).map(i => i.name || i.brand).join(', ');
+                            }}
                             sx={{ 
                                 color: 'text.primary',
                                 '.MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.2)' }
@@ -58,7 +65,15 @@ export default function PlanSessionDialog({ open, onClose, date, items, onSave }
                         >
                             {items.filter(i => i.status === 'active').map(item => (
                                 <MenuItem key={item.id} value={item.id}>
-                                    {item.name || item.brand} <Typography component="span" variant="caption" color="text.secondary" sx={{ml: 1}}>({item.customId || item.id})</Typography>
+                                    <Checkbox 
+                                        checked={selectedItemIds.indexOf(item.id) > -1} 
+                                        sx={{ color: 'rgba(255,255,255,0.7)', '&.Mui-checked': { color: '#fff' } }}
+                                    />
+                                    <ListItemText 
+                                        primary={`${item.name || item.brand}`} 
+                                        secondary={`(${item.customId || item.id})`} 
+                                        secondaryTypographyProps={{variant: 'caption', color: 'text.secondary'}} 
+                                    />
                                 </MenuItem>
                             ))}
                         </Select>
