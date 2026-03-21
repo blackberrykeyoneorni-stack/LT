@@ -51,12 +51,9 @@ export default function useTZDController(active, allItems) {
     const [currentSentenceIndex, setCurrentSentenceIndex] = useState(0);
     const [elapsedString, setElapsedString] = useState("00:00:00");
 
-    // STATE FÜR ERP (Emergency Replacement Protocol)
-    const [swapDialogOpen, setSwapDialogOpen] = useState(false);
+    // STATE FÜR ERP (Emergency Replacement Protocol - Unified Archiving)
+    const [archiveDialog, setArchiveDialog] = useState({ open: false, reason: '', runLocation: '', runCause: '' });
     const [itemToSwap, setItemToSwap] = useState(null);
-    const [archiveReason, setArchiveReason] = useState('');
-    const [defectLocation, setDefectLocation] = useState('');
-    const [defectCause, setDefectCause] = useState('');
     const [swapLoading, setSwapLoading] = useState(false);
 
     // LOGIK: Initial Status laden
@@ -153,31 +150,28 @@ export default function useTZDController(active, allItems) {
         if (status?.stage !== 'running') return;
 
         setItemToSwap(item);
-        setArchiveReason(''); 
-        setDefectLocation('');
-        setDefectCause('');
-        setSwapDialogOpen(true);
+        setArchiveDialog({ open: true, reason: '', runLocation: '', runCause: '' });
     };
 
     const handleConfirmSwap = async () => {
-        if (!archiveReason || !defectLocation || !defectCause) {
-            alert("Das Protokoll erfordert eine vollständige Dokumentation des Defekts.");
+        if (!archiveDialog.reason) {
+            alert("Das Protokoll erfordert die Auswahl eines Archivierungsgrundes.");
             return;
         }
 
         setSwapLoading(true);
         try {
             const archiveData = {
-                reason: archiveReason,
-                defectLocation,
-                defectCause
+                reason: archiveDialog.reason,
+                defectLocation: archiveDialog.runLocation,
+                defectCause: archiveDialog.runCause
             };
 
             const result = await swapItemInTZD(currentUser.uid, itemToSwap.id, archiveData, allItems);
             
             if (result.success) {
                 alert(`Austausch autorisiert. Defektes Item archiviert.\n\nNEUES ZIEL: ${result.newItemName}\n\nSofort wechseln. TZD läuft weiter.`);
-                setSwapDialogOpen(false);
+                setArchiveDialog(prev => ({ ...prev, open: false }));
                 const s = await getTZDStatus(currentUser.uid);
                 setStatus(s);
             } else {
@@ -197,15 +191,9 @@ export default function useTZDController(active, allItems) {
         elapsedString,
         currentSentence: SHAME_SENTENCES[currentSentenceIndex],
         currentSentenceIndex,
-        swapDialogOpen,
-        setSwapDialogOpen,
+        archiveDialog,
+        setArchiveDialog,
         itemToSwap,
-        archiveReason,
-        setArchiveReason,
-        defectLocation,
-        setDefectLocation,
-        defectCause,
-        setDefectCause,
         swapLoading,
         handleConfirm,
         handleGiveUp,

@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { 
     Box, Typography, Button, Container, Stack, Chip, 
-    List, ListItem, ListItemAvatar, Avatar, ListItemText, Divider,
-    Dialog, DialogTitle, DialogContent, DialogActions, TextField, Alert, CircularProgress
+    List, ListItem, ListItemAvatar, Avatar, ListItemText, Divider, Alert, CircularProgress
 } from '@mui/material';
 import { motion, AnimatePresence } from 'framer-motion';
 import { PALETTE } from '../../theme/obsidianDesign';
 import useTZDController from '../../hooks/dashboard/useTZDController';
 import { grantTZDAmnesty } from '../../services/TZDService';
+
+import ArchiveDialog from '../item-detail/ArchiveDialog';
 
 // Icons
 import SecurityIcon from '@mui/icons-material/Security';
@@ -15,11 +16,9 @@ import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
 import LockIcon from '@mui/icons-material/Lock';
 import FingerprintIcon from '@mui/icons-material/Fingerprint';
 import CheckroomIcon from '@mui/icons-material/Checkroom';
-import BrokenImageIcon from '@mui/icons-material/BrokenImage';
-import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 import WarningIcon from '@mui/icons-material/Warning';
 
-export default function TzdOverlay({ active, allItems, timeBankData, currentUser }) {
+export default function TzdOverlay({ active, allItems, timeBankData, currentUser, dropdowns = { archiveReasons: [], runLocations: [], runCauses: [] } }) {
     
     const [forceHide, setForceHide] = useState(false);
     const [amnestyLoading, setAmnestyLoading] = useState(false);
@@ -38,15 +37,9 @@ export default function TzdOverlay({ active, allItems, timeBankData, currentUser
         elapsedString,
         currentSentence,
         currentSentenceIndex,
-        swapDialogOpen,
-        setSwapDialogOpen,
+        archiveDialog,
+        setArchiveDialog,
         itemToSwap,
-        archiveReason,
-        setArchiveReason,
-        defectLocation,
-        setDefectLocation,
-        defectCause,
-        setDefectCause,
         swapLoading,
         handleConfirm,
         handleGiveUp,
@@ -332,64 +325,15 @@ export default function TzdOverlay({ active, allItems, timeBankData, currentUser
                 )}
             </AnimatePresence>
 
-            {/* EMERGENCY REPLACEMENT DIALOG */}
-            <Dialog 
-                open={swapDialogOpen} 
-                onClose={() => setSwapDialogOpen(false)}
-                PaperProps={{ sx: { bgcolor: '#1a0000', border: `1px solid ${PALETTE.accents.red}`, borderRadius: 4 } }}
-            >
-                <DialogTitle sx={{ color: PALETTE.accents.red, display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <BrokenImageIcon /> Emergency Replacement Protocol
-                </DialogTitle>
-                <DialogContent>
-                    <Alert severity="warning" variant="outlined" sx={{ mb: 2, color: '#fff', borderColor: 'rgba(255,0,0,0.3)' }}>
-                        Diese Aktion ist irreversibel. Das Item <strong>{itemToSwap?.name}</strong> wird als defekt archiviert und sofort aus dem Inventar entfernt.
-                    </Alert>
-                    
-                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                        Dokumentiere den Schaden vollständig, um Ersatz zu erhalten.
-                    </Typography>
-
-                    <Box component="form" sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                        <TextField
-                            label="Art des Defekts (z.B. Laufmasche)"
-                            variant="filled"
-                            fullWidth
-                            value={archiveReason}
-                            onChange={(e) => setArchiveReason(e.target.value)}
-                            sx={{ bgcolor: 'rgba(255,255,255,0.05)', '& .MuiInputBase-input': { color: '#fff' }, '& .MuiInputLabel-root': { color: 'rgba(255,255,255,0.7)' } }}
-                        />
-                        <TextField
-                            label="Ort des Defekts (z.B. Linker Oberschenkel)"
-                            variant="filled"
-                            fullWidth
-                            value={defectLocation}
-                            onChange={(e) => setDefectLocation(e.target.value)}
-                            sx={{ bgcolor: 'rgba(255,255,255,0.05)', '& .MuiInputBase-input': { color: '#fff' }, '& .MuiInputLabel-root': { color: 'rgba(255,255,255,0.7)' } }}
-                        />
-                        <TextField
-                            label="Ursache (z.B. Hängen geblieben)"
-                            variant="filled"
-                            fullWidth
-                            value={defectCause}
-                            onChange={(e) => setDefectCause(e.target.value)}
-                            sx={{ bgcolor: 'rgba(255,255,255,0.05)', '& .MuiInputBase-input': { color: '#fff' }, '& .MuiInputLabel-root': { color: 'rgba(255,255,255,0.7)' } }}
-                        />
-                    </Box>
-                </DialogContent>
-                <DialogActions sx={{ p: 2, justifyContent: 'space-between' }}>
-                    <Button onClick={() => setSwapDialogOpen(false)} color="inherit">Abbrechen</Button>
-                    <Button 
-                        onClick={handleConfirmSwap} 
-                        variant="contained" 
-                        color="error"
-                        startIcon={swapLoading ? <CircularProgress size={20} color="inherit" /> : <SwapHorizIcon />}
-                        disabled={swapLoading}
-                    >
-                        Archivieren & Austauschen
-                    </Button>
-                </DialogActions>
-            </Dialog>
+            {/* ZENTRALISIERTER ARCHIVIERUNGS-DIALOG (ERP) */}
+            <ArchiveDialog 
+                open={archiveDialog.open} 
+                onClose={() => setArchiveDialog(prev => ({ ...prev, open: false }))}
+                onConfirm={handleConfirmSwap}
+                dropdowns={dropdowns}
+                values={archiveDialog}
+                setValues={setArchiveDialog}
+            />
         </>
     );
 }

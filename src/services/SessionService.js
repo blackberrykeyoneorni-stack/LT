@@ -1,4 +1,3 @@
-// src/services/SessionService.js
 import { db } from '../firebase';
 import { collection, doc, writeBatch, serverTimestamp, getDoc, addDoc, setDoc, increment } from 'firebase/firestore';
 import { updateWearStats, addItemHistoryEntry, setItemStatus } from './ItemService';
@@ -48,6 +47,7 @@ export const startSession = async (userId, sessionData) => {
             verifiedViaNfc: sessionData.verifiedViaNfc || false,
             isDebtSession,
             minDuration,
+            targetDurationMinutes: sessionData.instructionDurationMinutes || sessionData.targetDurationMinutes || 0, // NEU: Fix für Exploits bei Overtime-Credits
             startTime: serverTimestamp(),
             endTime: null,
             durationMinutes: 0,

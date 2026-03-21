@@ -1,5 +1,5 @@
 import { db } from '../firebase';
-import { doc, updateDoc, serverTimestamp, setDoc, getDoc, increment, query, collection, where, getDocs, addDoc } from 'firebase/firestore';
+import { doc, updateDoc, serverTimestamp, setDoc, getDoc, increment, query, collection, where, getDocs, addDoc, writeBatch } from 'firebase/firestore';
 import { safeDate } from '../utils/dateUtils';
 import { registerPunishment } from './PunishmentService';
 import { setImmunity, isImmunityActive } from './OfferService'; 
@@ -85,16 +85,41 @@ export const startTZD = async (userId, targetItems, durationMatrix, overrideDura
 
     await setDoc(doc(db, `users/${userId}/status/tzd`), tzdData);
 
-    // --- Session-Schnitt zur Eliminierung des Double-Countings ---
+    // --- Session-Schnitt zur Eliminierung des Double-Countings (inkl. Backup) ---
+    let interruptedInstruction = null;
     try {
         const activeSessionsQuery = query(collection(db, `users/${userId}/sessions`), where('isActive', '==', true), where('type', '==', 'instruction'));
         const activeSessionsSnap = await getDocs(activeSessionsQuery);
         let periodIdToCarryOver = 'day';
         
+        const dailySnap = await getDoc(doc(db, `users/${userId}/status/dailyInstruction`));
+        let baseDuration = 0;
+        if (dailySnap.exists()) {
+            baseDuration = dailySnap.data().durationMinutes || 0;
+        }
+        
         for (const sessionDoc of activeSessionsSnap.docs) {
             const sData = sessionDoc.data();
             periodIdToCarryOver = sData.periodId || periodIdToCarryOver;
+            
+            let remainingMinutes = baseDuration;
+            if (sData.startTime) {
+                const start = sData.startTime.toDate ? sData.startTime.toDate() : new Date(sData.startTime);
+                const elapsed = Math.round((new Date() - start) / 60000);
+                remainingMinutes = Math.max(1, baseDuration - elapsed);
+            }
+
+            interruptedInstruction = {
+                items: sData.itemsDetails || [],
+                periodId: periodIdToCarryOver,
+                remainingDuration: remainingMinutes
+            };
+
             await stopSession(userId, sessionDoc.id, { note: 'Beendet für TZD-Start (Schnitt)' });
+        }
+
+        if (interruptedInstruction) {
+            await updateDoc(doc(db, `users/${userId}/status/tzd`), { interruptedInstruction });
         }
 
         // TZD als völlig isolierten Typen 'tzd' starten
@@ -188,7 +213,6 @@ export const isItemEligibleForTZD = (item) => {
  * Regulärer TZD Trigger.
  */
 export const checkForTZDTrigger = async (userId, activeSessions, items) => {
-    // KORREKTUR: AMNESTIE-PRÜFUNG ZUERST (Filtert den Trigger aus, bevor überhaupt eine Chance berechnet wird)
     try {
         const tbSnap = await getDoc(doc(db, `users/${userId}/status/timeBank`));
         if (tbSnap.exists()) {
@@ -502,7 +526,12 @@ export const swapItemInTZD = async (userId, oldItemId, archiveData, allItems) =>
         if (candidates.length === 0) throw new Error("Kein Ersatz im Inventar verfügbar.");
         const replacement = candidates[Math.floor(Math.random() * candidates.length)];
 
-        await updateDoc(doc(db, `users/${userId}/items`, oldItemId), {
+        // --- TRANSAKTION START (Deep Swap) ---
+        const batch = writeBatch(db);
+
+        // 1. Altes Item archivieren
+        const oldItemRef = doc(db, `users/${userId}/items`, oldItemId);
+        batch.update(oldItemRef, {
             status: 'archived',
             archiveReason: archiveData.reason,
             defectLocation: archiveData.defectLocation || '',
@@ -510,6 +539,11 @@ export const swapItemInTZD = async (userId, oldItemId, archiveData, allItems) =>
             archivedAt: serverTimestamp()
         });
 
+        // 2. Neues Item kompromisslos sperren (status: 'worn')
+        const newItemRef = doc(db, `users/${userId}/items`, replacement.id);
+        batch.update(newItemRef, { status: 'worn' });
+
+        // 3. TZD Status (lockedItems) aktualisieren
         const newLockedItems = tzdData.lockedItems.map(item => {
             if (item.id === oldItemId) {
                 return {
@@ -525,15 +559,45 @@ export const swapItemInTZD = async (userId, oldItemId, archiveData, allItems) =>
             return item;
         });
 
-        const updates = { lockedItems: newLockedItems };
+        const tzdUpdates = { lockedItems: newLockedItems };
         if (tzdData.itemId === oldItemId) {
-            updates.itemId = replacement.id;
-            updates.itemName = replacement.name;
+            tzdUpdates.itemId = replacement.id;
+            tzdUpdates.itemName = replacement.name;
+        }
+        batch.update(statusDocRef, tzdUpdates);
+
+        // 4. Session synchronisieren (Deep Swap)
+        const qTzd = query(collection(db, `users/${userId}/sessions`), where('isActive', '==', true), where('type', '==', 'tzd'));
+        const activeTzdSnap = await getDocs(qTzd);
+        
+        if (!activeTzdSnap.empty) {
+            const sessionDoc = activeTzdSnap.docs[0];
+            const sessionData = sessionDoc.data();
+            
+            const newItemIds = sessionData.itemIds ? sessionData.itemIds.map(id => id === oldItemId ? replacement.id : id) : [];
+            const newItemsDetails = sessionData.itemsDetails ? sessionData.itemsDetails.map(item => {
+                if (item.id === oldItemId) {
+                    return {
+                        id: replacement.id,
+                        name: replacement.name || replacement.subCategory || 'Unknown',
+                        brand: replacement.brand || 'Unknown',
+                        category: replacement.category || replacement.mainCategory || 'Nylons',
+                        customId: replacement.customId || null,
+                        imageUrl: replacement.imageUrl || (replacement.images && replacement.images.length > 0 ? replacement.images[0] : null)
+                    };
+                }
+                return item;
+            }) : [];
+
+            batch.update(sessionDoc.ref, {
+                itemIds: newItemIds,
+                itemsDetails: newItemsDetails
+            });
         }
 
-        await updateDoc(statusDocRef, updates);
-
-        await addDoc(collection(db, `users/${userId}/history`), {
+        // 5. Generelle Historie schreiben
+        const historyRef = doc(collection(db, `users/${userId}/history`));
+        batch.set(historyRef, {
             type: 'tzd_swap',
             oldItemName: oldItemFull ? oldItemFull.name : 'Unknown',
             newItemName: replacement.name,
@@ -541,6 +605,10 @@ export const swapItemInTZD = async (userId, oldItemId, archiveData, allItems) =>
             timestamp: serverTimestamp()
         });
 
+        // Transaktion feuern
+        await batch.commit();
+
+        // 6. Item Historie schreiben (außerhalb des Batches, da addItemHistoryEntry Arrays manipuliert)
         await addItemHistoryEntry(userId, replacement.id, {
             type: 'tzd_entry',
             message: `Ersatz für archiviertes Item (${oldItemFull?.name || 'Unbekannt'}) im laufenden TZD.`
@@ -553,7 +621,6 @@ export const swapItemInTZD = async (userId, oldItemId, archiveData, allItems) =>
     }
 };
 
-// --- NEU: AMNESTIE-KAUF-FUNKTION ---
 export const grantTZDAmnesty = async (userId) => {
     const tbRef = doc(db, `users/${userId}/status/timeBank`);
     const tzdRef = doc(db, `users/${userId}/status/tzd`);
@@ -564,31 +631,58 @@ export const grantTZDAmnesty = async (userId) => {
         
         const data = tbSnap.data();
         if (data.nc >= 500 && data.lc >= 500) {
-            const amnestyEnd = new Date(Date.now() + 24 * 60 * 60 * 1000); // Exakt 24 Stunden
+            const amnestyEnd = new Date(Date.now() + 24 * 60 * 60 * 1000); 
             
-            // Atomare Vernichtung der Coins
+            // 1. Atomare Vernichtung der Coins
             await updateDoc(tbRef, {
                 nc: increment(-500),
                 lc: increment(-500),
                 tzdAmnestyUntil: amnestyEnd
             });
             
-            // Sofortiges Abbrechen des angekündigten Diktats
+            // 2. TZD-Status lesen für Forensik und Backup-Wiederaufnahme
+            const tzdSnap = await getDoc(tzdRef);
+            let interruptedData = null;
+            if (tzdSnap.exists()) {
+                interruptedData = tzdSnap.data().interruptedInstruction;
+                if(tzdSnap.data().lockedItems) {
+                    for(const item of tzdSnap.data().lockedItems) {
+                        await addItemHistoryEntry(userId, item.id, {
+                            type: 'tzd_amnestied',
+                            message: 'TZD durch Amnestie-Freikauf (500 NC & 500 LC) abgewendet.'
+                        });
+                    }
+                }
+            }
+
+            // 3. ZOMBIE-KILL: Die im Hintergrund laufende TZD-Session stoppen
+            const qTzd = query(collection(db, `users/${userId}/sessions`), where('isActive', '==', true), where('type', '==', 'tzd'));
+            const activeTzdSnap = await getDocs(qTzd);
+            for (const activeDoc of activeTzdSnap.docs) {
+                await stopSession(userId, activeDoc.id, { note: 'Beendet durch Amnestie-Kauf' });
+            }
+
+            // 4. Abbrechen des angekündigten Diktats im TZD-Status
             await updateDoc(tzdRef, {
                 isActive: false,
                 result: 'amnestied',
                 endTime: serverTimestamp()
             });
-            
-            // Forensik aufzeichnen
-            const tzdSnap = await getDoc(tzdRef);
-            if(tzdSnap.exists() && tzdSnap.data().lockedItems) {
-                for(const item of tzdSnap.data().lockedItems) {
-                    await addItemHistoryEntry(userId, item.id, {
-                        type: 'tzd_amnestied',
-                        message: 'TZD durch Amnestie-Freikauf (500 NC & 500 LC) abgewendet.'
-                    });
-                }
+
+            // 5. NAHTLOSE WIEDERAUFNAHME (Seamless Resumption)
+            if (interruptedData && interruptedData.items && interruptedData.items.length > 0) {
+                await startSession(userId, {
+                    items: interruptedData.items,
+                    type: 'instruction',
+                    periodId: interruptedData.periodId,
+                    instructionDurationMinutes: interruptedData.remainingDuration,
+                    note: 'Nahtlose Wiederaufnahme nach Amnestie'
+                });
+
+                // Instruction-Dauer anpassen, damit UI den fortgesetzten Timer korrekt rendert
+                await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), {
+                    durationMinutes: interruptedData.remainingDuration
+                });
             }
 
             return true;
