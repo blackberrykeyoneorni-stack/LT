@@ -39,6 +39,7 @@ export default function DashboardDialogManager({
         auditOpen, setAuditOpen,
         pendingAuditItems, currentAuditIndex,
         laundryOpen, setLaundryOpen,
+        oathProgress, isHoldingOath 
     } = useUIStore();
 
     return (
@@ -67,12 +68,13 @@ export default function DashboardDialogManager({
 
             <InstructionDialog 
                 open={instructionOpen} onClose={() => setInstructionOpen(false)}
-                instruction={currentInstruction} onStart={handleStartRequest}
-                onDecline={handleDeclineOath} startOathPress={startOathPress}
-                cancelOathPress={cancelOathPress} isNight={isNight}
-                status={instructionStatus}
+                instruction={currentInstruction} onStartRequest={handleStartRequest}
+                onDeclineOath={handleDeclineOath} onStartOath={startOathPress}
+                onCancelOath={cancelOathPress} isNight={isNight}
+                loadingStatus={instructionStatus}
                 isFreeDay={isFreeDay} freeDayReason={freeDayReason}
                 items={items} activeSessions={activeSessions}
+                oathProgress={oathProgress} isHoldingOath={isHoldingOath} showToast={showToast}
             />
 
             <LaundryDialog 
