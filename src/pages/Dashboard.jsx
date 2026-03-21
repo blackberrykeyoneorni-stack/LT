@@ -27,6 +27,7 @@ import useKPIs from '../hooks/useKPIs';
 import useInstructionManager from '../hooks/dashboard/useInstructionManager';
 import useTZDAndGamble from '../hooks/dashboard/useTZDAndGamble';
 import useUIStore from '../store/uiStore';
+import { useDashboardActions } from '../hooks/dashboard/useDashboardActions';
 
 // Components
 import ProgressBar from '../components/dashboard/ProgressBar';
@@ -53,6 +54,8 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const { startBindingScan, isScanning: isNfcScanning } = useNFCGlobal();
   
+  // Logic Hooks
+  const { washingItems, handleWashItem, handleWashAll } = useDashboardActions();
   const { activeSessions, progress, loading: sessionsLoading, dailyTargetHours, registerRelease: hookRegisterRelease } = useSessionProgress(currentUser, items);
   const kpis = useKPIs(items, activeSessions); 
   const { femIndex, femIndexLoading, indexDetails, phase, subScores } = useFemIndex(kpis); 
@@ -337,8 +340,6 @@ export default function Dashboard() {
       );
   }
 
-  const laundryCount = (items || []).filter(i => i.status === 'washing').length;
-
   return (
     <Box sx={DESIGN_TOKENS.bottomNavSpacer}>
       <Container maxWidth="md" sx={{ pt: 2, pb: 4 }}>
@@ -462,7 +463,7 @@ export default function Dashboard() {
               }}
             >
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}><LocalLaundryServiceIcon /><Typography variant="button" sx={{ fontWeight: 'bold' }}>Wäschekorb</Typography></Box>
-              <Chip label={`${laundryCount} Stk.`} size="small" sx={{ bgcolor: 'rgba(255,255,255,0.1)', color: 'text.primary', fontWeight: 'bold', borderRadius: '4px' }} />
+              <Chip label={`${washingItems.length} Stk.`} size="small" sx={{ bgcolor: 'rgba(255,255,255,0.1)', color: 'text.primary', fontWeight: 'bold', borderRadius: '4px' }} />
             </Button>
 
             <Button
@@ -491,6 +492,7 @@ export default function Dashboard() {
 
       <DashboardDialogManager
           tzdActive={tzdActive} items={items || []} 
+          washingItems={washingItems} onWashItem={handleWashItem} onWashAll={handleWashAll}
           handleConfirmForcedRelease={handleConfirmForcedRelease} handleFailForcedRelease={handleFailForcedRelease} handleRefuseForcedRelease={handleRefuseForcedRelease}
           timeBankData={timeBankData} handleAcknowledgeInflation={handleAcknowledgeInflation} offerOpen={offerOpen} gambleStake={gambleStake} 
           handleGambleAccept={handleGambleAccept} handleGambleDecline={handleGambleDecline} hasVoluntarySession={hasVoluntarySession} isForcedGamble={isForcedGamble}
