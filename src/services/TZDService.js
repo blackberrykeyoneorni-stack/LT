@@ -577,7 +577,7 @@ export const swapItemInTZD = async (userId, oldItemId, archiveData, allItems) =>
         }
         batch.update(statusDocRef, tzdUpdates);
 
-        // 4. Session synchronisieren (Deep Swap)
+        // 4. Session synchronisieren (Deep Swap inkl. Item Ledger)
         const qTzd = query(collection(db, `users/${userId}/sessions`), where('isActive', '==', true), where('type', '==', 'tzd'));
         const activeTzdSnap = await getDocs(qTzd);
         
@@ -600,10 +600,18 @@ export const swapItemInTZD = async (userId, oldItemId, archiveData, allItems) =>
                 return item;
             }) : [];
 
-            batch.update(sessionDoc.ref, {
+            const sessionUpdates = {
                 itemIds: newItemIds,
                 itemsDetails: newItemsDetails
-            });
+            };
+            
+            // NEU: Item Ledger für punktgenaue Verschleißmessung aktualisieren
+            if (sessionData.itemLedger) {
+                sessionUpdates[`itemLedger.${oldItemId}.leftAt`] = serverTimestamp();
+                sessionUpdates[`itemLedger.${replacement.id}`] = { joinedAt: serverTimestamp(), leftAt: null };
+            }
+            
+            batch.update(sessionDoc.ref, sessionUpdates);
         }
 
         // 5. Generelle Historie schreiben

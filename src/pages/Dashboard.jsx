@@ -18,7 +18,7 @@ import { getActivePunishment, clearPunishment, findPunishmentItem } from '../ser
 import { loadMonthlyBudget } from '../services/BudgetService';
 import { stopSession as stopSessionService } from '../services/SessionService';
 import { isImmunityActive } from '../services/OfferService';
-import { runTimeBankAuditor } from '../services/TimeBankService'; 
+import { runTimeBankAuditor, spendCredits } from '../services/TimeBankService'; 
 
 // Hooks
 import useSessionProgress from '../hooks/dashboard/useSessionProgress';
@@ -117,6 +117,83 @@ export default function Dashboard() {
           }
       } catch (e) {
           console.error("Fehler beim Quittieren des Tributs:", e);
+      }
+  };
+
+  // --- KORREKTUR: STRIKTE WÄHRUNGSPARITÄT (Strict Currency Alignment Gatekeeper) ---
+  const handleBuyDiscount = async (minutesToBuy) => {
+      if (!currentUser || !currentInstruction || !currentInstruction.items || currentInstruction.items.length === 0) {
+          showToast("Freikauf gescheitert. Keine aktive Anweisung gefunden.", "error");
+          return;
+      }
+
+      // 1. DYNAMISCHER SCAN: Analysiere die aktuellen Anweisungs-Items
+      let hasNylon = false;
+      let hasLingerie = false;
+
+      currentInstruction.items.forEach(item => {
+          const mainCat = (item.mainCategory || '').toLowerCase();
+          const subCat = (item.subCategory || '').toLowerCase();
+          const name = (item.name || '').toLowerCase();
+
+          if (mainCat.includes('nylon') || subCat.includes('strumpfhose') || subCat.includes('tights') || name.includes('strumpfhose')) {
+              hasNylon = true;
+          }
+          if (mainCat.includes('lingerie') || mainCat.includes('dessous') || subCat.includes('höschen') || name.includes('höschen')) {
+              hasLingerie = true;
+          }
+      });
+
+      // 2. DAS KOMPROMISSLOSE WÄHRUNGS-LOCKING
+      let paymentType = null;
+      if (hasNylon && hasLingerie) {
+          paymentType = 'both';
+      } else if (hasNylon && !hasLingerie) {
+          paymentType = 'nylon';
+      } else if (!hasNylon && hasLingerie) {
+          paymentType = 'lingerie';
+      } else {
+          showToast("Freikauf gescheitert. Weder Nylons noch Lingerie aktiv.", "error");
+          return;
+      }
+
+      try {
+          // 3. TRANSAKTION AUSFÜHREN
+          // spendCredits wirft einen Error, falls das Konto/die Konten nicht gedeckt sind
+          await spendCredits(currentUser.uid, minutesToBuy, paymentType);
+
+          // 4. ATOMARE ANTI-DOUBLE-COUNTING GUTSCHRIFT
+          const instrRef = doc(db, `users/${currentUser.uid}/status/dailyInstruction`);
+          const instrSnap = await getDoc(instrRef);
+          
+          if (instrSnap.exists()) {
+              const data = instrSnap.data();
+              const currentDiscount = data.discountMinutes || 0;
+              // Addiere STRIKT NUR den angeforderten Wert (kein Double-Counting)
+              const newDiscount = currentDiscount + minutesToBuy;
+              
+              await updateDoc(instrRef, {
+                  discountMinutes: newDiscount
+              });
+
+              let successMessage = `Freikauf autorisiert (-${minutesToBuy} Min).`;
+              if (paymentType === 'both') {
+                  successMessage = `Freikauf autorisiert (-${minutesToBuy} Min). System erzwang kombinierte LC & NC Zahlung.`;
+              } else if (paymentType === 'nylon') {
+                  successMessage = `Freikauf autorisiert (-${minutesToBuy} Min). System erzwang NC Zahlung.`;
+              } else if (paymentType === 'lingerie') {
+                  successMessage = `Freikauf autorisiert (-${minutesToBuy} Min). System erzwang LC Zahlung.`;
+              }
+
+              showToast(successMessage, "success");
+          }
+      } catch (e) {
+          console.error("Fehler beim Freikauf:", e);
+          if (e.message === "INSOLVENCY_LIMIT_REACHED") {
+               showToast("Freikauf verweigert. Kreditlimit (Insolvenz) des erzwungenen Kontos erreicht.", "error");
+          } else {
+               showToast("Systemfehler beim Freikauf.", "error");
+          }
       }
   };
 
@@ -453,7 +530,11 @@ export default function Dashboard() {
                 <Typography variant="caption" color="text.secondary">METRIKEN & VERWALTUNG</Typography>
             </Divider>
 
-            <InfoTiles kpis={kpis} timeBank={timeBankData} />
+            <InfoTiles 
+                kpis={kpis} 
+                timeBank={timeBankData} 
+                onBuyDiscount={handleBuyDiscount} 
+            />
 
             <Button
               variant="contained" fullWidth size="large" onClick={() => useUIStore.getState().setLaundryOpen(true)}

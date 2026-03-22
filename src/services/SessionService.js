@@ -31,8 +31,15 @@ export const startSession = async (userId, sessionData) => {
              minDuration = 60; // 1 Stunde Pflicht-Tilgung
         }
 
+        // NEU: Initialisierung des Session Timeline Ledgers
+        const itemLedger = {};
+        itemIds.forEach(id => {
+            itemLedger[id] = { joinedAt: serverTimestamp(), leftAt: null };
+        });
+
         const payload = {
             itemIds,
+            itemLedger, 
             itemsDetails: items.map(i => ({
                 id: i.id,
                 name: i.name || i.subCategory || 'Unknown',
@@ -99,6 +106,7 @@ export const startTransitProtocol = async (userId, itemId) => {
     const newSessionRef = doc(collection(db, `users/${userId}/sessions`));
     const payload = {
         itemIds: [itemId],
+        itemLedger: { [itemId]: { joinedAt: serverTimestamp(), leftAt: null } },
         itemsDetails: [{ id: itemId, name: 'Transit Protocol Item' }],
         type: 'instruction',
         transitProtocolActive: true, 
@@ -204,11 +212,12 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
         }
     }
 
-    const itemIds = sessionData.itemIds || (sessionData.itemId ? [sessionData.itemId] : []);
+    const currentItemIds = sessionData.itemIds || (sessionData.itemId ? [sessionData.itemId] : []);
+    const allSessionItemIds = sessionData.itemLedger ? Object.keys(sessionData.itemLedger) : currentItemIds;
     const itemDetails = [];
 
     // BUGFIX B: Strikte Trennung. ERST alle Lese-Operationen (Reads) durchführen...
-    for (const id of itemIds) {
+    for (const id of allSessionItemIds) {
         const itemRef = doc(db, `users/${userId}/items`, id);
         try {
             const iSnap = await getDoc(itemRef);
@@ -217,16 +226,33 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
     }
 
     // ... DANN alle Schreib-Operationen (Writes) in den Batch legen
-    for (const id of itemIds) {
+    for (const id of allSessionItemIds) {
         const itemRef = doc(db, `users/${userId}/items`, id);
         const isTransitItem = sessionData.transitProtocolActive && id === sessionData.transitItemId;
         
-        batch.set(itemRef, { 
-            status: isTransitItem ? 'washing' : 'active', 
-            lastWorn: serverTimestamp(),
+        let itemDurationMinutes = durationMinutes; // Fallback
+        
+        if (sessionData.itemLedger && sessionData.itemLedger[id]) {
+            const ledgerEntry = sessionData.itemLedger[id];
+            const joined = ledgerEntry.joinedAt?.toDate ? ledgerEntry.joinedAt.toDate() : startTime;
+            const left = ledgerEntry.leftAt ? (ledgerEntry.leftAt.toDate ? ledgerEntry.leftAt.toDate() : new Date(ledgerEntry.leftAt)) : endTime;
+            itemDurationMinutes = Math.max(0, Math.round((left - joined) / 60000));
+        }
+
+        const isCurrentlyActive = currentItemIds.includes(id);
+        
+        const updatePayload = {
             wearCount: increment(1),
-            totalMinutes: increment(durationMinutes)
-        }, { merge: true });
+            totalMinutes: increment(itemDurationMinutes)
+        };
+        
+        // Status und lastWorn nur anpassen, wenn das Item zum Ende der Session noch aktiv getragen wurde
+        if (isCurrentlyActive) {
+            updatePayload.status = isTransitItem ? 'washing' : 'active';
+            updatePayload.lastWorn = serverTimestamp();
+        }
+        
+        batch.set(itemRef, updatePayload, { merge: true });
     }
 
     let creditCalculated = false;
