@@ -53,6 +53,7 @@ export const checkInsolvency = async (userId, type) => {
  * Zieht Credits ab (Spending).
  * KORREKTUR: Strikte Trennung. Nutzt nur noch den requestedType ('nylon', 'lingerie', 'both').
  * Kombinierte Währungspflicht bei 'both'. Entfernung der doppelten discountMinutes.
+ * NEU: Just-In-Time Interest Tracking (Transaktionsgebundene Vorab-Verzinsung)
  */
 export const spendCredits = async (userId, amountMinutes, requestedType) => {
     if (amountMinutes <= 0) return true;
@@ -61,11 +62,18 @@ export const spendCredits = async (userId, amountMinutes, requestedType) => {
     const balanceSnap = await getDoc(docRef);
     const data = balanceSnap.exists() ? balanceSnap.data() : { nc: 0, lc: 0 };
 
+    // SCHRITT 1: Einfrieren & Vorab-Verzinsung der Vergangenheit
+    const interestPayload = await _applyPendingInterest(userId, data);
+    
+    let currentNc = interestPayload.nc !== undefined ? interestPayload.nc : data.nc;
+    let currentLc = interestPayload.lc !== undefined ? interestPayload.lc : data.lc;
+
     let chargeNc = requestedType === 'nylon' || requestedType === 'both';
     let chargeLc = requestedType === 'lingerie' || requestedType === 'both';
 
     let finalCost = amountMinutes;
-    const updates = {};
+    // Wir übernehmen das Payload der Zinsabrechnung als Basis für unser Update
+    const updates = { ...interestPayload }; 
 
     // Helper: Berechnet Aufschlag bei Dispo-Nutzung exakt für den negativen Anteil
     const calcCost = (balance) => {
@@ -80,17 +88,19 @@ export const spendCredits = async (userId, amountMinutes, requestedType) => {
     };
 
     if (chargeNc) {
-        const costNc = calcCost(data.nc);
-        if ((data.nc - costNc) < -DEBT_CONFIG.MAX_DEBT_MINUTES) throw new Error("INSOLVENCY_LIMIT_REACHED");
-        updates.nc = increment(-Math.abs(costNc));
+        const costNc = calcCost(currentNc);
+        if ((currentNc - costNc) < -DEBT_CONFIG.MAX_DEBT_MINUTES) throw new Error("INSOLVENCY_LIMIT_REACHED");
+        updates.nc = currentNc - Math.abs(costNc); // Hard Set statt increment wegen Zins-Sync
     }
     if (chargeLc) {
-        const costLc = calcCost(data.lc);
-        if ((data.lc - costLc) < -DEBT_CONFIG.MAX_DEBT_MINUTES) throw new Error("INSOLVENCY_LIMIT_REACHED");
-        updates.lc = increment(-Math.abs(costLc));
+        const costLc = calcCost(currentLc);
+        if ((currentLc - costLc) < -DEBT_CONFIG.MAX_DEBT_MINUTES) throw new Error("INSOLVENCY_LIMIT_REACHED");
+        updates.lc = currentLc - Math.abs(costLc); // Hard Set statt increment wegen Zins-Sync
     }
 
     updates.lastTransaction = serverTimestamp();
+    // Der Zins-Timer wird bei JEDER Transaktion auf JETZT genullt.
+    updates.lastInterestDate = serverTimestamp(); 
 
     // Atomares Update der TimeBank
     await updateDoc(docRef, updates);
@@ -176,6 +186,7 @@ export const calculateEarnedCredits = async (userId, session) => {
 /**
  * Fügt Credits hinzu (Earning / Tilgung).
  * Akzeptiert Integer oder das Stealth-Objekt aus calculateEarnedCredits.
+ * NEU: Just-In-Time Interest Tracking (Transaktionsgebundene Vorab-Verzinsung)
  */
 export const addCredits = async (userId, rawMinutesOrObject, type) => {
     const field = type === 'nylon' ? 'nc' : 'lc';
@@ -184,7 +195,12 @@ export const addCredits = async (userId, rawMinutesOrObject, type) => {
     
     if (!docSnap.exists()) return;
     
-    const currentBalance = docSnap.data()[field];
+    const data = docSnap.data();
+
+    // SCHRITT 1: Einfrieren & Vorab-Verzinsung der Vergangenheit
+    const interestPayload = await _applyPendingInterest(userId, data);
+    const currentBalance = interestPayload[field] !== undefined ? interestPayload[field] : data[field];
+
     let earnedCredits = 0;
 
     // Typ-Weiche für Stealth-Integration
@@ -206,60 +222,52 @@ export const addCredits = async (userId, rawMinutesOrObject, type) => {
 
     if (earnedCredits <= 0) return;
 
-    await updateDoc(docRef, {
-        [field]: increment(earnedCredits),
-        lastTransaction: serverTimestamp()
-    });
+    // Wir übernehmen das Payload der Zinsabrechnung als Basis für unser Update
+    const updates = { ...interestPayload };
+    updates[field] = currentBalance + earnedCredits; // Hard Set statt increment wegen Zins-Sync
+    updates.lastTransaction = serverTimestamp();
+    // Der Zins-Timer wird bei JEDER Transaktion auf JETZT genullt.
+    updates.lastInterestDate = serverTimestamp(); 
 
-    console.log(`TimeBank: Added ${earnedCredits} ${type.toUpperCase()} credits.`);
+    await updateDoc(docRef, updates);
+
+    console.log(`TimeBank: Added ${earnedCredits} ${type.toUpperCase()} credits (after settling past interest).`);
     return earnedCredits;
 };
 
 /**
- * WIRD VOM FRONTEND AUDITOR AUFGERUFEN.
- * Berechnet rückwirkend Zinseszins auf negative Salden.
+ * INTERNER HELFER: Just-In-Time Zinsberechnung
+ * Prüft den alten Kontostand und berechnet die Zinsen für die Zeit der Inaktivität.
+ * Schreibt NICHT selbst in die Datenbank, sondern liefert das Payload für die laufende Transaktion.
  */
-export const applyDailyInterest = async (userId) => {
-    const docRef = doc(db, `users/${userId}/status/timeBank`);
-    const docSnap = await getDoc(docRef);
-    
-    if (!docSnap.exists()) return;
-    
-    const data = docSnap.data();
-    
+const _applyPendingInterest = async (userId, currentData) => {
     const now = new Date();
     now.setHours(0, 0, 0, 0);
 
-    const lastInterest = data.lastInterestDate ? data.lastInterestDate.toDate() : new Date();
+    const lastInterest = currentData.lastInterestDate ? currentData.lastInterestDate.toDate() : new Date();
     lastInterest.setHours(0, 0, 0, 0);
 
     const diffTime = Math.abs(now - lastInterest);
     const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
 
-    if (diffDays < 1) return; // Noch kein Tag vergangen
+    const payload = {};
 
-    const updates = {};
-    let interestApplied = false;
+    if (diffDays < 1) return payload; // Noch kein Tag vergangen, keine Alt-Zinsen fällig
 
-    // RÜCKWIRKENDE ZINSESZINS BERECHNUNG (Compound)
-    let newNc = data.nc;
-    if (newNc < 0) {
-        newNc = Math.floor(newNc * Math.pow(1 + DEBT_CONFIG.DAILY_INTEREST_RATE, diffDays));
-        updates.nc = newNc;
-        interestApplied = true;
+    // RÜCKWIRKENDE ZINSESZINS BERECHNUNG (Compound) auf den ALTEN Kontostand
+    let oldNc = currentData.nc;
+    if (oldNc < 0) {
+        payload.nc = Math.floor(oldNc * Math.pow(1 + DEBT_CONFIG.DAILY_INTEREST_RATE, diffDays));
+        console.log(`TimeBank: Calculated ${diffDays} days of retroactive interest on old NC debt (${oldNc} -> ${payload.nc}).`);
     }
 
-    let newLc = data.lc;
-    if (newLc < 0) {
-        newLc = Math.floor(newLc * Math.pow(1 + DEBT_CONFIG.DAILY_INTEREST_RATE, diffDays));
-        updates.lc = newLc;
-        interestApplied = true;
+    let oldLc = currentData.lc;
+    if (oldLc < 0) {
+        payload.lc = Math.floor(oldLc * Math.pow(1 + DEBT_CONFIG.DAILY_INTEREST_RATE, diffDays));
+        console.log(`TimeBank: Calculated ${diffDays} days of retroactive interest on old LC debt (${oldLc} -> ${payload.lc}).`);
     }
 
-    updates.lastInterestDate = serverTimestamp();
-    await updateDoc(docRef, updates);
-
-    if (interestApplied) console.log(`TimeBank: Applied ${diffDays} days of retroactive interest.`);
+    return payload;
 };
 
 /**
@@ -350,7 +358,7 @@ export const applyWeeklyInflation = async (userId) => {
  */
 export const runTimeBankAuditor = async (userId) => {
     try {
-        await applyDailyInterest(userId);
+        // Der tägliche Auditor wurde restlos entfernt. Zinsen laufen nur noch "Just-In-Time" bei Transaktionen.
         await applyWeeklyInflation(userId);
     } catch (e) {
         console.error("Fehler im TimeBank Auditor:", e);

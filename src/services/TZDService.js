@@ -244,7 +244,6 @@ export const checkForTZDTrigger = async (userId, activeSessions, items) => {
              return false;
         }
         
-        await penalizeTZDAppOpen(userId);
         return true; 
     }
 
@@ -373,6 +372,18 @@ export const penalizeTZDAppOpen = async (userId) => {
     try {
         const status = await getTZDStatus(userId);
         if (status && status.isActive && status.stage === 'running') {
+            
+            // --- NEU: Cooldown-Schranke (1 Stunde) ---
+            if (status.lastPenaltyAt) {
+                const lastPenaltyTime = status.lastPenaltyAt.toDate ? status.lastPenaltyAt.toDate() : new Date(status.lastPenaltyAt);
+                const hoursSince = (new Date() - lastPenaltyTime) / (1000 * 60 * 60);
+                if (hoursSince < 1) {
+                    console.log("TZD Penalty Cooldown: Letzte Strafe war vor weniger als 1 Stunde.");
+                    return false;
+                }
+            }
+            // -----------------------------------------
+
             const penaltyMinutes = TZD_CONFIG.PENALTY_MINUTES;
             await updateDoc(doc(db, `users/${userId}/status/tzd`), {
                 targetDurationMinutes: increment(penaltyMinutes),

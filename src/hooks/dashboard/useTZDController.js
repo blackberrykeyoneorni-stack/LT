@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { 
     getTZDStatus, confirmTZDBriefing, performCheckIn, 
-    emergencyBailout, convertTZDToPlugPunishment, swapItemInTZD 
+    emergencyBailout, convertTZDToPlugPunishment, swapItemInTZD,
+    penalizeTZDAppOpen
 } from '../../services/TZDService';
 
 // --- DIE WAHRHEITEN DER HERRIN ---
@@ -66,6 +67,25 @@ export default function useTZDController(active, allItems) {
         };
         load();
     }, [active, currentUser]);
+
+    // LOGIK: App Visibility Tracking für Präzisions-Eskalation
+    useEffect(() => {
+        if (!active || !currentUser || !status?.isActive || status?.stage !== 'running') return;
+
+        const handleVisibilityChange = async () => {
+            if (document.visibilityState === 'visible') {
+                console.log("App in den Vordergrund geholt. Prüfe auf TZD-Strafe...");
+                const penalized = await penalizeTZDAppOpen(currentUser.uid);
+                if (penalized) {
+                    const s = await getTZDStatus(currentUser.uid);
+                    setStatus(s);
+                }
+            }
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+    }, [active, currentUser, status?.isActive, status?.stage]);
 
     // LOGIK: Timer Loop & Check-In (alle 60s)
     useEffect(() => {
