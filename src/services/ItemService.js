@@ -25,47 +25,63 @@ export const calculateItemRecoveryStatus = (item, sessions) => {
 
     let lastWornDate = safeDate(item.lastWorn);
     let latestSession = null;
+    let totalWornHours = 0;
 
+    // --- NEU: Kontinuierliche Trage-Kette (Contiguous Wear-Chain) ---
     if (sessions && Array.isArray(sessions) && sessions.length > 0) {
-        // Robustes Ermitteln der absolut letzten beendeten Session (unabhängig von der Array-Sortierung)
-        latestSession = sessions.reduce((latest, current) => {
-            if (!current.endTime) return latest;
-            const currentEnd = safeDate(current.endTime);
-            if (!currentEnd) return latest;
-            
-            if (!latest) return current;
-            const latestEnd = safeDate(latest.endTime);
-            return currentEnd > latestEnd ? current : latest;
-        }, null);
+        
+        // 1. Filtern und sortieren nach endTime absteigend (neueste zuerst)
+        const validSessions = sessions
+            .filter(s => safeDate(s.startTime) && safeDate(s.endTime))
+            .sort((a, b) => safeDate(b.endTime) - safeDate(a.endTime));
 
-        if (latestSession) {
+        if (validSessions.length > 0) {
+            latestSession = validSessions[0];
             const sessionEnd = safeDate(latestSession.endTime);
+            
             if (sessionEnd && (!lastWornDate || sessionEnd > lastWornDate)) {
                 lastWornDate = sessionEnd;
             }
+
+            // 2. Rückwärts-Traversieren für nahtlose Ketten
+            let totalWornMs = safeDate(latestSession.endTime) - safeDate(latestSession.startTime);
+            let currentChainStart = safeDate(latestSession.startTime);
+
+            for (let i = 1; i < validSessions.length; i++) {
+                const prevSession = validSessions[i];
+                const prevEnd = safeDate(prevSession.endTime);
+                const prevStart = safeDate(prevSession.startTime);
+
+                const gapMs = currentChainStart - prevEnd;
+
+                // Toleranz: Maximal 15 Minuten Pause zwischen den Sessions. 
+                // Negative Gaps (leichte Überschneidungen durch asynchrone Writes) werden ebenfalls als nahtlos gewertet.
+                if (gapMs <= 15 * 60 * 1000) {
+                    totalWornMs += Math.max(0, prevEnd - prevStart); // Keine Fehler durch invertierte Zeiten
+                    currentChainStart = prevStart < currentChainStart ? prevStart : currentChainStart;
+                } else {
+                    break; // Echte Pause erkannt, Kette bricht ab
+                }
+            }
+            
+            totalWornHours = totalWornMs / (1000 * 60 * 60);
         }
     }
 
     if (!lastWornDate) return null;
     
-    // --- NEU: Dynamische Recovery-Zeit Berechnung inkl. 10% Sicherheitspuffer ---
-    let requiredRestingHours = 26.4; // Fallback (24h + 10%), falls Session-Dauer unklar
+    // --- Dynamische Recovery-Zeit Berechnung inkl. 10% Sicherheitspuffer ---
+    let requiredRestingHours = 26.4; // Fallback (24h + 10%)
     
-    if (latestSession && latestSession.startTime && latestSession.endTime) {
-        const start = safeDate(latestSession.startTime);
-        const end = safeDate(latestSession.endTime);
-        if (start && end) {
-            const wornHours = (end - start) / (1000 * 60 * 60);
-            
-            if (wornHours <= 2) {
-                requiredRestingHours = 6 * 1.1; // 6.6 Stunden
-            } else if (wornHours <= 6) {
-                requiredRestingHours = 12 * 1.1; // 13.2 Stunden
-            } else if (wornHours <= 12) {
-                requiredRestingHours = 24 * 1.1; // 26.4 Stunden
-            } else {
-                requiredRestingHours = 48 * 1.1; // 52.8 Stunden
-            }
+    if (totalWornHours > 0) {
+        if (totalWornHours <= 2) {
+            requiredRestingHours = 6 * 1.1; // 6.6 Stunden
+        } else if (totalWornHours <= 6) {
+            requiredRestingHours = 12 * 1.1; // 13.2 Stunden
+        } else if (totalWornHours <= 12) {
+            requiredRestingHours = 24 * 1.1; // 26.4 Stunden
+        } else {
+            requiredRestingHours = 48 * 1.1; // 52.8 Stunden
         }
     }
 

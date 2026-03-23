@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   collection, doc, updateDoc, serverTimestamp, 
-  addDoc, getDoc, onSnapshot 
+  addDoc, getDoc, onSnapshot, query, where 
 } from 'firebase/firestore'; 
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
@@ -14,7 +14,7 @@ import { motion } from 'framer-motion';
 // Services
 import { checkActiveSuspension } from '../services/SuspensionService';
 import { isAuditDue, initializeAudit, confirmAuditItem } from '../services/AuditService';
-import { getActivePunishment, clearPunishment, findPunishmentItem } from '../services/PunishmentService';
+import { getActivePunishment, clearPunishment, findPunishmentItem, executePunishmentTicket } from '../services/PunishmentService';
 import { loadMonthlyBudget } from '../services/BudgetService';
 import { stopSession as stopSessionService } from '../services/SessionService';
 import { isImmunityActive } from '../services/OfferService';
@@ -67,10 +67,10 @@ export default function Dashboard() {
   const [activeSuspension, setActiveSuspension] = useState(null);
   const [loadingSuspension, setLoadingSuspension] = useState(true);
   
-  // Verbleibende lokale Logic-States
+  // Local States
   const [auditDue, setAuditDue] = useState(false);
   const [punishmentStatus, setPunishmentStatus] = useState({ active: false, deferred: false, reason: null, durationMinutes: 0 });
-  const [punishmentItem, setPunishmentItem] = useState(null);
+  const [pendingPunishments, setPendingPunishments] = useState([]); // NEU: Ledger Queue
   const [monthlyBudget, setMonthlyBudget] = useState(0);
   const [currentSpent, setCurrentSpent] = useState(0); 
   const [maxInstructionItems, setMaxInstructionItems] = useState(1);
@@ -94,7 +94,7 @@ export default function Dashboard() {
       handleGambleAccept, handleGambleDecline
   } = useTZDAndGamble({
       currentUser, items, itemsLoading, activeSessions,
-      punishmentStatus, punishmentItem, isStealthActive, showToast
+      punishmentStatus, punishmentItem: null, isStealthActive, showToast
   });
 
   // --- HOOK INTEGRATION: INSTRUCTION MANAGER ---
@@ -120,14 +120,12 @@ export default function Dashboard() {
       }
   };
 
-  // --- KORREKTUR: STRIKTE WÄHRUNGSPARITÄT (Strict Currency Alignment Gatekeeper) ---
   const handleBuyDiscount = async (minutesToBuy) => {
       if (!currentUser || !currentInstruction || !currentInstruction.items || currentInstruction.items.length === 0) {
           showToast("Freikauf gescheitert. Keine aktive Anweisung gefunden.", "error");
           return;
       }
 
-      // 1. DYNAMISCHER SCAN: Analysiere die aktuellen Anweisungs-Items
       let hasNylon = false;
       let hasLingerie = false;
 
@@ -136,82 +134,52 @@ export default function Dashboard() {
           const subCat = (item.subCategory || '').toLowerCase();
           const name = (item.name || '').toLowerCase();
 
-          if (mainCat.includes('nylon') || subCat.includes('strumpfhose') || subCat.includes('tights') || name.includes('strumpfhose')) {
-              hasNylon = true;
-          }
-          if (mainCat.includes('lingerie') || mainCat.includes('dessous') || subCat.includes('höschen') || name.includes('höschen')) {
-              hasLingerie = true;
-          }
+          if (mainCat.includes('nylon') || subCat.includes('strumpfhose') || subCat.includes('tights') || name.includes('strumpfhose')) hasNylon = true;
+          if (mainCat.includes('lingerie') || mainCat.includes('dessous') || subCat.includes('höschen') || name.includes('höschen')) hasLingerie = true;
       });
 
-      // 2. DAS KOMPROMISSLOSE WÄHRUNGS-LOCKING
       let paymentType = null;
-      if (hasNylon && hasLingerie) {
-          paymentType = 'both';
-      } else if (hasNylon && !hasLingerie) {
-          paymentType = 'nylon';
-      } else if (!hasNylon && hasLingerie) {
-          paymentType = 'lingerie';
-      } else {
+      if (hasNylon && hasLingerie) paymentType = 'both';
+      else if (hasNylon && !hasLingerie) paymentType = 'nylon';
+      else if (!hasNylon && hasLingerie) paymentType = 'lingerie';
+      else {
           showToast("Freikauf gescheitert. Weder Nylons noch Lingerie aktiv.", "error");
           return;
       }
 
       try {
-          // 3. TRANSAKTION AUSFÜHREN
-          // spendCredits wirft einen Error, falls das Konto/die Konten nicht gedeckt sind
           await spendCredits(currentUser.uid, minutesToBuy, paymentType);
 
-          // 4. ATOMARE ANTI-DOUBLE-COUNTING GUTSCHRIFT
           const instrRef = doc(db, `users/${currentUser.uid}/status/dailyInstruction`);
           const instrSnap = await getDoc(instrRef);
           
           if (instrSnap.exists()) {
               const data = instrSnap.data();
               const currentDiscount = data.discountMinutes || 0;
-              // Addiere STRIKT NUR den angeforderten Wert (kein Double-Counting)
               const newDiscount = currentDiscount + minutesToBuy;
               
-              await updateDoc(instrRef, {
-                  discountMinutes: newDiscount
-              });
+              await updateDoc(instrRef, { discountMinutes: newDiscount });
 
               let successMessage = `Freikauf autorisiert (-${minutesToBuy} Min).`;
-              if (paymentType === 'both') {
-                  successMessage = `Freikauf autorisiert (-${minutesToBuy} Min). System erzwang kombinierte LC & NC Zahlung.`;
-              } else if (paymentType === 'nylon') {
-                  successMessage = `Freikauf autorisiert (-${minutesToBuy} Min). System erzwang NC Zahlung.`;
-              } else if (paymentType === 'lingerie') {
-                  successMessage = `Freikauf autorisiert (-${minutesToBuy} Min). System erzwang LC Zahlung.`;
-              }
+              if (paymentType === 'both') successMessage = `Freikauf autorisiert (-${minutesToBuy} Min). System erzwang kombinierte LC & NC Zahlung.`;
+              else if (paymentType === 'nylon') successMessage = `Freikauf autorisiert (-${minutesToBuy} Min). System erzwang NC Zahlung.`;
+              else if (paymentType === 'lingerie') successMessage = `Freikauf autorisiert (-${minutesToBuy} Min). System erzwang LC Zahlung.`;
 
               showToast(successMessage, "success");
           }
       } catch (e) {
-          console.error("Fehler beim Freikauf:", e);
-          if (e.message === "INSOLVENCY_LIMIT_REACHED") {
-               showToast("Freikauf verweigert. Kreditlimit (Insolvenz) des erzwungenen Kontos erreicht.", "error");
-          } else {
-               showToast("Systemfehler beim Freikauf.", "error");
-          }
+          if (e.message === "INSOLVENCY_LIMIT_REACHED") showToast("Freikauf verweigert. Kreditlimit (Insolvenz) des erzwungenen Kontos erreicht.", "error");
+          else showToast("Systemfehler beim Freikauf.", "error");
       }
   };
 
-  // 1. Initial Load & Weekly Report Listener
+  // 1. Initial Load & Listeners
   useEffect(() => {
     if (!currentUser) return;
     const initLoad = async () => {
         try {
-            // PERFORMANCE FIX: Alle unabhängigen Firebase-Reads parallel ausführen, um den Waterfall-Effekt zu zerstören.
             const [
-                _, // runTimeBankAuditor erzeugt keinen direkten Return-Wert für den State
-                pSnap,
-                statusData,
-                auditResult,
-                budgetResult,
-                bSnap,
-                suspResult,
-                immuneResult
+                _, pSnap, statusData, auditResult, budgetResult, bSnap, suspResult, immuneResult
             ] = await Promise.all([
                 runTimeBankAuditor(currentUser.uid),
                 getDoc(doc(db, `users/${currentUser.uid}/settings/preferences`)),
@@ -223,7 +191,6 @@ export default function Dashboard() {
                 isImmunityActive(currentUser.uid)
             ]);
 
-            // States mit den Ergebnissen der parallelen Abfragen füllen
             if(pSnap.exists()) setMaxInstructionItems(pSnap.data().maxInstructionItems || 1);
             setPunishmentStatus(statusData || { active: false });
             setAuditDue(auditResult);
@@ -232,61 +199,62 @@ export default function Dashboard() {
             setActiveSuspension(suspResult);
             setImmunityActive(immuneResult);
 
-        } catch(e) { 
-            console.error(e); 
-        } finally { 
-            setLoadingSuspension(false); 
-        }
+        } catch(e) { console.error(e); } 
+        finally { setLoadingSuspension(false); }
     };
     initLoad();
 
     const unsubProtocol = onSnapshot(doc(db, `users/${currentUser.uid}/settings/protocol`), (docSnap) => {
         if (docSnap.exists()) {
             const data = docSnap.data();
-            if (data.weeklyReport && data.weeklyReport.acknowledged === false) {
-                setWeeklyReport(data.weeklyReport);
-            } else {
-                setWeeklyReport(null);
-            }
+            setWeeklyReport((data.weeklyReport && data.weeklyReport.acknowledged === false) ? data.weeklyReport : null);
         }
     });
 
     const unsubscribeTB = onSnapshot(doc(db, `users/${currentUser.uid}/status/timeBank`), (docSnap) => {
-        if (docSnap.exists()) {
-            setTimeBankData(docSnap.data());
-        } else {
-            setTimeBankData({ nc: 0, lc: 0 });
-        }
+        setTimeBankData(docSnap.exists() ? docSnap.data() : { nc: 0, lc: 0 });
     });
+
+    // NEU: Live-Listener für das Punishment Ledger
+    const unsubLedger = onSnapshot(
+        query(collection(db, `users/${currentUser.uid}/punishmentLedger`), where('status', '==', 'pending')),
+        (snap) => {
+            const tickets = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => (a.createdAt?.toDate() || 0) - (b.createdAt?.toDate() || 0));
+            setPendingPunishments(tickets);
+        }
+    );
 
     return () => { 
         unsubscribeTB(); 
         unsubProtocol();
+        unsubLedger();
     };
   }, [currentUser, setImmunityActive]); 
 
-  // 2. Punishment Item Load
-  useEffect(() => {
-      if (items && items.length > 0) setPunishmentItem(findPunishmentItem(items));
-  }, [items]);
-
-  // HANDLERS
-  const executeStartPunishment = async () => { 
-      if(punishmentItem) { 
-          await addDoc(collection(db,`users/${currentUser.uid}/sessions`),{ itemId:punishmentItem.id, itemIds:[punishmentItem.id], type:'punishment', startTime:serverTimestamp(), endTime:null }); 
-          await updateDoc(doc(db,`users/${currentUser.uid}/status/punishment`),{active:true,deferred:false}); 
-          const newStatus = await getActivePunishment(currentUser.uid);
-          setPunishmentStatus(newStatus || { active: false }); 
-          useUIStore.getState().setPunishmentScanOpen(false); 
-      } 
+  // --- DAS NEUE TRIBUNAL SCAN-EVENT ---
+  const handlePunishmentScanTrigger = (ticketId, instrumentType, instrumentItem) => { 
+      startBindingScan(async (scannedId) => { 
+          // Strikter Tag-Abgleich mit dem aktiv ausgewählten Instrument
+          if (instrumentItem && (scannedId === instrumentItem.nfcTagId || scannedId === instrumentItem.customId || scannedId === instrumentItem.id)) { 
+              const scanMode = useUIStore.getState().punishmentScanMode;
+              if (scanMode === 'start') {
+                  const result = await executePunishmentTicket(currentUser.uid, ticketId, instrumentType, instrumentItem.id);
+                  if (result.success) {
+                      useUIStore.getState().setPunishmentScanOpen(false);
+                      setPunishmentStatus({ active: true, durationMinutes: result.duration }); // Lokaler UI-Update
+                      useUIStore.getState().showToast(`Vollzug autorisiert. Das System hat das Urteil gefällt.`, "error");
+                  } else {
+                      useUIStore.getState().showToast(result.error, "error");
+                  }
+              } 
+          } else { 
+              useUIStore.getState().showToast("Falscher Tag oder flasches Instrument!", "error"); 
+          } 
+      }); 
   };
-  
+
   const handleRequestStopSession = async (session) => { 
       if (tzdActive) { showToast("STOPPEN VERWEIGERT.", "error"); return; }
-      if (session.type === 'punishment') { 
-          const elapsed = Math.floor((Date.now() - session.startTime.getTime()) / 60000); 
-          if (elapsed < (punishmentStatus.durationMinutes || 30)) return; 
-      } 
       
       try { 
           await stopSessionService(currentUser.uid, session.id, { feelings: [], note: '' }); 
@@ -299,25 +267,6 @@ export default function Dashboard() {
       } catch(e){ 
           showToast("Fehler beim Beenden", "error"); 
       } 
-  };
-
-  const handlePunishmentScanTrigger = () => { 
-      startBindingScan((scannedId) => { 
-          if (punishmentItem && (scannedId === punishmentItem.nfcTagId || scannedId === punishmentItem.customId || scannedId === punishmentItem.id)) { 
-              const scanMode = useUIStore.getState().punishmentScanMode;
-              if (scanMode === 'start') {
-                  executeStartPunishment(); 
-              } else if (scanMode === 'stop') { 
-                  useUIStore.getState().setPunishmentScanOpen(false); 
-                  const pSession = (activeSessions || []).find(s => s.type === 'punishment');
-                  if (pSession) {
-                      handleRequestStopSession(pSession); 
-                  }
-              } 
-          } else { 
-              useUIStore.getState().showToast("Falscher Tag!", "error"); 
-          } 
-      }); 
   };
 
   const handleStartAudit = async () => { 
@@ -461,6 +410,8 @@ export default function Dashboard() {
             <ActionButtons 
                 punishmentStatus={punishmentStatus} 
                 punishmentRunning={isPunishmentRunning}
+                pendingPunishments={pendingPunishments}
+                isStealthActive={isStealthActive}
                 auditDue={auditDue}
                 isFreeDay={isFreeDay}
                 freeDayReason={freeDayReason}
@@ -472,11 +423,8 @@ export default function Dashboard() {
                 tzdActive={tzdActive}
                 onOpenInstruction={() => useUIStore.getState().setInstructionOpen(true)}
                 onStartPunishment={() => {
-                    if (punishmentItem?.nfcTagId) { 
-                        useUIStore.getState().setPunishmentScanMode('start'); 
-                        useUIStore.getState().setPunishmentScanOpen(true); 
-                    } 
-                    else executeStartPunishment(); 
+                    useUIStore.getState().setPunishmentScanMode('start'); 
+                    useUIStore.getState().setPunishmentScanOpen(true); 
                 }}
                 onStartAudit={handleStartAudit}
                 onOpenRelease={handleOpenRelease}
@@ -485,13 +433,12 @@ export default function Dashboard() {
             <ActiveSessionsList 
                 activeSessions={activeSessions || []} 
                 items={items || []}
-                punishmentStatus={punishmentStatus}
                 onNavigateItem={(id) => navigate(`/item/${id}`)}
                 onStopSession={handleRequestStopSession} 
                 onOpenRelease={handleOpenRelease}
             />
 
-            {!punishmentStatus.active && (
+            {!isPunishmentRunning && (
                 <Box sx={{ mb: 4 }}>
                     <Button
                         fullWidth
@@ -582,7 +529,7 @@ export default function Dashboard() {
           currentInstruction={currentInstruction} startOathPress={startOathPress} cancelOathPress={cancelOathPress}
           handleDeclineOath={handleDeclineOath} handleStartRequest={handleStartRequest} navigate={navigate} isFreeDay={isFreeDay} freeDayReason={freeDayReason} 
           instructionStatus={instructionStatus} isNight={isNight} showToast={showToast} 
-          punishmentItem={punishmentItem} isNfcScanning={isNfcScanning} 
+          punishmentItem={null} pendingPunishments={pendingPunishments} isNfcScanning={isNfcScanning} 
           handlePunishmentScanTrigger={handlePunishmentScanTrigger} kpis={kpis} 
           handleStartReleaseTimer={handleStartReleaseTimer} handleSkipTimer={handleSkipTimer} 
           handleReleaseDecision={handleReleaseDecision} 

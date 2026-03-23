@@ -1,18 +1,69 @@
 import React, { useState, useEffect } from 'react';
 import { 
-    Card, CardContent, Typography, Box, Button, Chip, LinearProgress, Avatar 
+    Card, CardContent, Typography, Box, Button, Chip, LinearProgress, Avatar,
+    Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, TextField
 } from '@mui/material';
 import StopIcon from '@mui/icons-material/Stop';
 import LockIcon from '@mui/icons-material/Lock';
+import VisibilityIcon from '@mui/icons-material/Visibility';
 import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
 import { motion, AnimatePresence } from 'framer-motion';
 
+// NEUE IMPORTE
+import { useAuth } from '../../contexts/AuthContext';
+import useUIStore from '../../store/uiStore';
+import { addPenaltyToActivePunishment } from '../../services/PunishmentService';
+
 export default function ActiveSessionsList({ activeSessions, items, onStopSession, onNavigateItem, onOpenRelease }) {
+  const { currentUser } = useAuth();
+  const showToast = useUIStore(s => s.showToast);
+
+  const [gatekeeperSession, setGatekeeperSession] = useState(null);
+  const [confessionText, setConfessionText] = useState("");
+
   const [, setTick] = useState(0);
   useEffect(() => {
     const timer = setInterval(() => setTick(t => t + 1), 60000);
     return () => clearInterval(timer);
   }, []);
+
+  // --- DIE UNGEDULDS-STEUER (Punkt 1) ---
+  const handleCheckPunishment = async (session, durationMinutes, minDuration) => {
+      if (durationMinutes >= minDuration) {
+          setGatekeeperSession(session);
+          setConfessionText('');
+      } else {
+          try {
+              if (currentUser) {
+                  // Sauberer Aufruf über den Service
+                  await addPenaltyToActivePunishment(currentUser.uid, session.id, 10);
+              }
+              showToast("Zugriff verweigert. Ungeduld protokolliert (+10 Min).", "error");
+          } catch (e) {
+              console.error(e);
+          }
+      }
+  };
+
+  // --- DAS FINALE GESTÄNDNIS (Punkt 3) ---
+  const handleGatekeeperSubmit = async () => {
+      const requiredText = "Ich bin eine gehorsame Sissy und danke für die Zurechtweisung";
+      if (confessionText === requiredText) {
+          onStopSession(gatekeeperSession);
+          setGatekeeperSession(null);
+      } else {
+          try {
+              if (currentUser) {
+                  // Sauberer Aufruf über den Service
+                  await addPenaltyToActivePunishment(currentUser.uid, gatekeeperSession.id, 15);
+              }
+              showToast("Tippfehler erkannt! +15 Minuten Strafaufschlag.", "error");
+              setGatekeeperSession(null);
+          } catch (e) {
+              console.error(e);
+          }
+      }
+  };
 
   if (!activeSessions || activeSessions.length === 0) return null;
 
@@ -27,7 +78,6 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
     <Box sx={{ mb: 4 }}>
       <AnimatePresence>
         {activeSessions.map((session) => {
-            // KORREKTUR: Strikte Validierung von itemIds als Array zur Vermeidung des .map() undefined Fehlers.
             let sessionItems = [];
             if (Array.isArray(session.itemIds) && session.itemIds.length > 0) {
                 sessionItems = session.itemIds.map(id => items.find(i => i.id === id)).filter(Boolean);
@@ -44,8 +94,7 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
             const isTZD = session.type === 'tzd' || session.tzdExecuted; 
             
             const isDebtLocked = session.isDebtSession && durationMinutes < minDuration;
-            const isPunishmentLocked = isPunishment && durationMinutes < minDuration;
-            const isLocked = isDebtLocked || isPunishmentLocked;
+            const isLocked = isDebtLocked; 
             const remainingTime = Math.max(0, minDuration - durationMinutes);
             
             let typeLabel = "FREIWILLIG";
@@ -164,12 +213,12 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
                                 </Box>
                             )}
 
-                            {/* PROGRESS BAR */}
-                            {(session.isDebtSession || isPunishment) && minDuration > 0 && (
+                            {/* PROGRESS BAR - Versteckt für Punishment */}
+                            {session.isDebtSession && minDuration > 0 && (
                                 <Box sx={{ mt: 1, mb: 2 }}>
                                     <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
                                         <Typography variant="caption" color="error">
-                                            {isPunishment ? "Strafzeit" : "Pflicht-Tilgung"}
+                                            Pflicht-Tilgung
                                         </Typography>
                                         <Typography variant="caption" color="text.secondary">{durationMinutes} / {minDuration} min</Typography>
                                     </Box>
@@ -184,7 +233,22 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
 
                             {/* ACTIONS */}
                             <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
-                                {(isTZD || isPunishment || session.isDebtSession) ? (
+                                {isPunishment ? (
+                                    <Button 
+                                        variant="contained"
+                                        size="small"
+                                        fullWidth
+                                        startIcon={<VisibilityIcon />}
+                                        onClick={() => handleCheckPunishment(session, durationMinutes, minDuration)}
+                                        sx={{
+                                            bgcolor: PALETTE.accents.red,
+                                            color: '#fff',
+                                            '&:hover': { bgcolor: '#b71c1c' }
+                                        }}
+                                    >
+                                        VOLLZUG PRÜFEN
+                                    </Button>
+                                ) : (isTZD || session.isDebtSession) ? (
                                     <Button 
                                         variant={isLocked ? "outlined" : "contained"} 
                                         size="small"
@@ -222,6 +286,49 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
             );
         })}
       </AnimatePresence>
+
+      {/* GATEKEEPER DIALOG (Das finale Geständnis) */}
+      <Dialog
+          open={!!gatekeeperSession}
+          onClose={() => {}} 
+          PaperProps={{
+              sx: { ...DESIGN_TOKENS.glassCard, border: `1px solid ${PALETTE.accents.red}` }
+          }}
+      >
+          <DialogTitle sx={{ color: PALETTE.accents.red, fontWeight: 'bold' }}>
+              FINALES GESTÄNDNIS
+          </DialogTitle>
+          <DialogContent>
+              <DialogContentText sx={{ color: 'text.secondary', mb: 2 }}>
+                  Die Strafzeit ist abgelaufen. Das System erfordert nun deine absolute Demut. Tippe den exakten Satz fehlerfrei und case-sensitive ab, um die Strafe zu beenden:
+              </DialogContentText>
+              <Typography variant="body1" sx={{ color: '#fff', fontWeight: 'bold', mb: 3, fontStyle: 'italic', textAlign: 'center' }}>
+                  "Ich bin eine gehorsame Sissy und danke für die Zurechtweisung"
+              </Typography>
+              <TextField
+                  autoFocus
+                  fullWidth
+                  variant="outlined"
+                  value={confessionText}
+                  onChange={(e) => setConfessionText(e.target.value)}
+                  autoComplete="off"
+                  sx={{
+                      '& .MuiOutlinedInput-root': {
+                          color: '#fff',
+                          '& fieldset': { borderColor: 'rgba(255,255,255,0.2)' },
+                          '&:hover fieldset': { borderColor: PALETTE.accents.red },
+                          '&.Mui-focused fieldset': { borderColor: PALETTE.accents.red },
+                      }
+                  }}
+              />
+          </DialogContent>
+          <DialogActions sx={{ p: 2, pt: 0 }}>
+              <Button onClick={() => setGatekeeperSession(null)} sx={{ color: 'text.secondary' }}>Abbrechen</Button>
+              <Button onClick={handleGatekeeperSubmit} variant="contained" sx={{ bgcolor: PALETTE.accents.red, color: '#fff', '&:hover': { bgcolor: '#b71c1c'} }}>
+                  Bestätigen
+              </Button>
+          </DialogActions>
+      </Dialog>
     </Box>
   );
 }

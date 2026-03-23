@@ -26,7 +26,7 @@ export default function DashboardDialogManager({
     currentInstruction, startOathPress, cancelOathPress,
     handleDeclineOath, handleStartRequest, navigate, isFreeDay, freeDayReason, 
     instructionStatus, isNight, showToast, 
-    punishmentItem, isNfcScanning, handlePunishmentScanTrigger, kpis, 
+    punishmentItem, pendingPunishments, isNfcScanning, handlePunishmentScanTrigger, kpis, 
     handleStartReleaseTimer, handleSkipTimer, handleReleaseDecision, 
     handleConfirmAuditItem, indexDetails, activeSessions
 }) {
@@ -90,7 +90,7 @@ export default function DashboardDialogManager({
 
             <PunishmentDialog 
                 open={punishmentScanOpen} onClose={() => setPunishmentScanOpen(false)}
-                punishmentItem={punishmentItem} isScanning={isNfcScanning}
+                pendingPunishments={pendingPunishments} items={items} isScanning={isNfcScanning}
                 onScanTrigger={handlePunishmentScanTrigger}
             />
 

@@ -16,6 +16,8 @@ import { motion } from 'framer-motion';
 export default function ActionButtons({ 
   punishmentStatus, 
   punishmentRunning, 
+  pendingPunishments,
+  isStealthActive,
   auditDue, isFreeDay, freeDayReason, 
   currentInstruction, currentPeriod, isHoldingOath, 
   isInstructionActive, isDailyGoalMet, tzdActive,
@@ -23,6 +25,8 @@ export default function ActionButtons({
 }) {
 
   const punishmentWindowOpen = isPunishmentWindowOpen();
+  const hasPendingPunishments = pendingPunishments && pendingPunishments.length > 0;
+
   const isNight = currentPeriod && currentPeriod.includes('night');
   const instructionAlreadyStarted = currentInstruction && currentInstruction.isAccepted;
   
@@ -33,8 +37,8 @@ export default function ActionButtons({
   return (
     <Box sx={{ width: '100%' }}>
       
-      {/* 1. STRAFE (Top Priorität) */}
-      {punishmentStatus.active && punishmentWindowOpen && (
+      {/* 1. STRAFE (Top Priorität: Dread-Indikator & Gatekeeper) */}
+      {(hasPendingPunishments || punishmentRunning) && (
         <Box sx={{ mb: 3 }}>
             {punishmentRunning ? (
                 <Button 
@@ -48,7 +52,7 @@ export default function ActionButtons({
                 >
                     STRAFE LÄUFT...
                 </Button>
-            ) : (
+            ) : punishmentWindowOpen && hasPendingPunishments ? (
                 <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
                     <Button 
                         variant="contained" fullWidth size="large"
@@ -60,10 +64,21 @@ export default function ActionButtons({
                         }} 
                         startIcon={<SportsScoreIcon />} onClick={onStartPunishment} 
                     >
-                        COMPLIANCE WHIP ({punishmentStatus.durationMinutes || 45}m)
+                        COMPLIANCE WHIP (URTEIL AUSSTEHEND)
                     </Button>
                 </motion.div>
-            )}
+            ) : hasPendingPunishments ? (
+                 <Button 
+                    variant="outlined" fullWidth disabled
+                    sx={{ 
+                        py: 2, fontWeight: 'bold', fontSize: '1rem',
+                        borderColor: PALETTE.accents.red, color: PALETTE.accents.red,
+                        bgcolor: 'rgba(255,0,0,0.05)'
+                    }} 
+                >
+                    {isStealthActive ? "SCHULDEN AKKUMULIERT - ZINSEN LAUFEN" : "URTEIL AUSSTEHEND – VOLLZUG AB 23:00 UHR"}
+                </Button>
+            ) : null}
         </Box>
       )}
 
@@ -82,7 +97,7 @@ export default function ActionButtons({
         </Box>
       )}
 
-      {/* 3. HAUPT BUTTON (Instruction) */}
+      {/* 3. HAUPT BUTTON (Instruction mit Deadlock) */}
       {(() => {
           let label = isNight ? "NACHTANWEISUNG ÖFFNEN" : "TAGESANWEISUNG ÖFFNEN";
           let icon = isNight ? <DarkModeIcon /> : <LightModeIcon />;
@@ -101,6 +116,12 @@ export default function ActionButtons({
           } else {
               if (tzdActive) {
                   label = "DIKTAT AKTIV - GESPERRT";
+                  icon = <LockIcon />;
+                  isDisabled = true;
+                  isBlockedStyle = true;
+              } else if (hasPendingPunishments && isNight) {
+                  // NEU: Absolute Verriegelung der Nachtanweisung bis Strafen getilgt sind
+                  label = "STRAFE BLOCKIERT PROTOKOLL";
                   icon = <LockIcon />;
                   isDisabled = true;
                   isBlockedStyle = true;
@@ -139,10 +160,10 @@ export default function ActionButtons({
           );
       })()}
 
-      {/* 5. Deferred Info */}
-      {punishmentStatus.deferred && (
+      {/* Fallback für alte Logik, falls noch Reste existieren */}
+      {punishmentStatus?.deferred && !hasPendingPunishments && (
         <Alert severity="warning" variant="filled" sx={{ mt: 2, fontWeight: 'bold', bgcolor: `${PALETTE.accents.gold}22`, color: PALETTE.accents.gold, border: `1px solid ${PALETTE.accents.gold}` }}>
-            STRAFE ({punishmentStatus.durationMinutes}m) AUFGESCHOBEN
+            STRAFE AUFGESCHOBEN
         </Alert>
       )}
     </Box>
