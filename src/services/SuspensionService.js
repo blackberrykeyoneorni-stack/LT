@@ -1,5 +1,5 @@
 import { db } from '../firebase';
-import { collection, addDoc, query, where, getDocs, updateDoc, doc, Timestamp, orderBy, deleteDoc } from 'firebase/firestore';
+import { collection, addDoc, query, where, getDocs, updateDoc, doc, Timestamp, orderBy, deleteDoc, getDoc, writeBatch } from 'firebase/firestore';
 import { DEFAULT_PROTOCOL_RULES } from '../config/defaultRules';
 
 const COLLECTION = 'suspensions';
@@ -113,6 +113,18 @@ export const checkActiveSuspension = async (userId) => {
             // Aussetzung ist vorbei -> Status auf 'completed'
             await updateDoc(doc(db, `users/${userId}/${COLLECTION}`, docSnap.id), { status: 'completed' });
             
+            // --- NEU: STEALTH-SCHULDEN EINTREIBEN ---
+            if (data.type === 'stealth_travel') {
+                const qLedger = query(collection(db, `users/${userId}/punishmentLedger`), where('status', '==', 'pending'), where('isStealthAkkumulation', '==', true));
+                const ledgerSnap = await getDocs(qLedger);
+                if (!ledgerSnap.empty) {
+                    const batch = writeBatch(db);
+                    ledgerSnap.forEach(ticket => batch.update(ticket.ref, { isStealthAkkumulation: false }));
+                    await batch.commit();
+                    console.log(`Stealth Mode regulär beendet. ${ledgerSnap.size} Straf-Tickets scharfgeschaltet.`);
+                }
+            }
+            
             // Suspension Flag im Daily Doc entfernen, damit Protokoll wieder greifen kann
             await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), { 
                 activeSuspension: false,
@@ -186,7 +198,22 @@ export const checkActiveSuspension = async (userId) => {
  * Beendet eine Aussetzung vorzeitig (z.B. frühere Entlassung aus Krankenhaus).
  */
 export const terminateSuspension = async (userId, suspensionId) => {
-    await updateDoc(doc(db, `users/${userId}/${COLLECTION}`, suspensionId), {
+    const suspRef = doc(db, `users/${userId}/${COLLECTION}`, suspensionId);
+    
+    // --- NEU: STEALTH-SCHULDEN BEI VORZEITIGEM ABBRUCH EINTREIBEN ---
+    const suspSnap = await getDoc(suspRef);
+    if (suspSnap.exists() && suspSnap.data().type === 'stealth_travel') {
+        const qLedger = query(collection(db, `users/${userId}/punishmentLedger`), where('status', '==', 'pending'), where('isStealthAkkumulation', '==', true));
+        const ledgerSnap = await getDocs(qLedger);
+        if (!ledgerSnap.empty) {
+            const batch = writeBatch(db);
+            ledgerSnap.forEach(ticket => batch.update(ticket.ref, { isStealthAkkumulation: false }));
+            await batch.commit();
+            console.log(`Stealth Mode vorzeitig beendet. ${ledgerSnap.size} Straf-Tickets scharfgeschaltet.`);
+        }
+    }
+    
+    await updateDoc(suspRef, {
         status: 'terminated',
         terminatedAt: Timestamp.now()
     });

@@ -452,6 +452,7 @@ export const terminateTZD = async (userId, success = true, customResult = null) 
         }
     } catch (e) { console.error("Fehler beim Setzen von tzdExecuted:", e); }
 
+    // Parität: Exakt 24h TZD generiert 24h Immunität (Reward)
     if (success) {
         if (status && status.targetDurationMinutes >= 1440) {
             await setImmunity(userId, 24);

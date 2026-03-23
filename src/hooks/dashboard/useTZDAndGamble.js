@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { getTZDStatus, checkForTZDTrigger, performCheckIn } from '../../services/TZDService';
+import { getTZDStatus, checkForTZDTrigger, performCheckIn, startTZD } from '../../services/TZDService';
 import { checkGambleTrigger, determineGambleStake, rollTheDice, recordGambleAction } from '../../services/OfferService';
 import { stopSession as stopSessionService } from '../../services/SessionService';
 
@@ -124,7 +124,10 @@ export default function useTZDAndGamble({
                 } catch (e) { console.error(e); }
             }
 
-            if (showToast) showToast("VERLOREN. Zeitloses Diktat aktiviert.", "error");
+            // --- NEU: Harter 24-Stunden Override (1440 Minuten) in die Datenbank schreiben ---
+            await startTZD(currentUser.uid, gambleStake, null, 1440, 'spiel_tzd');
+
+            if (showToast) showToast("VERLOREN. 24h Zeitloses Diktat aktiviert.", "error");
             setTzdActive(true);
             setTzdStartTime(new Date());
         }
