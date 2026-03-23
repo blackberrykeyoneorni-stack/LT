@@ -469,6 +469,7 @@ export default function Dashboard() {
                 isHoldingOath={isHoldingOath}
                 isInstructionActive={isInstructionActive}
                 isDailyGoalMet={isDailyGoalMet}
+                tzdActive={tzdActive}
                 onOpenInstruction={() => useUIStore.getState().setInstructionOpen(true)}
                 onStartPunishment={() => {
                     if (punishmentItem?.nfcTagId) { 

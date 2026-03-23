@@ -44,7 +44,12 @@ export default function DashboardDialogManager({
 
     return (
         <>
-            <TzdOverlay open={tzdActive} />
+            <TzdOverlay 
+                active={tzdActive} 
+                allItems={items}
+                timeBankData={timeBankData}
+                currentUser={currentUser}
+            />
             
             {timeBankData?.pendingInflationNotice && (
                 <InflationOverlay 

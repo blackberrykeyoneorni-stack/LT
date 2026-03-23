@@ -18,7 +18,7 @@ export default function ActionButtons({
   punishmentRunning, 
   auditDue, isFreeDay, freeDayReason, 
   currentInstruction, currentPeriod, isHoldingOath, 
-  isInstructionActive, isDailyGoalMet,
+  isInstructionActive, isDailyGoalMet, tzdActive,
   onStartPunishment, onStartAudit, onOpenInstruction
 }) {
 
@@ -99,7 +99,12 @@ export default function ActionButtons({
               label = freeDayReason === 'Holiday' ? "FEIERTAG (FREI)" : "WOCHENENDE (FREI)";
               icon = freeDayReason === 'Holiday' ? <CelebrationIcon /> : <WeekendIcon />;
           } else {
-              if (blockSessionRunning) {
+              if (tzdActive) {
+                  label = "DIKTAT AKTIV - GESPERRT";
+                  icon = <LockIcon />;
+                  isDisabled = true;
+                  isBlockedStyle = true;
+              } else if (blockSessionRunning) {
                   label = "SESSION LÄUFT";
                   icon = <LockIcon />;
                   isDisabled = true;

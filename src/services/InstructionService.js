@@ -262,7 +262,7 @@ const getRecentSessionsMap = async (uid, lookbackHours = 48) => {
 
 /**
  * Überprüft die Einhaltung der Nacht-Regeln (Checkpoints).
- * Prüft um 01:30, 03:00, 04:30 und 06:00 Uhr.
+ * Prüft um 01:30, 03:00, 04:30, 06:00 und 07:29 Uhr.
  */
 export const verifyNightCompliance = async (userId, referenceDate = new Date()) => {
     try {
@@ -275,7 +275,8 @@ export const verifyNightCompliance = async (userId, referenceDate = new Date()) 
             new Date(year, month, day, 1, 30, 0), // 01:30 Uhr
             new Date(year, month, day, 3, 0, 0),  // 03:00 Uhr
             new Date(year, month, day, 4, 30, 0), // 04:30 Uhr
-            new Date(year, month, day, 6, 0, 0)   // 06:00 Uhr
+            new Date(year, month, day, 6, 0, 0),  // 06:00 Uhr
+            new Date(year, month, day, 7, 29, 0)  // 07:29 Uhr
         ];
 
         // Suchfenster für Sessions: Von Gestern 16:00 Uhr bis Heute.
