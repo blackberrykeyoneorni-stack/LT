@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Typography, Box, Grid } from '@mui/material';
 import WarningIcon from '@mui/icons-material/Warning';
 import VerifiedUserIcon from '@mui/icons-material/VerifiedUser';
@@ -6,11 +6,14 @@ import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
 
 export default function PunishmentDialog({ open, onClose, pendingPunishments, items, isScanning, onScanTrigger }) {
     const [selectedInstrument, setSelectedInstrument] = useState(null);
+    const [manualBypassMode, setManualBypassMode] = useState(false);
+    
+    // State für den Long-Press Timer (5 Sekunden)
+    const [pressProgress, setPressProgress] = useState(0);
+    const pressTimerRef = useRef(null);
 
-    // Identifiziere das älteste Ticket aus dem Ledger
     const activeTicket = pendingPunishments && pendingPunishments.length > 0 ? pendingPunishments[0] : null;
 
-    // Finde die spezifischen Werkzeuge im Inventar
     const plugItem = items?.find(i => i.subCategory === 'Buttplug' && i.status === 'active');
     const dildoItem = items?.find(i => i.subCategory === 'Dildo' && i.status === 'active');
 
@@ -18,17 +21,47 @@ export default function PunishmentDialog({ open, onClose, pendingPunishments, it
         setSelectedInstrument(instrument);
     };
 
+    // --- LONG-PRESS LOGIK ---
+    const handlePressStart = () => {
+        setPressProgress(0);
+        pressTimerRef.current = setInterval(() => {
+            setPressProgress(prev => {
+                if (prev >= 100) {
+                    clearInterval(pressTimerRef.current);
+                    executeManualBypass();
+                    return 100;
+                }
+                return prev + 1; // 100 Schritte á 50ms = 5000ms (5 Sekunden)
+            });
+        }, 50);
+    };
+
+    const handlePressEnd = () => {
+        if (pressProgress < 100) {
+            clearInterval(pressTimerRef.current);
+            setPressProgress(0);
+        }
+    };
+
     const handleScan = () => {
         if (!selectedInstrument || !activeTicket) return;
         const targetItem = selectedInstrument === 'plug' ? plugItem : dildoItem;
-        
-        // Übergibt Ticket-ID, gewählten Faktor und das NFC-Ziel an das Dashboard
-        onScanTrigger(activeTicket.id, selectedInstrument, targetItem);
+        onScanTrigger(activeTicket.id, selectedInstrument, targetItem, false);
     };
 
-    // Reset der Auswahl, wenn der Dialog schließt
+    const executeManualBypass = () => {
+        if (!selectedInstrument || !activeTicket) return;
+        const targetItem = selectedInstrument === 'plug' ? plugItem : dildoItem;
+        onScanTrigger(activeTicket.id, selectedInstrument, targetItem, true); // true = isManual
+    };
+
     useEffect(() => {
-        if (!open) setSelectedInstrument(null);
+        if (!open) {
+            setSelectedInstrument(null);
+            setManualBypassMode(false);
+            setPressProgress(0);
+            if (pressTimerRef.current) clearInterval(pressTimerRef.current);
+        }
     }, [open]);
 
     if (!activeTicket) return null;
@@ -36,7 +69,7 @@ export default function PunishmentDialog({ open, onClose, pendingPunishments, it
     return (
         <Dialog 
             open={open} 
-            onClose={undefined} // Zwingt zur Entscheidung
+            onClose={undefined} 
             maxWidth="sm" 
             fullWidth
             PaperProps={DESIGN_TOKENS.dialog.paper}
@@ -99,6 +132,47 @@ export default function PunishmentDialog({ open, onClose, pendingPunishments, it
                                 </Button>
                             </Grid>
                         </Grid>
+                    ) : manualBypassMode ? (
+                        <Box sx={{ mt: 2, p: 3, border: `1px solid ${PALETTE.accents.red}`, borderRadius: 2, bgcolor: 'rgba(255,0,0,0.05)' }}>
+                            <Typography variant="subtitle1" sx={{ color: '#fff', mb: 1 }}>
+                                Manueller Bypass: <strong>{selectedInstrument === 'plug' ? 'Buttplug (1.0x)' : 'Dildo (0.5x)'}</strong>
+                            </Typography>
+                            <Typography variant="h5" sx={{ color: '#fff', fontWeight: 'bold', mb: 4, mt: 2, fontStyle: 'italic' }}>
+                                "Die Nylon-Hure wird jetzt durchgefickt."
+                            </Typography>
+                            
+                            <Button 
+                                variant="contained"
+                                fullWidth
+                                onMouseDown={handlePressStart}
+                                onMouseUp={handlePressEnd}
+                                onMouseLeave={handlePressEnd}
+                                onTouchStart={handlePressStart}
+                                onTouchEnd={handlePressEnd}
+                                sx={{ 
+                                    py: 3,
+                                    bgcolor: PALETTE.accents.red,
+                                    color: '#fff',
+                                    position: 'relative',
+                                    overflow: 'hidden',
+                                    '&:hover': { bgcolor: '#b71c1c' }
+                                }}
+                            >
+                                {/* Ladebalken Hintergrund */}
+                                <Box sx={{
+                                    position: 'absolute', left: 0, top: 0, bottom: 0,
+                                    bgcolor: 'rgba(0,0,0,0.4)', width: `${pressProgress}%`,
+                                    transition: 'width 50ms linear'
+                                }} />
+                                <Typography sx={{ position: 'relative', zIndex: 1, fontWeight: 'bold' }}>
+                                    5 SEKUNDEN GEDRÜCKT HALTEN
+                                </Typography>
+                            </Button>
+                            
+                            <Button size="small" sx={{ mt: 3, color: 'text.secondary' }} onClick={() => setManualBypassMode(false)}>
+                                Zurück zur NFC-Prüfung
+                            </Button>
+                        </Box>
                     ) : (
                         <Box sx={{ mt: 2, p: 3, border: `1px solid ${PALETTE.accents.red}`, borderRadius: 2, bgcolor: 'rgba(255,0,0,0.05)' }}>
                             <Typography variant="subtitle1" sx={{ color: '#fff', mb: 2 }}>
@@ -120,9 +194,14 @@ export default function PunishmentDialog({ open, onClose, pendingPunishments, it
                             >
                                 {isScanning ? "Warte auf NFC Scan..." : "NFC SCAN: URTEIL EMPFANGEN"}
                             </Button>
-                            <Button size="small" sx={{ mt: 2, color: 'text.secondary' }} onClick={() => setSelectedInstrument(null)} disabled={isScanning}>
-                                Auswahl ändern
-                            </Button>
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 3 }}>
+                                <Button size="small" sx={{ color: 'text.secondary' }} onClick={() => setSelectedInstrument(null)} disabled={isScanning}>
+                                    Auswahl ändern
+                                </Button>
+                                <Button size="small" sx={{ color: PALETTE.accents.red }} onClick={() => setManualBypassMode(true)} disabled={isScanning}>
+                                    Manueller Vollzug
+                                </Button>
+                            </Box>
                         </Box>
                     )}
 

@@ -14,7 +14,7 @@ import { motion } from 'framer-motion';
 // Services
 import { checkActiveSuspension } from '../services/SuspensionService';
 import { isAuditDue, initializeAudit, confirmAuditItem } from '../services/AuditService';
-import { getActivePunishment, clearPunishment, findPunishmentItem, executePunishmentTicket } from '../services/PunishmentService';
+import { getActivePunishment, clearPunishment, executePunishmentTicket } from '../services/PunishmentService';
 import { loadMonthlyBudget } from '../services/BudgetService';
 import { stopSession as stopSessionService } from '../services/SessionService';
 import { isImmunityActive } from '../services/OfferService';
@@ -70,7 +70,7 @@ export default function Dashboard() {
   // Local States
   const [auditDue, setAuditDue] = useState(false);
   const [punishmentStatus, setPunishmentStatus] = useState({ active: false, deferred: false, reason: null, durationMinutes: 0 });
-  const [pendingPunishments, setPendingPunishments] = useState([]); // NEU: Ledger Queue
+  const [pendingPunishments, setPendingPunishments] = useState([]); 
   const [monthlyBudget, setMonthlyBudget] = useState(0);
   const [currentSpent, setCurrentSpent] = useState(0); 
   const [maxInstructionItems, setMaxInstructionItems] = useState(1);
@@ -173,7 +173,6 @@ export default function Dashboard() {
       }
   };
 
-  // 1. Initial Load & Listeners
   useEffect(() => {
     if (!currentUser) return;
     const initLoad = async () => {
@@ -215,7 +214,6 @@ export default function Dashboard() {
         setTimeBankData(docSnap.exists() ? docSnap.data() : { nc: 0, lc: 0 });
     });
 
-    // NEU: Live-Listener für das Punishment Ledger
     const unsubLedger = onSnapshot(
         query(collection(db, `users/${currentUser.uid}/punishmentLedger`), where('status', '==', 'pending')),
         (snap) => {
@@ -231,26 +229,40 @@ export default function Dashboard() {
     };
   }, [currentUser, setImmunityActive]); 
 
-  // --- DAS NEUE TRIBUNAL SCAN-EVENT ---
-  const handlePunishmentScanTrigger = (ticketId, instrumentType, instrumentItem) => { 
-      startBindingScan(async (scannedId) => { 
-          // Strikter Tag-Abgleich mit dem aktiv ausgewählten Instrument
-          if (instrumentItem && (scannedId === instrumentItem.nfcTagId || scannedId === instrumentItem.customId || scannedId === instrumentItem.id)) { 
-              const scanMode = useUIStore.getState().punishmentScanMode;
-              if (scanMode === 'start') {
-                  const result = await executePunishmentTicket(currentUser.uid, ticketId, instrumentType, instrumentItem.id);
-                  if (result.success) {
-                      useUIStore.getState().setPunishmentScanOpen(false);
-                      setPunishmentStatus({ active: true, durationMinutes: result.duration }); // Lokaler UI-Update
-                      useUIStore.getState().showToast(`Vollzug autorisiert. Das System hat das Urteil gefällt.`, "error");
-                  } else {
-                      useUIStore.getState().showToast(result.error, "error");
-                  }
+  // --- DAS NEUE TRIBUNAL EVENT (Mit Bypass & Clean Exit) ---
+  const handlePunishmentScanTrigger = async (ticketId, instrumentType, instrumentItem, isManual = false) => { 
+      // Die sofortige Ausführung (Clean Exit Architektur)
+      const executeAndClose = async () => {
+          // 1. Zwingt das Overlay zum SOFORTIGEN Schließen (Freeze Behebung)
+          useUIStore.getState().setPunishmentScanOpen(false); 
+          
+          // 2. Transaktion im Hintergrund
+          const result = await executePunishmentTicket(currentUser.uid, ticketId, instrumentType, instrumentItem.id);
+          
+          if (result.success) {
+              setPunishmentStatus({ active: true, durationMinutes: result.duration });
+              useUIStore.getState().showToast(`Vollzug autorisiert. Das System hat das Urteil gefällt.`, "error");
+          } else {
+              useUIStore.getState().showToast(result.error, "error");
+          }
+      };
+
+      if (isManual) {
+          // 5-Sekunden Bypass wurde ausgelöst
+          await executeAndClose();
+      } else {
+          // Normaler NFC Scan
+          startBindingScan(async (scannedId) => { 
+              if (instrumentItem && (scannedId === instrumentItem.nfcTagId || scannedId === instrumentItem.customId || scannedId === instrumentItem.id)) { 
+                  const scanMode = useUIStore.getState().punishmentScanMode;
+                  if (scanMode === 'start') {
+                      await executeAndClose();
+                  } 
+              } else { 
+                  useUIStore.getState().showToast("Falscher Tag oder falsches Instrument!", "error"); 
               } 
-          } else { 
-              useUIStore.getState().showToast("Falscher Tag oder flasches Instrument!", "error"); 
-          } 
-      }); 
+          }); 
+      }
   };
 
   const handleRequestStopSession = async (session) => { 

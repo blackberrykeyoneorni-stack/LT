@@ -9,7 +9,6 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
 import { motion, AnimatePresence } from 'framer-motion';
 
-// NEUE IMPORTE
 import { useAuth } from '../../contexts/AuthContext';
 import useUIStore from '../../store/uiStore';
 import { addPenaltyToActivePunishment } from '../../services/PunishmentService';
@@ -27,7 +26,7 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
     return () => clearInterval(timer);
   }, []);
 
-  // --- DIE UNGEDULDS-STEUER (Punkt 1) ---
+  // --- DIE UNGEDULDS-STEUER ---
   const handleCheckPunishment = async (session, durationMinutes, minDuration) => {
       if (durationMinutes >= minDuration) {
           setGatekeeperSession(session);
@@ -35,17 +34,17 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
       } else {
           try {
               if (currentUser) {
-                  // Sauberer Aufruf über den Service
                   await addPenaltyToActivePunishment(currentUser.uid, session.id, 10);
               }
-              showToast("Zugriff verweigert. Ungeduld protokolliert (+10 Min).", "error");
+              // NEUER TEXT GEMÄSS BEFEHL
+              showToast("Zu früh, dein Arsch wird weiter durchgefickt.", "error");
           } catch (e) {
               console.error(e);
           }
       }
   };
 
-  // --- DAS FINALE GESTÄNDNIS (Punkt 3) ---
+  // --- DAS FINALE GESTÄNDNIS ---
   const handleGatekeeperSubmit = async () => {
       const requiredText = "Ich bin eine gehorsame Sissy und danke für die Zurechtweisung";
       if (confessionText === requiredText) {
@@ -54,7 +53,6 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
       } else {
           try {
               if (currentUser) {
-                  // Sauberer Aufruf über den Service
                   await addPenaltyToActivePunishment(currentUser.uid, gatekeeperSession.id, 15);
               }
               showToast("Tippfehler erkannt! +15 Minuten Strafaufschlag.", "error");
@@ -287,7 +285,7 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
         })}
       </AnimatePresence>
 
-      {/* GATEKEEPER DIALOG (Das finale Geständnis) */}
+      {/* GATEKEEPER DIALOG */}
       <Dialog
           open={!!gatekeeperSession}
           onClose={() => {}} 
