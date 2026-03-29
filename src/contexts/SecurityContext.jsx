@@ -11,17 +11,15 @@ export function useSecurity() {
 export function SecurityProvider({ children }) {
   const { currentUser } = useAuth();
 
-  // 1. INITIALISIERUNG: Prüfen, ob der User das Feature aktiviert hat
-  // WICHTIG: Wir holen den Wert direkt beim Start, damit kein "Flackern" entsteht
   const [isBiometricActive, setIsBiometricActive] = useState(() => isBiometricEnabled());
-  
-  // 2. SPERR-ZUSTAND: Wenn aktiv, dann starten wir GESPERRT (true)
   const [isLocked, setIsLocked] = useState(() => isBiometricEnabled());
+
+  // NEU: Bypass Flag für System-Dialoge (Kamera / Filepicker)
+  const [suspendAutoLock, setSuspendAutoLock] = useState(false);
 
   const [biometricsAvailable, setBiometricsAvailable] = useState(false);
   const [authError, setAuthError] = useState(null);
 
-  // Hardware-Check beim Start
   useEffect(() => {
     const checkSupport = async () => {
         const supported = await isBiometricSupported();
@@ -30,24 +28,19 @@ export function SecurityProvider({ children }) {
     checkSupport();
   }, []);
 
-  // Wird aus den Settings aufgerufen, wenn der Switch betätigt wird
   const updateStatus = () => {
       const enabled = isBiometricEnabled();
       setIsBiometricActive(enabled);
-      if (!enabled) setIsLocked(false); // Sofort entsperren, wenn deaktiviert
+      if (!enabled) setIsLocked(false); 
   };
 
-  // Die Hauptfunktion zum Entsperren
   const unlock = async () => {
     setAuthError(null);
     try {
-        // Dies triggert den Android-System-Dialog (Face/Finger + PIN Backup)
         const success = await verifyBiometrics();
-        
         if (success) {
             setIsLocked(false);
         } else {
-            // Fehlermeldung, aber wir bleiben im Lockscreen
             setAuthError("Verifizierung fehlgeschlagen. Bitte erneut versuchen.");
         }
     } catch (e) {
@@ -56,15 +49,27 @@ export function SecurityProvider({ children }) {
     }
   };
 
-  // Notfall-Unlock (z.B. nach erfolgreichem Firebase Re-Login)
   const forceUnlock = () => {
     setIsLocked(false);
     setAuthError(null);
   };
 
-  // Manuelles Sperren (z.B. Timeout oder Button)
+  // NEU: Signalisiert der Security, dass die App gleich legal in den Hintergrund geht
+  const prepareSystemDialog = () => {
+      setSuspendAutoLock(true);
+      // Fallback: Bypass nach 30 Sekunden aufheben, falls der User abbricht
+      setTimeout(() => {
+          setSuspendAutoLock(false);
+      }, 30000);
+  };
+
   const lockNow = () => {
     if (isBiometricActive) {
+        // NEU: Greift der Bypass, wird die Sperre umgangen und sofort resettet
+        if (suspendAutoLock) {
+            setSuspendAutoLock(false); 
+            return;
+        }
         setIsLocked(true);
     }
   };
@@ -77,7 +82,8 @@ export function SecurityProvider({ children }) {
     unlock,
     forceUnlock,
     lockNow,
-    updateStatus
+    updateStatus,
+    prepareSystemDialog // Exportiert für ItemGallery
   };
 
   return (

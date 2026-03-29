@@ -1,5 +1,5 @@
 import { db } from '../firebase';
-import { collection, doc, writeBatch, serverTimestamp, getDoc, addDoc, setDoc, increment } from 'firebase/firestore';
+import { collection, doc, writeBatch, serverTimestamp, getDoc, setDoc, increment, query, where, getDocs } from 'firebase/firestore';
 import { updateWearStats, addItemHistoryEntry, setItemStatus } from './ItemService';
 import { addCredits, getTimeBankBalance, calculateEarnedCredits } from './TimeBankService';
 import { registerPunishment } from './PunishmentService';
@@ -8,7 +8,6 @@ export const startSession = async (userId, sessionData) => {
     if (!userId || !sessionData) throw new Error("Parameter fehlen.");
 
     try {
-        // TIME BANKRUPTCY CHECK
         const tbBalance = await getTimeBankBalance(userId);
         if (tbBalance && tbBalance.isBankrupt && !sessionData.type.includes('debt') && !sessionData.type.includes('punishment')) {
             throw new Error("TIME BANKRUPTCY. Freiwillige Sessions gesperrt.");
@@ -19,78 +18,165 @@ export const startSession = async (userId, sessionData) => {
 
         if (itemIds.length === 0 && sessionData.itemId) {
             itemIds.push(sessionData.itemId);
-            items.push({ id: sessionData.itemId });
+            items.push({ id: sessionData.itemId }); 
         }
 
         if (itemIds.length === 0) throw new Error("Keine Items ausgewählt.");
 
-        let isDebtSession = false;
-        let minDuration = 0;
-        if (tbBalance && tbBalance.debtLocked) {
-             isDebtSession = true;
-             minDuration = 60; // 1 Stunde Pflicht-Tilgung
+        // --- NEU: ZWEI-STUFEN-START FÜR INSTRUCTION SESSIONS ---
+        // 1. Lade Daily Instruction, um die "Ziel-Liste" der Items zu kennen
+        let requiredItemIds = [];
+        if (sessionData.type === 'instruction') {
+            const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
+            const instrSnap = await getDoc(instrRef);
+            if (instrSnap.exists() && instrSnap.data().items) {
+                requiredItemIds = instrSnap.data().items.map(i => i.id);
+            }
         }
 
-        // NEU: Initialisierung des Session Timeline Ledgers
-        const itemLedger = {};
-        itemIds.forEach(id => {
-            itemLedger[id] = { joinedAt: serverTimestamp(), leftAt: null };
-        });
+        // 2. Prüfe, ob bereits eine Instruction-Session läuft (Warteschleife)
+        let existingSessionRef = null;
+        let existingSessionData = null;
 
-        const payload = {
-            itemIds,
-            itemLedger, 
-            itemsDetails: items.map(i => ({
-                id: i.id,
-                name: i.name || i.subCategory || 'Unknown',
-                brand: i.brand || 'Unknown',
-                category: i.category || i.mainCategory || 'Nylons',
-                customId: i.customId || null, 
-                imageUrl: i.imageUrl || (i.images && i.images.length > 0 ? i.images[0] : null)
-            })),
-            type: sessionData.type || 'voluntary',
-            periodId: sessionData.periodId || null,
-            acceptedAt: sessionData.acceptedAt || null,
-            verifiedViaNfc: sessionData.verifiedViaNfc || false,
-            isDebtSession,
-            minDuration,
-            targetDurationMinutes: sessionData.instructionDurationMinutes || sessionData.targetDurationMinutes || 0, // NEU: Fix für Exploits bei Overtime-Credits
-            startTime: serverTimestamp(),
-            endTime: null,
-            durationMinutes: 0,
-            isActive: true,
-            isPornActive: false // Neu für TZD Porn-Detektion
-        };
+        if (sessionData.type === 'instruction') {
+            const q = query(collection(db, `users/${userId}/sessions`), where('isActive', '==', true), where('type', '==', 'instruction'));
+            const snap = await getDocs(q);
+            if (!snap.empty) {
+                existingSessionRef = snap.docs[0].ref;
+                existingSessionData = snap.docs[0].data();
+            }
+        }
 
         const batch = writeBatch(db);
 
-        const newSessionRef = doc(collection(db, `users/${userId}/sessions`));
-        batch.set(newSessionRef, payload);
+        if (existingSessionRef) {
+            // --- MERGE LOGIK (Zweites Item zu laufender Instruction hinzufügen) ---
+            const mergedItemIds = [...new Set([...(existingSessionData.itemIds || []), ...itemIds])];
 
-        for (const itemId of itemIds) {
-            const itemRef = doc(db, `users/${userId}/items`, itemId);
-            // BUGFIX C: Absicherung durch set + merge anstelle von reinem update
-            batch.set(itemRef, { status: 'worn' }, { merge: true });
+            // Forensik-Timer (Ledger) für das NEUE Item genau jetzt starten
+            const newItemLedger = { ...existingSessionData.itemLedger };
+            itemIds.forEach(id => {
+                if (!newItemLedger[id]) {
+                    newItemLedger[id] = { joinedAt: serverTimestamp(), leftAt: null };
+                }
+            });
+
+            const existingItemDetailsIds = (existingSessionData.itemsDetails || []).map(i => i.id);
+            const newItemDetails = [...(existingSessionData.itemsDetails || [])];
+            items.forEach(i => {
+                if (!existingItemDetailsIds.includes(i.id)) {
+                    newItemDetails.push({
+                        id: i.id,
+                        name: i.name || i.subCategory || 'Unbekannt',
+                        brand: i.brand || 'Unbekannt',
+                        category: i.category || i.mainCategory || 'Nylons',
+                        customId: i.customId || null,
+                        imageUrl: i.imageUrl || (i.images && i.images.length > 0 ? i.images[0] : null)
+                    });
+                }
+            });
+
+            // 3. Gatekeeper Check: Sind jetzt ALLE geforderten Items gescannt?
+            const allRequiredPresent = requiredItemIds.length > 0 && requiredItemIds.every(reqId => mergedItemIds.includes(reqId));
+            let instructionReadyTime = existingSessionData.instructionReadyTime || null;
+            let newStartTime = existingSessionData.startTime;
+
+            if (allRequiredPresent && !instructionReadyTime) {
+                // START DES HAUPT-TIMERS (Die Pflichtzeit beginnt genau jetzt)
+                const now = serverTimestamp();
+                instructionReadyTime = now;
+                newStartTime = now; // Setzt den UI Timer im Dashboard auf 0 zurück
+            }
+
+            batch.update(existingSessionRef, {
+                itemIds: mergedItemIds,
+                itemLedger: newItemLedger,
+                itemsDetails: newItemDetails,
+                instructionReadyTime: instructionReadyTime,
+                startTime: newStartTime
+            });
+
+            for (const itemId of itemIds) {
+                const itemRef = doc(db, `users/${userId}/items`, itemId);
+                batch.set(itemRef, { status: 'worn' }, { merge: true });
+            }
+
+            await batch.commit();
+            return existingSessionRef.id;
+
+        } else {
+            // --- NEUE SESSION ERSTELLEN (Erstes Item) ---
+            let isDebtSession = false;
+            let minDuration = 0;
+            if (tbBalance && tbBalance.debtLocked) {
+                 isDebtSession = true;
+                 minDuration = 60;
+            }
+
+            const itemLedger = {};
+            itemIds.forEach(id => {
+                itemLedger[id] = { joinedAt: serverTimestamp(), leftAt: null };
+            });
+
+            // Check für Fallback, falls die Instruction nur 1 Item fordert
+            const allRequiredPresent = requiredItemIds.length > 0 && requiredItemIds.every(reqId => itemIds.includes(reqId));
+            let instructionReadyTime = null;
+            if (sessionData.type === 'instruction' && allRequiredPresent) {
+                instructionReadyTime = serverTimestamp();
+            }
+
+            const payload = {
+                itemIds,
+                itemLedger,
+                itemsDetails: items.map(i => ({
+                    id: i.id,
+                    name: i.name || i.subCategory || 'Unbekannt',
+                    brand: i.brand || 'Unbekannt',
+                    category: i.category || i.mainCategory || 'Nylons',
+                    customId: i.customId || null,
+                    imageUrl: i.imageUrl || (i.images && i.images.length > 0 ? i.images[0] : null)
+                })),
+                type: sessionData.type || 'voluntary',
+                periodId: sessionData.periodId || null,
+                acceptedAt: sessionData.acceptedAt || null,
+                verifiedViaNfc: sessionData.verifiedViaNfc || false,
+                isDebtSession,
+                minDuration,
+                targetDurationMinutes: sessionData.instructionDurationMinutes || sessionData.targetDurationMinutes || 0,
+                startTime: serverTimestamp(),
+                instructionReadyTime: instructionReadyTime, // Das Herzstück für die Compliance!
+                endTime: null,
+                durationMinutes: 0,
+                isActive: true,
+                isPornActive: false
+            };
+
+            const newSessionRef = doc(collection(db, `users/${userId}/sessions`));
+            batch.set(newSessionRef, payload);
+
+            for (const itemId of itemIds) {
+                const itemRef = doc(db, `users/${userId}/items`, itemId);
+                batch.set(itemRef, { status: 'worn' }, { merge: true });
+            }
+
+            if (sessionData.type === 'instruction') {
+                 const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
+                 batch.set(instrRef, {
+                     isActive: true,
+                     activeSessionId: newSessionRef.id
+                 }, { merge: true });
+            }
+
+            if (sessionData.type === 'punishment') {
+                 const punRef = doc(db, `users/${userId}/status/punishment`);
+                 batch.set(punRef, {
+                     activeSessionId: newSessionRef.id
+                 }, { merge: true });
+            }
+
+            await batch.commit();
+            return newSessionRef.id;
         }
-
-        // Aktualisiere Status Tracker
-        if (sessionData.type === 'instruction') {
-             const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
-             batch.set(instrRef, {
-                 isActive: true,
-                 activeSessionId: newSessionRef.id
-             }, { merge: true });
-        }
-
-        if (sessionData.type === 'punishment') {
-             const punRef = doc(db, `users/${userId}/status/punishment`);
-             batch.set(punRef, {
-                 activeSessionId: newSessionRef.id
-             }, { merge: true });
-        }
-
-        await batch.commit();
-        return newSessionRef.id;
 
     } catch (e) {
         console.error("Start Session Fehler:", e);
@@ -102,7 +188,6 @@ export const startTransitProtocol = async (userId, itemId) => {
     if (!userId || !itemId) throw new Error("Parameter fehlen.");
     const batch = writeBatch(db);
     
-    // 1. Session anlegen (spezieller Typ)
     const newSessionRef = doc(collection(db, `users/${userId}/sessions`));
     const payload = {
         itemIds: [itemId],
@@ -112,29 +197,20 @@ export const startTransitProtocol = async (userId, itemId) => {
         transitProtocolActive: true, 
         transitItemId: itemId,
         startTime: serverTimestamp(),
+        instructionReadyTime: serverTimestamp(),
         endTime: null,
         durationMinutes: 0,
         isActive: true
     };
     batch.set(newSessionRef, payload);
 
-    // 2. Item auf getragen setzen
     const itemRef = doc(db, `users/${userId}/items`, itemId);
     batch.set(itemRef, { status: 'worn' }, { merge: true });
 
-    // 3. Instruction Status updaten (Transit ist aktiv, Forced Release scharfgestellt)
-    // BUGFIX C: Punkt-Notation durch saubere verschachtelte Objekte für merge:true ersetzt
     const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
     batch.set(instrRef, {
-        transitProtocol: {
-            active: true,
-            sessionId: newSessionRef.id,
-            startTime: serverTimestamp()
-        },
-        forcedRelease: {
-            required: true,
-            executed: false
-        },
+        transitProtocol: { active: true, sessionId: newSessionRef.id, startTime: serverTimestamp() },
+        forcedRelease: { required: true, executed: false },
         isActive: true,
         activeSessionId: newSessionRef.id
     }, { merge: true });
@@ -159,7 +235,18 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
     const endTime = new Date();
 
     const startTime = sessionData.startTime?.toDate ? sessionData.startTime.toDate() : new Date(); 
-    const durationMinutes = Math.round((endTime - startTime) / 60000);
+    
+    // --- NEU: BERECHNUNG DER ECHTEN PFLICHT-DAUER ---
+    let complianceStartTime = startTime;
+    if (sessionData.type === 'instruction') {
+        if (sessionData.instructionReadyTime) {
+            complianceStartTime = sessionData.instructionReadyTime?.toDate ? sessionData.instructionReadyTime.toDate() : new Date(sessionData.instructionReadyTime);
+        } else {
+            // Instruction wurde nie komplett angezogen! -> Dauer für das Tagesziel ist 0 Minuten.
+            complianceStartTime = endTime; 
+        }
+    }
+    const durationMinutes = Math.round((endTime - complianceStartTime) / 60000);
 
     let nightSuccess = null;
     const isInstruction = sessionData.type === 'instruction';
@@ -196,13 +283,11 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
     }
     batch.set(sessionRef, updateData, { merge: true });
 
-    // --- POST-NUT CLARITY EVALUATION (Retention Tracking) ---
-    // BUGFIX A: Evaluierung findet statt, aber Ausführung (Strafe) wird auf NACH dem commit verschoben
     let pendingPunishment = null;
     if (sessionData.forcedReleaseAt) {
         const releaseTime = sessionData.forcedReleaseAt?.toDate ? sessionData.forcedReleaseAt.toDate() : new Date(sessionData.forcedReleaseAt);
         const retentionMinutes = Math.floor((endTime - releaseTime) / 60000);
-        const MIN_RETENTION_MINUTES = 60; // 60 Minuten Halte-Schwelle
+        const MIN_RETENTION_MINUTES = 60; 
 
         if (retentionMinutes < MIN_RETENTION_MINUTES) {
             pendingPunishment = {
@@ -216,7 +301,6 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
     const allSessionItemIds = sessionData.itemLedger ? Object.keys(sessionData.itemLedger) : currentItemIds;
     const itemDetails = [];
 
-    // BUGFIX B: Strikte Trennung. ERST alle Lese-Operationen (Reads) durchführen...
     for (const id of allSessionItemIds) {
         const itemRef = doc(db, `users/${userId}/items`, id);
         try {
@@ -225,13 +309,13 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
         } catch (e) { console.error(e); }
     }
 
-    // ... DANN alle Schreib-Operationen (Writes) in den Batch legen
     for (const id of allSessionItemIds) {
         const itemRef = doc(db, `users/${userId}/items`, id);
         const isTransitItem = sessionData.transitProtocolActive && id === sessionData.transitItemId;
         
-        let itemDurationMinutes = durationMinutes; // Fallback
+        let itemDurationMinutes = durationMinutes; 
         
+        // --- FORENSIK: Individuelle Item-Tragezeit aus dem Ledger ---
         if (sessionData.itemLedger && sessionData.itemLedger[id]) {
             const ledgerEntry = sessionData.itemLedger[id];
             const joined = ledgerEntry.joinedAt?.toDate ? ledgerEntry.joinedAt.toDate() : startTime;
@@ -246,7 +330,6 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
             totalMinutes: increment(itemDurationMinutes)
         };
         
-        // Status und lastWorn nur anpassen, wenn das Item zum Ende der Session noch aktiv getragen wurde
         if (isCurrentlyActive) {
             updatePayload.status = isTransitItem ? 'washing' : 'active';
             updatePayload.lastWorn = serverTimestamp();
@@ -283,7 +366,6 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
         }
     }
 
-    // Cleanup System-Status
     if (sessionData.type === 'instruction') {
         const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
         batch.set(instrRef, { isActive: false, activeSessionId: null }, { merge: true });
@@ -298,10 +380,8 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
         batch.set(punRef, { activeSessionId: null }, { merge: true });
     }
 
-    // 1. Sicheres Schließen der Session
     await batch.commit();
 
-    // 2. KORREKTUR A: Ausführung der Strafe erfolgt isoliert NACH dem sicheren Abschluss
     if (pendingPunishment) {
         try {
             await registerPunishment(userId, pendingPunishment.msg, pendingPunishment.dur);
