@@ -1,5 +1,5 @@
 import { db } from '../firebase';
-import { doc, getDoc, updateDoc, collection, query, where, getDocs, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, collection, query, where, getDocs, setDoc, serverTimestamp, arrayUnion } from 'firebase/firestore';
 
 const AUDIT_INTERVAL_DAYS = 30;
 const ITEMS_TO_AUDIT = 5;
@@ -74,20 +74,37 @@ export const completeAudit = async (userId) => {
 
 // Aktualisiert den Zustand des Items und des Audit-Status nach der Prüfung
 export const confirmAuditItem = async (userId, itemId, newCondition) => {
-    // 1. Item-Zustand aktualisieren (Condition)
-    const itemRef = doc(db, `users/${userId}/items`, itemId);
-    if (newCondition) {
-        await updateDoc(itemRef, { condition: newCondition });
-    }
-
-    // 2. Item aus der Liste der pendingItems entfernen
     const statusRef = doc(db, `users/${userId}/status/auditStatus`);
     const statusSnap = await getDoc(statusRef);
     
     if (statusSnap.exists() && statusSnap.data().active) {
         let pendingItems = statusSnap.data().pendingItems || [];
-        pendingItems = pendingItems.filter(item => item.id !== itemId);
         
+        // 1. Alten Zustand aus den pendingItems extrahieren für das Historien-Log
+        const auditedItem = pendingItems.find(item => item.id === itemId);
+        const oldCondition = auditedItem ? auditedItem.initialCondition : '?';
+
+        // 2. Item-Zustand und ULP Historie aktualisieren
+        const itemRef = doc(db, `users/${userId}/items`, itemId);
+        const updates = {};
+        
+        if (newCondition) {
+            updates.condition = newCondition;
+        }
+
+        // Gatekeeper: Audit-Event schreiben
+        updates.historyLog = arrayUnion({
+            type: 'AUDITED',
+            date: new Date().toISOString(),
+            data: {
+                message: `Audit durchgeführt. Zustand: ${oldCondition} -> ${newCondition || oldCondition}`
+            }
+        });
+
+        await updateDoc(itemRef, updates);
+        
+        // 3. Item aus der Liste der pendingItems entfernen
+        pendingItems = pendingItems.filter(item => item.id !== itemId);
         await updateDoc(statusRef, { pendingItems: pendingItems });
         
         // Wenn keine Items mehr zu prüfen sind, Audit abschließen

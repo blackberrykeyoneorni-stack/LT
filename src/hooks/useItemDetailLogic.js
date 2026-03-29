@@ -1,14 +1,13 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { 
-    doc, getDoc, updateDoc, collection, query, where, getDocs, 
-    serverTimestamp, arrayUnion 
+    doc, getDoc, collection, query, where, getDocs 
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useNFCGlobal } from '../contexts/NFCContext'; 
-import { calculateItemRecoveryStatus } from '../services/ItemService'; 
+import { calculateItemRecoveryStatus, updateItem, markItemAsWashing, archiveItemRecord } from '../services/ItemService'; 
 import { startSession as startSessionService } from '../services/SessionService'; 
 import { safeDate } from '../utils/dateUtils';
 import { DEFAULT_ARCHIVE_REASONS, DEFAULT_RUN_LOCATIONS, DEFAULT_RUN_CAUSES } from '../utils/constants';
@@ -290,13 +289,20 @@ function useItemActions(config) {
             const updatedData = { 
                 ...formData, 
                 cost: isNaN(costNum) ? 0 : costNum, 
-                updatedAt: serverTimestamp(),
                 images: finalImages,
                 imageUrl: finalImages.length > 0 ? finalImages[0] : null
             };
 
-            await updateDoc(doc(db, `users/${currentUser.uid}/items`, id), updatedData);
-            setItem({ ...item, ...updatedData });
+            // Gatekeeper ULP Update nutzen
+            await updateItem(currentUser.uid, id, updatedData);
+            
+            const timestamp = new Date().toISOString();
+            setItem(prev => ({ 
+                ...prev, 
+                ...updatedData,
+                historyLog: [...(prev.historyLog || []), { type: 'METADATA_UPDATED', date: timestamp, data: { message: 'Eigenschaften modifiziert' } }]
+            }));
+            
             setPendingFiles([]); 
             setIsEditing(false);
             
@@ -304,18 +310,16 @@ function useItemActions(config) {
     };
 
     const handleWash = async () => {
+        if (!currentUser || !id) return;
         try {
-            const timestamp = new Date().toISOString();
-            await updateDoc(doc(db, `users/${currentUser.uid}/items`, id), {
-                status: 'washing', 
-                cleanDate: null, 
-                historyLog: arrayUnion({ type: 'wash_pending', date: timestamp })
-            });
+            // Gatekeeper ULP Wash nutzen
+            const entry = await markItemAsWashing(currentUser.uid, id);
+            
             setItem(prev => ({ 
                 ...prev, 
                 status: 'washing',
                 cleanDate: null, 
-                historyLog: [...(prev.historyLog || []), { type: 'wash_pending', date: timestamp }] 
+                historyLog: [...(prev.historyLog || []), entry] 
             }));
             navigate('/inventory');
 
@@ -323,16 +327,16 @@ function useItemActions(config) {
     };
 
     const handleArchive = async () => {
+        if (!currentUser || !id) return;
         try {
-            const timestamp = new Date().toISOString();
-            await updateDoc(doc(db, `users/${currentUser.uid}/items`, id), {
-                status: 'archived',
-                archiveReason: archiveDialog.reason,
-                archiveDate: serverTimestamp(),
-                runLocation: archiveDialog.reason === 'run' ? archiveDialog.runLocation : null,
-                runCause: archiveDialog.reason === 'run' ? archiveDialog.runCause : null,
-                historyLog: arrayUnion({ type: 'archived', date: timestamp, reason: archiveDialog.reason })
-            });
+            // Gatekeeper ULP Archive nutzen
+            const entry = await archiveItemRecord(currentUser.uid, id, archiveDialog);
+            
+            setItem(prev => ({ 
+                ...prev, 
+                status: 'archived', 
+                historyLog: [...(prev.historyLog || []), entry] 
+            }));
             setArchiveDialog(prev => ({ ...prev, open: false }));
             navigate('/inventory');
         } catch(e) { console.error(e); }

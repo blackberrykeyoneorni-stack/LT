@@ -121,7 +121,7 @@ export const subscribeToItems = (userId, callback) => {
 };
 
 /**
- * Fügt ein neues Item hinzu.
+ * Fügt ein neues Item hinzu (inklusive ULP CREATED Event).
  */
 export const addItem = async (userId, itemData, customId = null) => {
     const payload = {
@@ -130,7 +130,7 @@ export const addItem = async (userId, itemData, customId = null) => {
         wearCount: 0,
         totalMinutes: 0,
         status: 'active', // active, washing, archived, worn
-        historyLog: []
+        historyLog: [{ type: 'CREATED', date: new Date().toISOString(), data: { message: 'Ins Inventar aufgenommen' } }]
     };
 
     if (customId) {
@@ -143,13 +143,14 @@ export const addItem = async (userId, itemData, customId = null) => {
 };
 
 /**
- * Aktualisiert ein bestehendes Item.
+ * Aktualisiert ein bestehendes Item (inklusive ULP METADATA_UPDATED Event).
  */
 export const updateItem = async (userId, itemId, data) => {
     const itemRef = doc(db, `users/${userId}/${COLLECTION_NAME}`, itemId);
     await updateDoc(itemRef, {
         ...data,
-        updatedAt: serverTimestamp()
+        updatedAt: serverTimestamp(),
+        historyLog: arrayUnion({ type: 'METADATA_UPDATED', date: new Date().toISOString(), data: { message: 'Eigenschaften modifiziert' } })
     });
 };
 
@@ -163,7 +164,6 @@ export const deleteItem = async (userId, itemId) => {
 
 /**
  * Aktualisiert die Trage-Statistiken eines Items nach einer Session.
- * WICHTIG: Wird vom SessionService aufgerufen.
  */
 export const updateWearStats = async (userId, itemId, durationMinutes) => {
     if (!userId || !itemId) return;
@@ -174,12 +174,12 @@ export const updateWearStats = async (userId, itemId, durationMinutes) => {
         wearCount: increment(1),
         totalMinutes: increment(durationMinutes),
         lastWorn: serverTimestamp(),
-        lastSessionDurationMinutes: durationMinutes // NEU: Synchrone Erfassung für das Inventory
+        lastSessionDurationMinutes: durationMinutes 
     });
 };
 
 /**
- * Setzt den Status eines Items (z.B. auf 'washing').
+ * Setzt den Status eines Items (Legacy, für einfache Aufrufe).
  */
 export const setItemStatus = async (userId, itemId, status) => {
     const itemRef = doc(db, `users/${userId}/${COLLECTION_NAME}`, itemId);
@@ -187,7 +187,52 @@ export const setItemStatus = async (userId, itemId, status) => {
 };
 
 /**
- * Fügt einen Eintrag zur Item-Historie hinzu.
+ * Gatekeeper: Setzt den Item-Status auf 'washing' und loggt WASH_PENDING.
+ */
+export const markItemAsWashing = async (userId, itemId) => {
+    const itemRef = doc(db, `users/${userId}/${COLLECTION_NAME}`, itemId);
+    const entry = { type: 'WASH_PENDING', date: new Date().toISOString(), data: { message: 'Zur Reinigung hinzugefügt' } };
+    await updateDoc(itemRef, {
+        status: 'washing',
+        cleanDate: null,
+        historyLog: arrayUnion(entry)
+    });
+    return entry;
+};
+
+/**
+ * Gatekeeper: Setzt den Item-Status auf 'active' und loggt WASHED.
+ */
+export const markItemAsWashed = async (userId, itemId) => {
+    const itemRef = doc(db, `users/${userId}/${COLLECTION_NAME}`, itemId);
+    const entry = { type: 'WASHED', date: new Date().toISOString(), data: { message: 'Gewaschen und verfügbar' } };
+    await updateDoc(itemRef, {
+        status: 'active',
+        cleanDate: serverTimestamp(),
+        historyLog: arrayUnion(entry)
+    });
+    return entry;
+};
+
+/**
+ * Gatekeeper: Archiviert ein Item und loggt ARCHIVED.
+ */
+export const archiveItemRecord = async (userId, itemId, archiveData) => {
+    const itemRef = doc(db, `users/${userId}/${COLLECTION_NAME}`, itemId);
+    const entry = { type: 'ARCHIVED', date: new Date().toISOString(), data: { reason: archiveData.reason, message: 'Aus dem aktiven Bestand entfernt' } };
+    await updateDoc(itemRef, {
+        status: 'archived',
+        archiveReason: archiveData.reason,
+        archiveDate: serverTimestamp(),
+        runLocation: archiveData.reason === 'run' ? archiveData.runLocation : null,
+        runCause: archiveData.reason === 'run' ? archiveData.runCause : null,
+        historyLog: arrayUnion(entry)
+    });
+    return entry;
+};
+
+/**
+ * Fügt einen manuellen Eintrag zur Item-Historie hinzu.
  */
 export const addItemHistoryEntry = async (userId, itemId, entry) => {
     if (!userId || !itemId) return;
@@ -195,7 +240,7 @@ export const addItemHistoryEntry = async (userId, itemId, entry) => {
     await updateDoc(itemRef, {
         historyLog: arrayUnion({
             ...entry,
-            timestamp: new Date().toISOString()
+            date: new Date().toISOString()
         })
     });
 };

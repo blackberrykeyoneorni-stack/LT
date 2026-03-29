@@ -23,7 +23,7 @@ export default function ItemHistory({ historyEvents }) {
                     let icon = null;
                     let durationLabel = '';
 
-                    // KORREKTUR: Robuste Timestamp-Decodierung für IndexedDB Cache-Objekte
+                    // Robuste Timestamp-Decodierung für IndexedDB Cache-Objekte
                     const parseFirebaseDate = (val) => {
                         if (!val) return null;
                         if (val instanceof Date && !isNaN(val)) return val;
@@ -42,7 +42,7 @@ export default function ItemHistory({ historyEvents }) {
                     if (event.type === 'session') {
                         const s = event.data;
                         
-                        // KORREKTUR: Präzise Aufschlüsselung der Session-Kategorien (Tag/Nacht, TZD Subtypen)
+                        // Präzise Aufschlüsselung der Session-Kategorien (Tag/Nacht, TZD Subtypen)
                         let typeLabel = 'Session';
                         if (s.type === 'instruction') {
                             typeLabel = s.periodId === 'night' ? 'Anweisung (Nacht)' : 'Anweisung (Tag)';
@@ -83,25 +83,45 @@ export default function ItemHistory({ historyEvents }) {
                         color = "info";
                         icon = <WaterDropIcon style={{ fontSize: 16 }} />;
                         durationLabel = r.outcome === 'maintained' ? 'Maintained' : 'Removed';
-                    } else if (event.type === 'wash_pending') {
-                        // KORREKTUR: Explizites Erfassen, wann ein Item in den Wäschekorb gelegt wurde
+                        
+                    // ULP: Unified Lifecycle Protocol Integration
+                    } else if (event.type === 'wash_pending' || event.type === 'WASH_PENDING') {
                         label = "Wäschekorb";
-                        sub = `${dateStr} • Zur Reinigung hinzugefügt`;
+                        sub = event.data?.message || `${dateStr} • Zur Reinigung hinzugefügt`;
                         color = "warning";
                         icon = <LocalLaundryServiceIcon style={{ fontSize: 16 }} />;
                         durationLabel = 'Wartend';
-                    } else if (event.type === 'wash') {
-                        label = "Reinigung";
-                        sub = `${dateStr} • Gewaschen`;
+                    } else if (event.type === 'wash' || event.type === 'WASHED') {
+                        label = "Reinigung abgeschlossen";
+                        sub = event.data?.message || `${dateStr} • Gewaschen und verfügbar`;
                         color = "success";
                         icon = <LocalLaundryServiceIcon style={{ fontSize: 16 }} />;
                         durationLabel = 'Sauber';
-                    } else if (event.type === 'archived') {
+                    } else if (event.type === 'archived' || event.type === 'ARCHIVED') {
                         label = "Archiviert";
-                        sub = `${dateStr} • ${event.data.reason || 'Kein Grund'}`;
+                        const reasonStr = event.data?.reason || event.reason || 'Kein Grund';
+                        sub = event.data?.message ? `${event.data.message} (${reasonStr})` : `${dateStr} • ${reasonStr}`;
                         color = "error";
                         icon = <DeleteIcon style={{ fontSize: 16 }} />;
                         durationLabel = 'End of Life';
+                    } else if (event.type === 'CREATED') {
+                        label = "Inventarisierung";
+                        sub = event.data?.message || `${dateStr} • Ins System aufgenommen`;
+                        color = "primary";
+                        icon = <InfoIcon style={{ fontSize: 16 }} />;
+                        durationLabel = 'Neu';
+                    } else if (event.type === 'METADATA_UPDATED') {
+                        label = "Daten-Update";
+                        sub = event.data?.message || `${dateStr} • Eigenschaften modifiziert`;
+                        color = "default";
+                        icon = <InfoIcon style={{ fontSize: 16 }} />;
+                        durationLabel = 'Edit';
+                    } else if (event.type === 'AUDITED') {
+                        label = "System-Audit";
+                        sub = event.data?.message || `${dateStr} • Zustand geprüft`;
+                        color = "secondary";
+                        icon = <GavelIcon style={{ fontSize: 16 }} />;
+                        durationLabel = 'Geprüft';
                     } 
                     else if (event.type && event.type.startsWith('tzd_')) {
                         label = "Zeitloses Diktat";
