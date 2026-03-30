@@ -1,5 +1,5 @@
 // src/pages/Dashboard.jsx
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   collection, doc, updateDoc, serverTimestamp, 
@@ -60,9 +60,15 @@ export default function Dashboard() {
   const kpis = useKPIs(items, activeSessions); 
   const { femIndex, femIndexLoading, indexDetails, phase, subScores } = useFemIndex(kpis); 
 
-  // Store Connections
-  const showToast = useUIStore(s => s.showToast);
-  const isHoldingOath = useUIStore(s => s.isHoldingOath);
+  // Store Connections (Zentraler Controller)
+  const { 
+      showToast, 
+      setInstructionOpen, 
+      setOathProgress, 
+      isHoldingOath, setIsHoldingOath,
+      setForcedReleaseOpen, 
+      setForcedReleaseMethod 
+  } = useUIStore();
 
   const [activeSuspension, setActiveSuspension] = useState(null);
   const [loadingSuspension, setLoadingSuspension] = useState(true);
@@ -75,6 +81,7 @@ export default function Dashboard() {
   const [currentSpent, setCurrentSpent] = useState(0); 
   const [maxInstructionItems, setMaxInstructionItems] = useState(1);
   const releaseTimerInterval = useRef(null);
+  const oathTimerRef = useRef(null); // NEU: Oath Timer in der UI Schicht
   
   const [timeBankData, setTimeBankData] = useState({ nc: 0, lc: 0 });
   const [weeklyReport, setWeeklyReport] = useState(null);
@@ -89,7 +96,7 @@ export default function Dashboard() {
   // --- HOOK INTEGRATION: TZD & GAMBLE MANAGER ---
   const {
       tzdActive, setTzdActive, isCheckingProtocol,
-      offerOpen, gambleStake, isForcedGamble,
+      gambleOffer, // NEU: Ersetzt isOfferOpen
       immunityActive, setImmunityActive,
       handleGambleAccept, handleGambleDecline
   } = useTZDAndGamble({
@@ -97,16 +104,56 @@ export default function Dashboard() {
       punishmentStatus, punishmentItem: null, isStealthActive, showToast
   });
 
+  // UI Zustand aus den Daten des Hooks ableiten
+  const offerOpen = gambleOffer !== null;
+  const gambleStake = gambleOffer?.stake || [];
+  const isForcedGamble = gambleOffer?.isForced || false;
+
   // --- HOOK INTEGRATION: INSTRUCTION MANAGER ---
   const {
       currentPeriod, isNight, isFreeDay, freeDayReason,
       currentInstruction, instructionStatus, isInstructionActive,
-      handleStartRequest, startOathPress, cancelOathPress, handleDeclineOath,
+      handleStartRequest, handleAcceptOath, handleDeclineOath,
       handleConfirmForcedRelease, handleFailForcedRelease, handleRefuseForcedRelease
   } = useInstructionManager({
       currentUser, items, activeSessions, sessionsLoading, isStealthActive, 
-      tzdActive, setTzdActive, showToast, setPunishmentStatus
+      tzdActive, setTzdActive, showToast, setPunishmentStatus,
+      // NEU: Callback Architektur (Der Controller steuert das UI, der Hook liefert Events)
+      onEvasionDetected: () => setInstructionOpen(false),
+      onForcedReleaseDue: (method) => {
+          setForcedReleaseMethod(method);
+          setForcedReleaseOpen(true);
+      },
+      onInstructionStarted: () => setInstructionOpen(false),
+      onOathAccepted: () => setIsHoldingOath(false),
+      onOathRefused: () => {
+          setInstructionOpen(false);
+          setIsHoldingOath(false);
+      },
+      onReleaseResolved: () => setForcedReleaseOpen(false)
   });
+
+  // NEU: Oath Timer Logik (Reines UI Verhalten)
+  const startOathPress = useCallback(() => { 
+      setIsHoldingOath(true); 
+      setOathProgress(0); 
+      oathTimerRef.current = setInterval(() => { 
+          setOathProgress(prev => { 
+              if (prev >= 100) { 
+                  clearInterval(oathTimerRef.current); 
+                  handleAcceptOath(); // Startet Datenbank-Logik im Hook
+                  return 100; 
+              } 
+              return prev + 0.4; 
+          }); 
+      }, 20); 
+  }, [handleAcceptOath, setIsHoldingOath, setOathProgress]);
+  
+  const cancelOathPress = useCallback(() => { 
+      clearInterval(oathTimerRef.current); 
+      setIsHoldingOath(false); 
+      setOathProgress(0); 
+  }, [setIsHoldingOath, setOathProgress]);
 
   const handleAcknowledgeInflation = async () => {
       try {

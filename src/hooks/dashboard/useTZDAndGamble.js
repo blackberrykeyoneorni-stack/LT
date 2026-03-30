@@ -18,9 +18,8 @@ export default function useTZDAndGamble({
     const [tzdStartTime, setTzdStartTime] = useState(null); 
     const [isCheckingProtocol, setIsCheckingProtocol] = useState(true); 
     
-    const [offerOpen, setOfferOpen] = useState(false);
-    const [gambleStake, setGambleStake] = useState([]);
-    const [isForcedGamble, setIsForcedGamble] = useState(false);
+    // NEU: Reines Daten-Objekt statt UI-Store Flag (Entkopplung)
+    const [gambleOffer, setGambleOffer] = useState(null); 
     const [hasGambledThisSession, setHasGambledThisSession] = useState(false);
     const [immunityActive, setImmunityActive] = useState(false);
 
@@ -66,9 +65,8 @@ export default function useTZDAndGamble({
                         if (gambleResult.trigger) {
                             const stake = determineGambleStake(items);
                             if (stake.length > 0) {
-                                setGambleStake(stake);
-                                setIsForcedGamble(gambleResult.isForced);
-                                setOfferOpen(true);
+                                // NEU: Nur Daten setzen. UI reagiert dynamisch.
+                                setGambleOffer({ stake, isForced: gambleResult.isForced });
                                 setHasGambledThisSession(true);
                             }
                         } else {
@@ -102,8 +100,10 @@ export default function useTZDAndGamble({
     const handleGambleAccept = useCallback(async () => {
         if (!currentUser) return;
         await recordGambleAction(currentUser.uid, 'accept');
-        const result = await rollTheDice(currentUser.uid, gambleStake);
-        setOfferOpen(false);
+        const currentStake = gambleOffer?.stake || [];
+        const result = await rollTheDice(currentUser.uid, currentStake);
+        
+        setGambleOffer(null); // Daten löschen schließt implizit das Fenster im Dashboard
         
         if (result.win) {
             if (showToast) showToast("GEWINN! 24h Immunität aktiviert.", "success");
@@ -124,19 +124,18 @@ export default function useTZDAndGamble({
                 } catch (e) { console.error(e); }
             }
 
-            // --- NEU: Harter 24-Stunden Override (1440 Minuten) in die Datenbank schreiben ---
-            await startTZD(currentUser.uid, gambleStake, null, 1440, 'spiel_tzd');
+            await startTZD(currentUser.uid, currentStake, null, 1440, 'spiel_tzd');
 
             if (showToast) showToast("VERLOREN. 24h Zeitloses Diktat aktiviert.", "error");
             setTzdActive(true);
             setTzdStartTime(new Date());
         }
-    }, [currentUser, activeSessions, gambleStake, showToast]);
+    }, [currentUser, activeSessions, gambleOffer, showToast]);
 
     const handleGambleDecline = useCallback(async () => {
         if (!currentUser) return;
         await recordGambleAction(currentUser.uid, 'decline');
-        setOfferOpen(false);
+        setGambleOffer(null);
         if (showToast) showToast("Sicher ist sicher...", "info");
     }, [currentUser, showToast]);
 
@@ -145,9 +144,7 @@ export default function useTZDAndGamble({
         tzdActive,
         setTzdActive,
         isCheckingProtocol,
-        offerOpen,
-        gambleStake,
-        isForcedGamble,
+        gambleOffer, // NEU: Datenübergabe statt Fenster-Trigger
         immunityActive,
         setImmunityActive,
         handleGambleAccept,

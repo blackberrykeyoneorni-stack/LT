@@ -7,7 +7,6 @@ import { triggerEvasionPenalty } from '../../services/TZDService';
 import { startSession as startSessionService } from '../../services/SessionService';
 import { registerRelease as apiRegisterRelease } from '../../services/ReleaseService';
 import { registerOathRefusal, registerPunishment, getActivePunishment } from '../../services/PunishmentService';
-import useUIStore from '../../store/uiStore';
 
 // --- HILFSFUNKTIONEN ---
 const getLocalISODate = (date) => { 
@@ -43,16 +42,15 @@ export default function useInstructionManager({
     tzdActive,
     setTzdActive,
     showToast,
-    setPunishmentStatus
+    setPunishmentStatus,
+    // --- NEU: Callback-API für strikte UI-Trennung ---
+    onEvasionDetected, 
+    onForcedReleaseDue, 
+    onInstructionStarted, 
+    onOathAccepted, 
+    onOathRefused, 
+    onReleaseResolved
 }) {
-    // UI Store Einbindung
-    const setInstructionOpen = useUIStore(state => state.setInstructionOpen);
-    const setOathProgress = useUIStore(state => state.setOathProgress);
-    const setIsHoldingOath = useUIStore(state => state.setIsHoldingOath);
-    const setForcedReleaseOpen = useUIStore(state => state.setForcedReleaseOpen);
-    const setForcedReleaseMethod = useUIStore(state => state.setForcedReleaseMethod);
-    const forcedReleaseOpen = useUIStore(state => state.forcedReleaseOpen);
-
     // --- LOKALE STATES ---
     const [now, setNow] = useState(Date.now());
     const [currentPeriod, setCurrentPeriod] = useState(calculatePeriodId());
@@ -63,8 +61,7 @@ export default function useInstructionManager({
     const [instructionStatus, setInstructionStatus] = useState('idle');
 
     // --- REFS FÜR TIMER UND LOGIK ---
-    const oathTimerRef = useRef(null);
-    const isJustStartedRef = useRef(false);
+    const forcedReleaseTriggeredRef = useRef(false); // NEU: Verhindert Mehrfach-Trigger ohne UI-State-Abhängigkeit
 
     // --- ABGELEITETE STATES ---
     const safeActiveSessions = activeSessions || [];
@@ -134,7 +131,7 @@ export default function useInstructionManager({
                                     evasionPenaltyTriggered: true 
                                 });
                                 setTzdActive(true); 
-                                setInstructionOpen(false); 
+                                if (onEvasionDetected) onEvasionDetected(); // Controller informieren
                                 instr = null;
                             }
                         }
@@ -153,7 +150,7 @@ export default function useInstructionManager({
             };
             check();
         }
-    }, [currentUser, safeItems.length, sessionsLoading, currentPeriod, currentInstruction, instructionStatus, isFreeDay, safeActiveSessions, isStealthActive, setTzdActive, setInstructionOpen]);
+    }, [currentUser, safeItems.length, sessionsLoading, currentPeriod, currentInstruction, instructionStatus, isFreeDay, safeActiveSessions, isStealthActive, setTzdActive, onEvasionDetected]);
 
     // --- EFFECT 3: LIVE-WATCHER (Post-Oath Flucht) ---
     useEffect(() => {
@@ -178,7 +175,7 @@ export default function useInstructionManager({
                     console.log("Flucht erkannt (Live Watcher - Post Oath)!\nTrigger 150% TZD.");
                     
                     setCurrentInstruction(prev => ({ ...prev, evasionPenaltyTriggered: true }));
-                    setInstructionOpen(false);
+                    if (onEvasionDetected) onEvasionDetected(); // Controller informieren
 
                     await triggerEvasionPenalty(currentUser.uid, currentInstruction.items);
           
@@ -194,7 +191,7 @@ export default function useInstructionManager({
         }, 60000); 
 
         return () => clearInterval(timer);
-    }, [currentUser, currentInstruction, safeActiveSessions, setTzdActive, showToast, setInstructionOpen]);
+    }, [currentUser, currentInstruction, safeActiveSessions, setTzdActive, showToast, onEvasionDetected]);
 
     // --- EFFECT 4: FORCED RELEASE VERZÖGERUNGS-TRIGGER ---
     useEffect(() => {
@@ -207,22 +204,21 @@ export default function useInstructionManager({
             const fr = currentInstruction.forcedRelease;
             
             if (activeInstSession && fr && fr.required === true && fr.executed === false && activeInstSession.startTime) {
-                if (!forcedReleaseOpen) {
+                if (!forcedReleaseTriggeredRef.current) {
                     const startMs = activeInstSession.startTime?.toDate ? activeInstSession.startTime.toDate().getTime() : new Date(activeInstSession.startTime).getTime();
                     const nowMs = Date.now();
                     const elapsed = nowMs - startMs;
                     const delay = Math.max(0, 5000 - elapsed);
                     
                     const timerId = setTimeout(() => {
-                        setForcedReleaseMethod(fr.method);
-                        setForcedReleaseOpen(true);
-                        isJustStartedRef.current = false; 
+                        forcedReleaseTriggeredRef.current = true;
+                        if (onForcedReleaseDue) onForcedReleaseDue(fr.method); // Controller informieren
                     }, delay);
                     return () => clearTimeout(timerId);
                 }
             }
         }
-    }, [currentInstruction, forcedReleaseOpen, safeActiveSessions, setForcedReleaseMethod, setForcedReleaseOpen]);
+    }, [currentInstruction, safeActiveSessions, onForcedReleaseDue]);
 
     // --- HANDLER: SESSION START ---
     const handleStartRequest = useCallback(async (itemsToStart) => { 
@@ -233,8 +229,6 @@ export default function useInstructionManager({
         }
         const targetItems = itemsToStart || currentInstruction?.items;
         if (targetItems && targetItems.length > 0) { 
-            isJustStartedRef.current = true;
-            
             await startSessionService(currentUser.uid, {
                 items: targetItems,
                 type: 'instruction',
@@ -242,10 +236,10 @@ export default function useInstructionManager({
                 acceptedAt: currentInstruction.acceptedAt
             });
             
-            setInstructionOpen(false); 
+            if (onInstructionStarted) onInstructionStarted(); // Controller informieren
             if (showToast) showToast(`${targetItems.length} Sessions gestartet.`, "success");
         }
-    }, [currentUser, tzdActive, currentInstruction, showToast, setInstructionOpen]);
+    }, [currentUser, tzdActive, currentInstruction, showToast, onInstructionStarted]);
 
     // --- HANDLER: OATH (EID) LOGIK ---
     const handleAcceptOath = useCallback(async () => { 
@@ -255,38 +249,16 @@ export default function useInstructionManager({
         batch.update(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), { isAccepted: true, acceptedAt: nowISO }); 
         await batch.commit(); 
         setCurrentInstruction(prev => ({ ...prev, isAccepted: true, acceptedAt: nowISO })); 
-        setIsHoldingOath(false); 
-    }, [currentUser, setIsHoldingOath]);
-
-    const startOathPress = useCallback(() => { 
-        setIsHoldingOath(true); 
-        setOathProgress(0); 
-        oathTimerRef.current = setInterval(() => { 
-            setOathProgress(prev => { 
-                if (prev >= 100) { 
-                    clearInterval(oathTimerRef.current); 
-                    handleAcceptOath(); 
-                    return 100; 
-                } 
-                return prev + 0.4; 
-            }); 
-        }, 20); 
-    }, [handleAcceptOath, setIsHoldingOath, setOathProgress]);
-    
-    const cancelOathPress = useCallback(() => { 
-        clearInterval(oathTimerRef.current); 
-        setIsHoldingOath(false); 
-        setOathProgress(0); 
-    }, [setIsHoldingOath, setOathProgress]);
+        if (onOathAccepted) onOathAccepted(); // Controller informieren
+    }, [currentUser, onOathAccepted]);
 
     const handleDeclineOath = useCallback(async () => { 
         if (!currentUser) return;
         await registerOathRefusal(currentUser.uid); 
         const newPunishment = await getActivePunishment(currentUser.uid);
         if (setPunishmentStatus) setPunishmentStatus(newPunishment || { active: false }); 
-        setInstructionOpen(false); 
-        setIsHoldingOath(false); 
-    }, [currentUser, setPunishmentStatus, setInstructionOpen, setIsHoldingOath]);
+        if (onOathRefused) onOathRefused(); // Controller informieren
+    }, [currentUser, setPunishmentStatus, onOathRefused]);
 
     // --- HANDLER: FORCED RELEASE ---
     const handleConfirmForcedRelease = useCallback(async (outcome) => {
@@ -307,13 +279,13 @@ export default function useInstructionManager({
             await batch.commit();
 
             setCurrentInstruction(prev => ({ ...prev, forcedRelease: { ...prev.forcedRelease, executed: true } }));
-            setForcedReleaseOpen(false);
+            if (onReleaseResolved) onReleaseResolved(); // Controller informieren
             if (showToast) showToast("Protokoll erfüllt. Sauber und gehorsam.", "success");
         } catch (e) {
             console.error("Error confirming forced release:", e);
             if (showToast) showToast("Fehler beim Speichern.", "error");
         }
-    }, [currentUser, safeActiveSessions, showToast, setForcedReleaseOpen]);
+    }, [currentUser, safeActiveSessions, showToast, onReleaseResolved]);
 
     const handleFailForcedRelease = useCallback(async () => {
         if (!currentUser) return;
@@ -333,12 +305,12 @@ export default function useInstructionManager({
             await batch.commit();
   
             setCurrentInstruction(prev => ({ ...prev, forcedRelease: { ...prev.forcedRelease, executed: true } }));
-            setForcedReleaseOpen(false);
+            if (onReleaseResolved) onReleaseResolved(); // Controller informieren
             if (showToast) showToast("Schwäche protokolliert. Ausrüstung ruiniert. Strafe aktiv.", "error");
         } catch (e) {
             console.error("Error failing forced release:", e);
         }
-    }, [currentUser, currentInstruction, setPunishmentStatus, showToast, setForcedReleaseOpen]);
+    }, [currentUser, currentInstruction, setPunishmentStatus, showToast, onReleaseResolved]);
   
     const handleRefuseForcedRelease = useCallback(async () => {
         if (!currentUser) return;
@@ -349,12 +321,12 @@ export default function useInstructionManager({
             
             await updateDoc(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), { "forcedRelease.executed": true });
             setCurrentInstruction(prev => ({ ...prev, forcedRelease: { ...prev.forcedRelease, executed: true } }));
-            setForcedReleaseOpen(false);
+            if (onReleaseResolved) onReleaseResolved(); // Controller informieren
             if (showToast) showToast("Verweigerung registriert. Massive Strafe aktiv.", "warning");
         } catch (e) {
             console.error("Error refusing forced release:", e);
         }
-    }, [currentUser, setPunishmentStatus, showToast, setForcedReleaseOpen]);
+    }, [currentUser, setPunishmentStatus, showToast, onReleaseResolved]);
 
     return {
         currentPeriod,
@@ -365,8 +337,7 @@ export default function useInstructionManager({
         instructionStatus,
         isInstructionActive,
         handleStartRequest,
-        startOathPress,
-        cancelOathPress,
+        handleAcceptOath, // NEU: Direkt exportiert, UI-Logik ins Dashboard verlagert
         handleDeclineOath,
         handleConfirmForcedRelease,
         handleFailForcedRelease,
