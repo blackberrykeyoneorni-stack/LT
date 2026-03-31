@@ -36,7 +36,6 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
               if (currentUser) {
                   await addPenaltyToActivePunishment(currentUser.uid, session.id, 10);
               }
-              // NEUER TEXT GEMÄSS BEFEHL
               showToast("Zu früh, dein Arsch wird weiter durchgefickt.", "error");
           } catch (e) {
               console.error(e);
@@ -101,7 +100,7 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
             let chipBg = '#000000'; 
 
             if (session.isDebtSession) {
-                typeLabel = "SCHULDENABBAU";
+                typeLabel = "SCHULDENTILGUNG";
                 borderColor = PALETTE.accents.red;
                 chipColor = PALETTE.accents.red;
                 chipBg = '#FFFFFF'; 
@@ -247,24 +246,43 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
                                         VOLLZUG PRÜFEN
                                     </Button>
                                 ) : (isTZD || session.isDebtSession) ? (
-                                    <Button 
-                                        variant={isLocked ? "outlined" : "contained"} 
-                                        size="small"
-                                        fullWidth
-                                        disabled={isLocked}
-                                        onClick={() => onStopSession(session)}
-                                        startIcon={isLocked ? <LockIcon /> : <StopIcon />}
-                                        sx={isLocked ? { 
-                                            borderColor: 'rgba(255,255,255,0.1)',
-                                            color: 'text.disabled'
-                                        } : {
-                                            bgcolor: PALETTE.primary.main,
-                                            color: '#000',
-                                            '&:hover': { bgcolor: PALETTE.primary.dark }
-                                        }}
-                                    >
-                                        {isLocked ? `GESPERRT (${remainingTime}m)` : "BEENDEN"}
-                                    </Button>
+                                    <Box sx={{ display: 'flex', width: '100%', gap: 1 }}>
+                                        {isLocked && session.isDebtSession && (
+                                            <Button
+                                                variant="outlined"
+                                                size="small"
+                                                color="error"
+                                                onClick={() => {
+                                                    if(window.confirm("SYSTEMWARNUNG: Ein Not-Abbruch vernichtet die bisherige Tragezeit und erhöht deine Schulden sofort um 50% (Overdraft Penalty). Fortfahren?")) {
+                                                        onStopSession(session, { emergencyBailout: true });
+                                                    }
+                                                }}
+                                                sx={{ flex: 1, borderColor: PALETTE.accents.red, color: PALETTE.accents.red, fontWeight: 'bold' }}
+                                            >
+                                                NOT-ABBRUCH
+                                            </Button>
+                                        )}
+                                        <Button 
+                                            variant={isLocked ? "outlined" : "contained"} 
+                                            size="small"
+                                            disabled={isLocked}
+                                            onClick={() => onStopSession(session)}
+                                            startIcon={isLocked ? <LockIcon /> : <StopIcon />}
+                                            sx={isLocked ? { 
+                                                flex: session.isDebtSession ? 1 : 'none',
+                                                width: session.isDebtSession ? 'auto' : '100%',
+                                                borderColor: 'rgba(255,255,255,0.1)',
+                                                color: 'text.disabled'
+                                            } : {
+                                                fullWidth: true,
+                                                bgcolor: PALETTE.primary.main,
+                                                color: '#000',
+                                                '&:hover': { bgcolor: PALETTE.primary.dark }
+                                            }}
+                                        >
+                                            {isLocked ? `GESPERRT (${remainingTime}m)` : "BEENDEN"}
+                                        </Button>
+                                    </Box>
                                 ) : (
                                     <Button 
                                         variant="contained" 

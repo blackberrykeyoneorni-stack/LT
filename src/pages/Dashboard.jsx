@@ -16,7 +16,7 @@ import { checkActiveSuspension } from '../services/SuspensionService';
 import { isAuditDue, initializeAudit, confirmAuditItem } from '../services/AuditService';
 import { getActivePunishment, clearPunishment, executePunishmentTicket } from '../services/PunishmentService';
 import { loadMonthlyBudget } from '../services/BudgetService';
-import { stopSession as stopSessionService } from '../services/SessionService';
+import { stopSession as stopSessionService, startSession as startSessionService } from '../services/SessionService';
 import { isImmunityActive } from '../services/OfferService';
 import { runTimeBankAuditor, spendCredits } from '../services/TimeBankService'; 
 
@@ -93,10 +93,17 @@ export default function Dashboard() {
   const budgetBalance = monthlyBudget - currentSpent;
   const isStealthActive = activeSuspension?.type === 'stealth_travel';
 
+  // --- SCHULDEN-LOGIK (Irreversible Debt Protocol) ---
+  const ncDebt = timeBankData.nc < 0 ? Math.abs(timeBankData.nc) : 0;
+  const lcDebt = timeBankData.lc < 0 ? Math.abs(timeBankData.lc) : 0;
+  const inDebt = ncDebt > 0 || lcDebt > 0;
+  const debtMinDuration = Math.max(ncDebt, lcDebt);
+  const hasActiveDebtSession = (activeSessions || []).some(s => s.type === 'debt' || s.isDebtSession);
+
   // --- HOOK INTEGRATION: TZD & GAMBLE MANAGER ---
   const {
       tzdActive, setTzdActive, isCheckingProtocol,
-      gambleOffer, // NEU: Ersetzt isOfferOpen
+      gambleOffer, 
       immunityActive, setImmunityActive,
       handleGambleAccept, handleGambleDecline
   } = useTZDAndGamble({
@@ -104,7 +111,6 @@ export default function Dashboard() {
       punishmentStatus, punishmentItem: null, isStealthActive, showToast
   });
 
-  // UI Zustand aus den Daten des Hooks ableiten
   const offerOpen = gambleOffer !== null;
   const gambleStake = gambleOffer?.stake || [];
   const isForcedGamble = gambleOffer?.isForced || false;
@@ -118,7 +124,6 @@ export default function Dashboard() {
   } = useInstructionManager({
       currentUser, items, activeSessions, sessionsLoading, isStealthActive, 
       tzdActive, setTzdActive, showToast, setPunishmentStatus,
-      // NEU: Callback Architektur (Der Controller steuert das UI, der Hook liefert Events)
       onEvasionDetected: () => setInstructionOpen(false),
       onForcedReleaseDue: (method) => {
           setForcedReleaseMethod(method);
@@ -133,7 +138,6 @@ export default function Dashboard() {
       onReleaseResolved: () => setForcedReleaseOpen(false)
   });
 
-  // NEU: Oath Timer Logik (Reines UI Verhalten)
   const startOathPress = useCallback(() => { 
       setIsHoldingOath(true); 
       setOathProgress(0); 
@@ -141,7 +145,7 @@ export default function Dashboard() {
           setOathProgress(prev => { 
               if (prev >= 100) { 
                   clearInterval(oathTimerRef.current); 
-                  handleAcceptOath(); // Startet Datenbank-Logik im Hook
+                  handleAcceptOath(); 
                   return 100; 
               } 
               return prev + 0.4; 
@@ -176,13 +180,11 @@ export default function Dashboard() {
       let hasNylon = false;
       let hasLingerie = false;
 
+      // STRIKTE PRÜFUNG DER HAUPTKATEGORIEN
       currentInstruction.items.forEach(item => {
           const mainCat = (item.mainCategory || '').toLowerCase();
-          const subCat = (item.subCategory || '').toLowerCase();
-          const name = (item.name || '').toLowerCase();
-
-          if (mainCat.includes('nylon') || subCat.includes('strumpfhose') || subCat.includes('tights') || name.includes('strumpfhose')) hasNylon = true;
-          if (mainCat.includes('lingerie') || mainCat.includes('dessous') || subCat.includes('höschen') || name.includes('höschen')) hasLingerie = true;
+          if (mainCat === 'nylons' || mainCat === 'nylon') hasNylon = true;
+          if (mainCat === 'dessous' || mainCat === 'lingerie') hasLingerie = true;
       });
 
       let paymentType = null;
@@ -276,14 +278,9 @@ export default function Dashboard() {
     };
   }, [currentUser, setImmunityActive]); 
 
-  // --- DAS NEUE TRIBUNAL EVENT (Mit Bypass & Clean Exit) ---
   const handlePunishmentScanTrigger = async (ticketId, instrumentType, instrumentItem, isManual = false) => { 
-      // Die sofortige Ausführung (Clean Exit Architektur)
       const executeAndClose = async () => {
-          // 1. Zwingt das Overlay zum SOFORTIGEN Schließen (Freeze Behebung)
           useUIStore.getState().setPunishmentScanOpen(false); 
-          
-          // 2. Transaktion im Hintergrund
           const result = await executePunishmentTicket(currentUser.uid, ticketId, instrumentType, instrumentItem.id);
           
           if (result.success) {
@@ -295,10 +292,8 @@ export default function Dashboard() {
       };
 
       if (isManual) {
-          // 5-Sekunden Bypass wurde ausgelöst
           await executeAndClose();
       } else {
-          // Normaler NFC Scan
           startBindingScan(async (scannedId) => { 
               if (instrumentItem && (scannedId === instrumentItem.nfcTagId || scannedId === instrumentItem.customId || scannedId === instrumentItem.id)) { 
                   const scanMode = useUIStore.getState().punishmentScanMode;
@@ -312,17 +307,22 @@ export default function Dashboard() {
       }
   };
 
-  const handleRequestStopSession = async (session) => { 
+  const handleRequestStopSession = async (session, options = {}) => { 
       if (tzdActive) { showToast("STOPPEN VERWEIGERT.", "error"); return; }
       
       try { 
-          await stopSessionService(currentUser.uid, session.id, { feelings: [], note: '' }); 
+          await stopSessionService(currentUser.uid, session.id, { feelings: [], note: '', ...options }); 
           
           if(session.type === 'punishment') { 
               await clearPunishment(currentUser.uid); 
               setPunishmentStatus({ active: false, deferred: false, reason: null, durationMinutes: 0 });
           } 
-          showToast("Session beendet.", "success");
+          
+          if (options.emergencyBailout) {
+              showToast("Not-Abbruch! 50% Strafaufschlag angewendet.", "error");
+          } else {
+              showToast("Session beendet.", "success");
+          }
       } catch(e){ 
           showToast("Fehler beim Beenden", "error"); 
       } 
@@ -441,6 +441,63 @@ export default function Dashboard() {
                 )}
             </Box>
 
+            {/* SCHULDENTILGUNG BLOCK */}
+            {inDebt && !hasActiveDebtSession && (
+                <Paper sx={{ p: 3, mb: 3, bgcolor: 'rgba(211, 47, 47, 0.1)', border: `1px solid ${PALETTE.accents.red}` }}>
+                    <Typography variant="subtitle1" color="error" sx={{ fontWeight: 'bold', mb: 1, display: 'flex', alignItems: 'center' }}>
+                        <LockIcon sx={{ mr: 1 }}/> SCHULDENTILGUNG ERFORDERLICH
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                        Dein Konto ist im Minus (NC: {timeBankData.nc}, LC: {timeBankData.lc}). Alle freiwilligen Sessions sind systemseitig gesperrt, bis die Tilgung abgeschlossen ist.
+                    </Typography>
+                    <Button 
+                        variant="contained" 
+                        color="error" 
+                        fullWidth 
+                        onClick={async () => {
+                            let requiredItems = [];
+                            const activeItems = items.filter(i => i.status === 'active');
+                            
+                            // STRIKTE PRÜFUNG BEI ZWANGS-ZUWEISUNG
+                            if (ncDebt > 0) {
+                                const nylon = activeItems.find(i => {
+                                    const mCat = (i.mainCategory || '').toLowerCase();
+                                    return mCat === 'nylons' || mCat === 'nylon';
+                                });
+                                if (nylon) requiredItems.push(nylon);
+                            }
+                            if (lcDebt > 0) {
+                                const lingerie = activeItems.find(i => {
+                                    const mCat = (i.mainCategory || '').toLowerCase();
+                                    return mCat === 'dessous' || mCat === 'lingerie';
+                                });
+                                if (lingerie) requiredItems.push(lingerie);
+                            }
+                            
+                            if (requiredItems.length === 0) {
+                                showToast("Fehler: Keine passenden Items im aktiven Inventar.", "error");
+                                return;
+                            }
+
+                            try {
+                                await startSessionService(currentUser.uid, {
+                                    items: requiredItems,
+                                    type: 'debt',
+                                    minDuration: debtMinDuration,
+                                    note: 'Erzwungene Schuldentilgung'
+                                });
+                                showToast("Tilgungs-Session gestartet.", "success");
+                            } catch (e) {
+                                showToast(e.message || "Fehler beim Starten.", "error");
+                            }
+                        }}
+                        sx={{ fontWeight: 'bold' }}
+                    >
+                        TILGUNG STARTEN ({debtMinDuration} MIN)
+                    </Button>
+                </Paper>
+            )}
+
             {isStealthActive && (
                 <Paper sx={{ p: 2, mb: 3, bgcolor: PALETTE.accents.purple, border: `1px solid ${PALETTE.accents.purple}` }}>
                     <Typography variant="subtitle2" sx={{ fontWeight: 'bold', color: '#fff', textTransform: 'uppercase', textAlign: 'center' }}>
@@ -466,28 +523,30 @@ export default function Dashboard() {
                 subScores={subScores}   
             />
 
-            <ActionButtons 
-                punishmentStatus={punishmentStatus} 
-                punishmentRunning={isPunishmentRunning}
-                pendingPunishments={pendingPunishments}
-                isStealthActive={isStealthActive}
-                auditDue={auditDue}
-                isFreeDay={isFreeDay}
-                freeDayReason={freeDayReason}
-                currentInstruction={currentInstruction}
-                currentPeriod={currentPeriod}
-                isHoldingOath={isHoldingOath}
-                isInstructionActive={isInstructionActive}
-                isDailyGoalMet={isDailyGoalMet}
-                tzdActive={tzdActive}
-                onOpenInstruction={() => useUIStore.getState().setInstructionOpen(true)}
-                onStartPunishment={() => {
-                    useUIStore.getState().setPunishmentScanMode('start'); 
-                    useUIStore.getState().setPunishmentScanOpen(true); 
-                }}
-                onStartAudit={handleStartAudit}
-                onOpenRelease={handleOpenRelease}
-            />
+            <Box sx={{ opacity: inDebt ? 0.4 : 1, pointerEvents: inDebt ? 'none' : 'auto' }}>
+                <ActionButtons 
+                    punishmentStatus={punishmentStatus} 
+                    punishmentRunning={isPunishmentRunning}
+                    pendingPunishments={pendingPunishments}
+                    isStealthActive={isStealthActive}
+                    auditDue={auditDue}
+                    isFreeDay={isFreeDay}
+                    freeDayReason={freeDayReason}
+                    currentInstruction={currentInstruction}
+                    currentPeriod={currentPeriod}
+                    isHoldingOath={isHoldingOath}
+                    isInstructionActive={isInstructionActive}
+                    isDailyGoalMet={isDailyGoalMet}
+                    tzdActive={tzdActive}
+                    onOpenInstruction={() => useUIStore.getState().setInstructionOpen(true)}
+                    onStartPunishment={() => {
+                        useUIStore.getState().setPunishmentScanMode('start'); 
+                        useUIStore.getState().setPunishmentScanOpen(true); 
+                    }}
+                    onStartAudit={handleStartAudit}
+                    onOpenRelease={handleOpenRelease}
+                />
+            </Box>
 
             <ActiveSessionsList 
                 activeSessions={activeSessions || []} 

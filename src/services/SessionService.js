@@ -8,9 +8,11 @@ export const startSession = async (userId, sessionData) => {
     if (!userId || !sessionData) throw new Error("Parameter fehlen.");
 
     try {
+        // --- GATEKEEPER FÜR FREIWILLIGE SESSIONS BEI SCHULDEN ---
         const tbBalance = await getTimeBankBalance(userId);
-        if (tbBalance && tbBalance.isBankrupt && !sessionData.type.includes('debt') && !sessionData.type.includes('punishment')) {
-            throw new Error("TIME BANKRUPTCY. Freiwillige Sessions gesperrt.");
+        const isBankrupt = tbBalance.nc < 0 || tbBalance.lc < 0;
+        if (isBankrupt && !sessionData.type.includes('debt') && !sessionData.type.includes('punishment') && !sessionData.type.includes('instruction')) {
+            throw new Error("TIME BANKRUPTCY. Freiwillige Sessions systemseitig gesperrt.");
         }
 
         const items = sessionData.items || [];
@@ -23,8 +25,6 @@ export const startSession = async (userId, sessionData) => {
 
         if (itemIds.length === 0) throw new Error("Keine Items ausgewählt.");
 
-        // --- NEU: ZWEI-STUFEN-START FÜR INSTRUCTION SESSIONS ---
-        // 1. Lade Daily Instruction, um die "Ziel-Liste" der Items zu kennen
         let requiredItemIds = [];
         if (sessionData.type === 'instruction') {
             const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
@@ -34,7 +34,6 @@ export const startSession = async (userId, sessionData) => {
             }
         }
 
-        // 2. Prüfe, ob bereits eine Instruction-Session läuft (Warteschleife)
         let existingSessionRef = null;
         let existingSessionData = null;
 
@@ -50,10 +49,8 @@ export const startSession = async (userId, sessionData) => {
         const batch = writeBatch(db);
 
         if (existingSessionRef) {
-            // --- MERGE LOGIK (Zweites Item zu laufender Instruction hinzufügen) ---
             const mergedItemIds = [...new Set([...(existingSessionData.itemIds || []), ...itemIds])];
 
-            // Forensik-Timer (Ledger) für das NEUE Item genau jetzt starten
             const newItemLedger = { ...existingSessionData.itemLedger };
             itemIds.forEach(id => {
                 if (!newItemLedger[id]) {
@@ -76,16 +73,14 @@ export const startSession = async (userId, sessionData) => {
                 }
             });
 
-            // 3. Gatekeeper Check: Sind jetzt ALLE geforderten Items gescannt?
             const allRequiredPresent = requiredItemIds.length > 0 && requiredItemIds.every(reqId => mergedItemIds.includes(reqId));
             let instructionReadyTime = existingSessionData.instructionReadyTime || null;
             let newStartTime = existingSessionData.startTime;
 
             if (allRequiredPresent && !instructionReadyTime) {
-                // START DES HAUPT-TIMERS (Die Pflichtzeit beginnt genau jetzt)
                 const now = serverTimestamp();
                 instructionReadyTime = now;
-                newStartTime = now; // Setzt den UI Timer im Dashboard auf 0 zurück
+                newStartTime = now; 
             }
 
             batch.update(existingSessionRef, {
@@ -105,12 +100,12 @@ export const startSession = async (userId, sessionData) => {
             return existingSessionRef.id;
 
         } else {
-            // --- NEUE SESSION ERSTELLEN (Erstes Item) ---
+            // --- DIE TILGUNGS-SITZUNG ---
             let isDebtSession = false;
             let minDuration = 0;
-            if (tbBalance && tbBalance.debtLocked) {
+            if (sessionData.type === 'debt' || sessionData.isDebtSession) {
                  isDebtSession = true;
-                 minDuration = 60;
+                 minDuration = sessionData.minDuration || 60;
             }
 
             const itemLedger = {};
@@ -118,7 +113,6 @@ export const startSession = async (userId, sessionData) => {
                 itemLedger[id] = { joinedAt: serverTimestamp(), leftAt: null };
             });
 
-            // Check für Fallback, falls die Instruction nur 1 Item fordert
             const allRequiredPresent = requiredItemIds.length > 0 && requiredItemIds.every(reqId => itemIds.includes(reqId));
             let instructionReadyTime = null;
             if (sessionData.type === 'instruction' && allRequiredPresent) {
@@ -144,7 +138,7 @@ export const startSession = async (userId, sessionData) => {
                 minDuration,
                 targetDurationMinutes: sessionData.instructionDurationMinutes || sessionData.targetDurationMinutes || 0,
                 startTime: serverTimestamp(),
-                instructionReadyTime: instructionReadyTime, // Das Herzstück für die Compliance!
+                instructionReadyTime: instructionReadyTime,
                 endTime: null,
                 durationMinutes: 0,
                 isActive: true,
@@ -236,13 +230,11 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
 
     const startTime = sessionData.startTime?.toDate ? sessionData.startTime.toDate() : new Date(); 
     
-    // --- NEU: BERECHNUNG DER ECHTEN PFLICHT-DAUER ---
     let complianceStartTime = startTime;
     if (sessionData.type === 'instruction') {
         if (sessionData.instructionReadyTime) {
             complianceStartTime = sessionData.instructionReadyTime?.toDate ? sessionData.instructionReadyTime.toDate() : new Date(sessionData.instructionReadyTime);
         } else {
-            // Instruction wurde nie komplett angezogen! -> Dauer für das Tagesziel ist 0 Minuten.
             complianceStartTime = endTime; 
         }
     }
@@ -254,7 +246,6 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
 
     if (isInstruction && !isNight) {
         nightSuccess = false;
-
         const offset = endTime.getTimezoneOffset() * 60000;
         const dateKey = new Date(endTime.getTime() - offset).toISOString().split('T')[0];
 
@@ -281,7 +272,6 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
     if (nightSuccess !== null) {
         updateData.nightSuccess = nightSuccess;
     }
-    batch.set(sessionRef, updateData, { merge: true });
 
     let pendingPunishment = null;
     if (sessionData.forcedReleaseAt) {
@@ -315,7 +305,6 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
         
         let itemDurationMinutes = durationMinutes; 
         
-        // --- FORENSIK: Individuelle Item-Tragezeit aus dem Ledger ---
         if (sessionData.itemLedger && sessionData.itemLedger[id]) {
             const ledgerEntry = sessionData.itemLedger[id];
             const joined = ledgerEntry.joinedAt?.toDate ? ledgerEntry.joinedAt.toDate() : startTime;
@@ -338,33 +327,67 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
         batch.set(itemRef, updatePayload, { merge: true });
     }
 
+    // --- NOT-ABBRUCH vs REGULÄRE BERECHNUNG ---
     let creditCalculated = false;
-    const sessionForCredit = { ...sessionData, startTime, endTime };
-    const earnedResult = await calculateEarnedCredits(userId, sessionForCredit);
 
-    const isEligible = (typeof earnedResult === 'object' && earnedResult !== null && earnedResult.exactCredits > 0) || 
-                       (typeof earnedResult === 'number' && earnedResult > 0);
+    if (feedback.emergencyBailout) {
+        // NOT-ABBRUCH (Emergency Bailout): Credit-Berechnung überspringen und Schulden eskalieren
+        const tbBalance = await getTimeBankBalance(userId);
+        const penaltyNc = tbBalance.nc < 0 ? Math.floor(Math.abs(tbBalance.nc) * 0.5) : 0;
+        const penaltyLc = tbBalance.lc < 0 ? Math.floor(Math.abs(tbBalance.lc) * 0.5) : 0;
 
-    if (isEligible) {
-        try {
-            const resultValue = (typeof earnedResult === 'object') ? earnedResult.exactCredits : earnedResult;
-            let cat = 'nylon';
-            if (itemDetails.length > 0) {
-                const mainCat = (itemDetails[0].category || '').toLowerCase();
-                if (mainCat.includes('dessous') || mainCat.includes('lingerie') || mainCat.includes('korsett')) {
-                    cat = 'lingerie';
+        const tbRef = doc(db, `users/${userId}/status/timeBank`);
+        batch.set(tbRef, {
+            nc: tbBalance.nc - penaltyNc,
+            lc: tbBalance.lc - penaltyLc,
+            lastTransaction: serverTimestamp()
+        }, { merge: true });
+
+        updateData.durationMinutes = 0; 
+        updateData.finalNote = 'NOT-ABBRUCH (50% Strafaufschlag)';
+
+        for (const id of allSessionItemIds) {
+            await addItemHistoryEntry(userId, id, {
+                type: 'debt_bailout',
+                message: `Not-Abbruch der Tilgung! 50% Strafaufschlag auf bestehende Schulden.`
+            });
+        }
+    } else {
+        // REGULÄRER ABLAUF
+        const sessionForCredit = { ...sessionData, startTime, endTime };
+        const earnedResult = await calculateEarnedCredits(userId, sessionForCredit);
+
+        const isEligible = (typeof earnedResult === 'object' && earnedResult !== null && earnedResult.exactCredits > 0) || 
+                           (typeof earnedResult === 'number' && earnedResult > 0);
+
+        if (isEligible) {
+            try {
+                const resultValue = (typeof earnedResult === 'object') ? earnedResult.exactCredits : earnedResult;
+                
+                let earnNylon = false;
+                let earnLingerie = false;
+
+                // STRIKTE PARALLEL-BERECHNUNG
+                for (const item of itemDetails) {
+                    const mainCat = (item.mainCategory || '').toLowerCase();
+                    if (mainCat === 'nylons' || mainCat === 'nylon') earnNylon = true;
+                    if (mainCat === 'dessous' || mainCat === 'lingerie') earnLingerie = true;
                 }
+
+                if (earnNylon) {
+                    await addCredits(userId, resultValue, 'nylon');
+                }
+                if (earnLingerie) {
+                    await addCredits(userId, resultValue, 'lingerie');
+                }
+                creditCalculated = true;
+            } catch (e) {
+                console.error("Credit Buchung fehlgeschlagen:", e);
             }
-            if (cat === 'nylon') {
-                await addCredits(userId, resultValue, 'nylon');
-            } else {
-                await addCredits(userId, resultValue, 'lingerie');
-            }
-            creditCalculated = true;
-        } catch (e) {
-            console.error("Credit Buchung fehlgeschlagen:", e);
         }
     }
+
+    batch.set(sessionRef, updateData, { merge: true });
 
     if (sessionData.type === 'instruction') {
         const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
