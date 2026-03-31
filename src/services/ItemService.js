@@ -24,41 +24,60 @@ export const calculateItemRecoveryStatus = (item, sessions) => {
     if (item.mainCategory !== 'Nylons') return null;
 
     let lastWornDate = safeDate(item.lastWorn);
-    let latestSession = null;
     let totalWornHours = 0;
+    let isCurrentlyWorn = false;
 
-    // --- NEU: Kontinuierliche Trage-Kette (Contiguous Wear-Chain) ---
+    // --- LCRP: Ledger-Centric Recovery Protocol ---
     if (sessions && Array.isArray(sessions) && sessions.length > 0) {
-        
-        // 1. Filtern und sortieren nach endTime absteigend (neueste zuerst)
-        const validSessions = sessions
-            .filter(s => safeDate(s.startTime) && safeDate(s.endTime))
-            .sort((a, b) => safeDate(b.endTime) - safeDate(a.endTime));
+        const now = new Date();
+        const microBlocks = [];
 
-        if (validSessions.length > 0) {
-            latestSession = validSessions[0];
-            const sessionEnd = safeDate(latestSession.endTime);
-            
-            if (sessionEnd && (!lastWornDate || sessionEnd > lastWornDate)) {
-                lastWornDate = sessionEnd;
+        // 1. Extraktion der Micro-Blocks (Item-Zeiten statt Session-Zeiten)
+        sessions.forEach(s => {
+            const hasItem = (s.itemIds && s.itemIds.includes(item.id)) || s.itemId === item.id || (s.itemLedger && s.itemLedger[item.id]);
+            if (!hasItem) return;
+
+            let joinedAt = safeDate(s.startTime);
+            let leftAt = safeDate(s.endTime);
+
+            if (s.itemLedger && s.itemLedger[item.id]) {
+                const ledger = s.itemLedger[item.id];
+                if (ledger.joinedAt) joinedAt = safeDate(ledger.joinedAt);
+                if (ledger.leftAt) leftAt = safeDate(ledger.leftAt);
             }
 
-            // 2. Rückwärts-Traversieren für nahtlose Ketten
-            let totalWornMs = safeDate(latestSession.endTime) - safeDate(latestSession.startTime);
-            let currentChainStart = safeDate(latestSession.startTime);
+            if (!joinedAt) return; // Ohne Startzeit kein Block
 
-            for (let i = 1; i < validSessions.length; i++) {
-                const prevSession = validSessions[i];
-                const prevEnd = safeDate(prevSession.endTime);
-                const prevStart = safeDate(prevSession.startTime);
+            if (!leftAt) {
+                leftAt = now;
+                isCurrentlyWorn = true; // Item wird exakt in diesem Moment getragen
+            }
 
-                const gapMs = currentChainStart - prevEnd;
+            microBlocks.push({ joinedAt, leftAt });
+        });
 
-                // Toleranz: Maximal 15 Minuten Pause zwischen den Sessions. 
-                // Negative Gaps (leichte Überschneidungen durch asynchrone Writes) werden ebenfalls als nahtlos gewertet.
+        // 2. Filtern und sortieren nach leftAt absteigend (neueste Blöcke zuerst)
+        microBlocks.sort((a, b) => b.leftAt - a.leftAt);
+
+        if (microBlocks.length > 0) {
+            const latestBlock = microBlocks[0];
+            
+            if (!lastWornDate || latestBlock.leftAt > lastWornDate) {
+                lastWornDate = isCurrentlyWorn ? now : latestBlock.leftAt;
+            }
+
+            // 3. Rückwärts-Traversieren für nahtlose Item-Ketten
+            let totalWornMs = Math.max(0, latestBlock.leftAt - latestBlock.joinedAt);
+            let currentChainStart = latestBlock.joinedAt;
+
+            for (let i = 1; i < microBlocks.length; i++) {
+                const prevBlock = microBlocks[i];
+                const gapMs = currentChainStart - prevBlock.leftAt;
+
+                // Toleranz: Maximal 15 Minuten Pause zwischen dem Ablegen und Wiederanziehen
                 if (gapMs <= 15 * 60 * 1000) {
-                    totalWornMs += Math.max(0, prevEnd - prevStart); // Keine Fehler durch invertierte Zeiten
-                    currentChainStart = prevStart < currentChainStart ? prevStart : currentChainStart;
+                    totalWornMs += Math.max(0, prevBlock.leftAt - prevBlock.joinedAt); // Keine Fehler durch invertierte Zeiten
+                    currentChainStart = prevBlock.joinedAt < currentChainStart ? prevBlock.joinedAt : currentChainStart;
                 } else {
                     break; // Echte Pause erkannt, Kette bricht ab
                 }
@@ -67,6 +86,9 @@ export const calculateItemRecoveryStatus = (item, sessions) => {
             totalWornHours = totalWornMs / (1000 * 60 * 60);
         }
     }
+
+    // Wenn das Item jetzt gerade getragen wird, gibt es keine Erholung.
+    if (isCurrentlyWorn) return null;
 
     if (!lastWornDate) return null;
     
@@ -85,8 +107,7 @@ export const calculateItemRecoveryStatus = (item, sessions) => {
         }
     }
 
-    const now = new Date();
-    const diffMs = now - lastWornDate;
+    const diffMs = new Date() - lastWornDate;
     const hoursSince = diffMs / (1000 * 60 * 60);
     
     if (hoursSince < requiredRestingHours) {
