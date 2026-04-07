@@ -43,22 +43,31 @@ export const calculateDailyNylonWearMinutes = (targetDate, sessions, items) => {
         return { start, end };
     }).filter(i => i.end > i.start);
 
-    if (intervals.length === 0) return 0;
+    // NEU: Virtuelle Minuten für diesen Tag ermitteln
+    let additionalDiscountMs = 0;
+    relevantSessions.forEach(s => {
+        if (s.discountMinutes) additionalDiscountMs += (s.discountMinutes * 60000);
+    });
+
+    if (intervals.length === 0 && additionalDiscountMs === 0) return 0;
 
     intervals.sort((a, b) => a.start - b.start);
     const merged = [];
-    let current = intervals[0];
-    for (let i = 1; i < intervals.length; i++) {
-        if (intervals[i].start < current.end) {
-            current.end = Math.max(current.end, intervals[i].end);
-        } else {
-            merged.push(current);
-            current = intervals[i];
+    if (intervals.length > 0) {
+        let current = intervals[0];
+        for (let i = 1; i < intervals.length; i++) {
+            if (intervals[i].start < current.end) {
+                current.end = Math.max(current.end, intervals[i].end);
+            } else {
+                merged.push(current);
+                current = intervals[i];
+            }
         }
+        merged.push(current);
     }
-    merged.push(current);
 
-    const totalMs = merged.reduce((acc, i) => acc + (i.end - i.start), 0);
+    // NEU: Virtuellen Fortschritt fest in die Tagesbilanz einbauen
+    const totalMs = merged.reduce((acc, i) => acc + (i.end - i.start), 0) + additionalDiscountMs;
     return Math.floor(totalMs / 60000);
 };
 
@@ -85,22 +94,31 @@ export const calculateDailyActiveMinutes = (targetDate, sessions) => {
         return { start, end };
     }).filter(i => i.end > i.start);
 
-    if (intervals.length === 0) return 0;
+    // NEU: Virtuelle Minuten für diesen Tag ermitteln
+    let additionalDiscountMs = 0;
+    relevantSessions.forEach(s => {
+        if (s.discountMinutes) additionalDiscountMs += (s.discountMinutes * 60000);
+    });
+
+    if (intervals.length === 0 && additionalDiscountMs === 0) return 0;
 
     intervals.sort((a, b) => a.start - b.start);
     const merged = [];
-    let current = intervals[0];
-    for (let i = 1; i < intervals.length; i++) {
-        if (intervals[i].start < current.end) {
-            current.end = Math.max(current.end, intervals[i].end);
-        } else {
-            merged.push(current);
-            current = intervals[i];
+    if (intervals.length > 0) {
+        let current = intervals[0];
+        for (let i = 1; i < intervals.length; i++) {
+            if (intervals[i].start < current.end) {
+                current.end = Math.max(current.end, intervals[i].end);
+            } else {
+                merged.push(current);
+                current = intervals[i];
+            }
         }
+        merged.push(current);
     }
-    merged.push(current);
 
-    const totalMs = merged.reduce((acc, i) => acc + (i.end - i.start), 0);
+    // NEU: Virtuellen Fortschritt fest in die Tagesbilanz einbauen
+    const totalMs = merged.reduce((acc, i) => acc + (i.end - i.start), 0) + additionalDiscountMs;
     return Math.floor(totalMs / 60000);
 };
 
@@ -146,6 +164,8 @@ export const calculateTrend = (metricId, sessions, items) => {
                     if (hasNylon) {
                         const clampEnd = sEnd > actualEnd ? actualEnd : sEnd;
                         totalNylonMs += Math.max(0, clampEnd - sStart);
+                        // NEU: Virtuellen Fortschritt (gekauft durch NC/LC) bei den Kosten berücksichtigen
+                        if (s.discountMinutes) totalNylonMs += (s.discountMinutes * 60000);
                     }
                 }
             });
@@ -216,7 +236,9 @@ export const calculateTrend = (metricId, sessions, items) => {
                 daySessions.forEach(s => {
                     const start = safeDate(s.startTime) < startOfDay ? startOfDay : safeDate(s.startTime);
                     const end = (safeDate(s.endTime) || new Date()) > endOfDay ? endOfDay : (safeDate(s.endTime) || new Date());
-                    const dur = Math.max(0, end - start);
+                    let dur = Math.max(0, end - start);
+                    // NEU: Virtuelle Zeit anrechnen
+                    if (s.discountMinutes) dur += (s.discountMinutes * 60000);
                     totalMs += dur;
                     if(s.type === 'voluntary') volMs += dur;
                 });
@@ -228,7 +250,10 @@ export const calculateTrend = (metricId, sessions, items) => {
                 daySessions.forEach(s => {
                     const start = safeDate(s.startTime) < startOfDay ? startOfDay : safeDate(s.startTime);
                     const end = (safeDate(s.endTime) || new Date()) > endOfDay ? endOfDay : (safeDate(s.endTime) || new Date());
-                    dMins += Math.max(0, end - start) / 60000;
+                    let durMins = Math.max(0, end - start) / 60000;
+                    // NEU: Virtuelle Zeit zur Endurance addieren
+                    if (s.discountMinutes) durMins += s.discountMinutes;
+                    dMins += durMins;
                     dCount++;
                 });
                 val = dCount > 0 ? (dMins / dCount / 60) : 0;

@@ -167,7 +167,8 @@ export default function useSessionProgress(currentUser, items) {
                 const isNight = data.periodId && data.periodId.toLowerCase().includes('night');
 
                 if (!isNight && data.endTime) {
-                    const duration = (data.endTime.toDate() - data.startTime.toDate()) / 60000;
+                    let duration = (data.endTime.toDate() - data.startTime.toDate()) / 60000;
+                    if (data.discountMinutes) duration += data.discountMinutes; // NEU: Virtuellen Fortschritt aus der Historie mitnehmen
                     if (duration > maxDuration) maxDuration = duration;
                 }
             });
@@ -184,7 +185,8 @@ export default function useSessionProgress(currentUser, items) {
     const calculateProgress = () => {
         const now = new Date();
         
-        let targetMinutes = (dailyTargetHours * 60) - discountMinutes;
+        // ZIEL BLEIBT FIX: Keine Reduzierung des Ziels mehr. Das Ziel ist absolut.
+        let targetMinutes = (dailyTargetHours * 60);
         if (targetMinutes < 0) targetMinutes = 0; 
         
         if (now.getHours() >= nightStartHour) {
@@ -222,10 +224,12 @@ export default function useSessionProgress(currentUser, items) {
 
         if (activeInstruction) {
             const start = activeInstruction.startTime;
-            currentMinutes = Math.floor((now - start) / 60000);
+            // NEU: Virtueller Fortschritt wird sofort aufaddiert
+            currentMinutes = Math.floor((now - start) / 60000) + discountMinutes;
             isLive = true;
         } else {
-            currentMinutes = Math.floor(completedTodayMinutes);
+            // NEU: Virtueller Fortschritt (falls noch nicht in abgeschlossener Session verbucht) wird aufaddiert
+            currentMinutes = Math.floor(completedTodayMinutes) + discountMinutes;
         }
 
         const isGoalMet = currentMinutes >= targetMinutes;

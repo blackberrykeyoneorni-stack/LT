@@ -230,6 +230,18 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
 
     const startTime = sessionData.startTime?.toDate ? sessionData.startTime.toDate() : new Date(); 
     
+    // --- NEU: Virtueller Fortschritt (Discount Minutes auslesen und abspeichern) ---
+    let sessionDiscountMinutes = 0;
+    if (sessionData.type === 'instruction') {
+        try {
+            const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
+            const instrSnap = await getDoc(instrRef);
+            if (instrSnap.exists() && instrSnap.data().discountMinutes) {
+                sessionDiscountMinutes = instrSnap.data().discountMinutes;
+            }
+        } catch (e) { console.error("Fehler beim Auslesen der discountMinutes:", e); }
+    }
+
     let complianceStartTime = startTime;
     if (sessionData.type === 'instruction') {
         if (sessionData.instructionReadyTime) {
@@ -264,7 +276,8 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
     const updateData = {
         endTime: serverTimestamp(),
         isActive: false,
-        durationMinutes,
+        durationMinutes, // Dies ist die strikt physische Dauer
+        discountMinutes: sessionDiscountMinutes, // NEU: Der virtuelle Fortschritt wird eingefroren
         feelings: feedback.feelings || [],
         finalNote: feedback.note || ''
     };
@@ -391,7 +404,8 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
 
     if (sessionData.type === 'instruction') {
         const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
-        batch.set(instrRef, { isActive: false, activeSessionId: null }, { merge: true });
+        // NEU: Setze discountMinutes zurück auf 0, damit eine spätere Session nicht den gleichen Rabatt gutgeschrieben bekommt
+        batch.set(instrRef, { isActive: false, activeSessionId: null, discountMinutes: 0 }, { merge: true });
         
         if (sessionData.transitProtocolActive) {
             batch.set(instrRef, {

@@ -5,9 +5,9 @@ import { PALETTE } from '../../theme/obsidianDesign';
 
 export default function ProgressBar({ currentMinutes, targetHours, isGoalMetToday, progressData }) {
     
-    // Zielzeit = Ursprungsziel (aus Protokoll) minus erkauften Rabatt
-    let targetMinutes = (targetHours * 60) - (progressData?.discountMinutes || 0);
-    if (targetMinutes < 0) targetMinutes = 0; // Fallback, falls Rabatt größer als Ziel ist
+    // Zielzeit = Ursprungsziel (aus Protokoll). Keine künstliche Verkürzung mehr!
+    let targetMinutes = (targetHours * 60);
+    if (targetMinutes < 0) targetMinutes = 0; 
 
     // Balken darf max 100% sein für die Anzeige
     const progressPercent = targetMinutes > 0 ? Math.min(100, Math.max(0, (currentMinutes / targetMinutes) * 100)) : 100;
@@ -53,10 +53,10 @@ export default function ProgressBar({ currentMinutes, targetHours, isGoalMetToda
                     <Typography variant="body2" sx={{ color: isStrictlySuccessful ? activeColor : 'text.secondary', letterSpacing: 1, fontWeight: 'bold' }}>
                         TAGESZIEL
                     </Typography>
-                    {/* NEU: Visueller Hinweis auf TimeBank-Rabatt */}
+                    {/* NEU: Visueller Hinweis auf TimeBank-Fortschritt (+) */}
                     {progressData?.discountMinutes > 0 && (
                         <Typography variant="caption" sx={{ color: PALETTE.primary.main, ml: 1, fontWeight: 'bold' }}>
-                            (-{progressData.discountMinutes}m TimeBank)
+                            (+{progressData.discountMinutes}m TimeBank)
                         </Typography>
                     )}
                 </Box>
