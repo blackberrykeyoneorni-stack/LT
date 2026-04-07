@@ -4,9 +4,10 @@ import { doc, getDoc, updateDoc, setDoc, increment, serverTimestamp, collection,
 // KONFIGURATION DER SCHULDENFALLE
 const DEBT_CONFIG = {
     MAX_DEBT_MINUTES: 2880, // 48 Stunden (Das harte Limit)
+    MAX_CREDIT_MINUTES: 4320, // 72 Stunden (Das harte Guthaben-Limit)
     OVERDRAFT_PENALTY: 1.5, // 50% Aufschlag bei Kreditaufnahme
     DAILY_INTEREST_RATE: 0.10, // 10% Zinsen pro Tag
-    INFLATION_RATE: 0.10 // 10% Inflation pro Woche für positive Bestände
+    INFLATION_RATE: 0.10 // 10% Inflation pro Woche für positive Bestände (Legacy-Referenz)
 };
 
 /**
@@ -224,14 +225,15 @@ export const addCredits = async (userId, rawMinutesOrObject, type) => {
 
     // Wir übernehmen das Payload der Zinsabrechnung als Basis für unser Update
     const updates = { ...interestPayload };
-    updates[field] = currentBalance + earnedCredits; // Hard Set statt increment wegen Zins-Sync
+    // Hard Set statt increment wegen Zins-Sync. Und gnadenlose Begrenzung (Hard Cap)
+    updates[field] = Math.min(currentBalance + earnedCredits, DEBT_CONFIG.MAX_CREDIT_MINUTES); 
     updates.lastTransaction = serverTimestamp();
     // Der Zins-Timer wird bei JEDER Transaktion auf JETZT genullt.
     updates.lastInterestDate = serverTimestamp(); 
 
     await updateDoc(docRef, updates);
 
-    console.log(`TimeBank: Added ${earnedCredits} ${type.toUpperCase()} credits (after settling past interest).`);
+    console.log(`TimeBank: Added ${earnedCredits} ${type.toUpperCase()} credits (after settling past interest). Cap enforced.`);
     return earnedCredits;
 };
 
@@ -268,6 +270,31 @@ const _applyPendingInterest = async (userId, currentData) => {
     }
 
     return payload;
+};
+
+/**
+ * INTERNER HELFER: Berechnet die progressive Inflationssteuer auf Guthaben.
+ * Die Bank gewinnt immer.
+ */
+const _calculateProgressiveTax = (balance) => {
+    if (balance <= 0) return 0;
+    
+    let tax = 0;
+    let remainder = balance;
+    
+    if (remainder > 2000) {
+        tax += (remainder - 2000) * 0.20; // 20% ab 2001
+        remainder = 2000;
+    }
+    if (remainder > 1000) {
+        tax += (remainder - 1000) * 0.15; // 15% von 1001 bis 2000
+        remainder = 1000;
+    }
+    if (remainder > 0) {
+        tax += remainder * 0.10; // 10% bis 1000
+    }
+    
+    return Math.ceil(tax); 
 };
 
 /**
@@ -316,18 +343,28 @@ export const applyWeeklyInflation = async (userId) => {
         // Inflation auf POSITIVE Bestände
         let newNc = data.nc;
         if (newNc > 0) {
-            const calculatedNc = Math.floor(newNc * Math.pow(1 - DEBT_CONFIG.INFLATION_RATE, weeksPassed));
-            totalDeductedNc = newNc - calculatedNc;
-            newNc = calculatedNc;
+            let originalNc = newNc;
+            if (newNc > DEBT_CONFIG.MAX_CREDIT_MINUTES) newNc = DEBT_CONFIG.MAX_CREDIT_MINUTES; // Stilles Cap für Legacy-Daten
+            
+            for (let i = 0; i < weeksPassed; i++) {
+                if (newNc > 0) newNc -= _calculateProgressiveTax(newNc);
+            }
+            
+            totalDeductedNc = originalNc - newNc;
             updates.nc = newNc;
             if (totalDeductedNc > 0) inflationApplied = true;
         }
 
         let newLc = data.lc;
         if (newLc > 0) {
-            const calculatedLc = Math.floor(newLc * Math.pow(1 - DEBT_CONFIG.INFLATION_RATE, weeksPassed));
-            totalDeductedLc = newLc - calculatedLc;
-            newLc = calculatedLc;
+            let originalLc = newLc;
+            if (newLc > DEBT_CONFIG.MAX_CREDIT_MINUTES) newLc = DEBT_CONFIG.MAX_CREDIT_MINUTES; // Stilles Cap für Legacy-Daten
+            
+            for (let i = 0; i < weeksPassed; i++) {
+                if (newLc > 0) newLc -= _calculateProgressiveTax(newLc);
+            }
+            
+            totalDeductedLc = originalLc - newLc;
             updates.lc = newLc;
             if (totalDeductedLc > 0) inflationApplied = true;
         }
@@ -347,7 +384,7 @@ export const applyWeeklyInflation = async (userId) => {
 
         await updateDoc(docRef, updates);
 
-        if (inflationApplied) console.log(`TimeBank: Applied ${weeksPassed} weeks of inflation at anchor.`);
+        if (inflationApplied) console.log(`TimeBank: Applied ${weeksPassed} weeks of progressive inflation at anchor.`);
     } catch (e) {
         console.error("Fehler bei der Credit-Inflation:", e);
     }
