@@ -5,7 +5,7 @@ import { PALETTE } from '../../theme/obsidianDesign';
 
 export default function ProgressBar({ currentMinutes, targetHours, isGoalMetToday, progressData }) {
     
-    // Zielzeit = Ursprungsziel (aus Protokoll). Keine künstliche Verkürzung mehr!
+    // Zielzeit = Ursprungsziel (aus Protokoll)
     let targetMinutes = (targetHours * 60);
     if (targetMinutes < 0) targetMinutes = 0; 
 
@@ -53,7 +53,7 @@ export default function ProgressBar({ currentMinutes, targetHours, isGoalMetToda
                     <Typography variant="body2" sx={{ color: isStrictlySuccessful ? activeColor : 'text.secondary', letterSpacing: 1, fontWeight: 'bold' }}>
                         TAGESZIEL
                     </Typography>
-                    {/* NEU: Visueller Hinweis auf TimeBank-Fortschritt (+) */}
+                    {/* NEU: Visueller Hinweis auf TimeBank-Tribut (als Aufschlag) */}
                     {progressData?.discountMinutes > 0 && (
                         <Typography variant="caption" sx={{ color: PALETTE.primary.main, ml: 1, fontWeight: 'bold' }}>
                             (+{progressData.discountMinutes}m TimeBank)

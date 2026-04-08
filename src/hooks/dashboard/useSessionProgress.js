@@ -168,7 +168,7 @@ export default function useSessionProgress(currentUser, items) {
 
                 if (!isNight && data.endTime) {
                     let duration = (data.endTime.toDate() - data.startTime.toDate()) / 60000;
-                    if (data.discountMinutes) duration += data.discountMinutes; // NEU: Virtuellen Fortschritt aus der Historie mitnehmen
+                    if (data.discountMinutes) duration += data.discountMinutes;
                     if (duration > maxDuration) maxDuration = duration;
                 }
             });
@@ -185,13 +185,12 @@ export default function useSessionProgress(currentUser, items) {
     const calculateProgress = () => {
         const now = new Date();
         
-        // ZIEL BLEIBT FIX: Keine Reduzierung des Ziels mehr. Das Ziel ist absolut.
         let targetMinutes = (dailyTargetHours * 60);
         if (targetMinutes < 0) targetMinutes = 0; 
         
         if (now.getHours() >= nightStartHour) {
             return {
-                currentContinuousMinutes: 0,
+                currentContinuousMinutes: discountMinutes,
                 dailyTargetMinutes: targetMinutes,
                 percentage: 0,
                 isDailyGoalMet: false, 
@@ -203,7 +202,7 @@ export default function useSessionProgress(currentUser, items) {
 
         if (nightCompliance === false) {
             return {
-                currentContinuousMinutes: 0, 
+                currentContinuousMinutes: discountMinutes, 
                 dailyTargetMinutes: targetMinutes,
                 percentage: 0,
                 isDailyGoalMet: false,
@@ -224,18 +223,16 @@ export default function useSessionProgress(currentUser, items) {
 
         if (activeInstruction) {
             const start = activeInstruction.startTime;
-            // NEU: Virtueller Fortschritt wird sofort aufaddiert
             currentMinutes = Math.floor((now - start) / 60000) + discountMinutes;
             isLive = true;
         } else {
-            // NEU: Virtueller Fortschritt (falls noch nicht in abgeschlossener Session verbucht) wird aufaddiert
             currentMinutes = Math.floor(completedTodayMinutes) + discountMinutes;
         }
 
         const isGoalMet = currentMinutes >= targetMinutes;
 
         if (!isLive && !isGoalMet) {
-            currentMinutes = 0;
+            currentMinutes = discountMinutes;
         }
 
         return {
