@@ -83,13 +83,21 @@ export const startSession = async (userId, sessionData) => {
                 newStartTime = now; 
             }
 
-            batch.update(existingSessionRef, {
+            const updatePayload = {
                 itemIds: mergedItemIds,
                 itemLedger: newItemLedger,
                 itemsDetails: newItemDetails,
                 instructionReadyTime: instructionReadyTime,
                 startTime: newStartTime
-            });
+            };
+
+            // NEU: Lag nachtragen, falls es beim Transit Protocol fehlte
+            if (existingSessionData.complianceLagMinutes == null && sessionData.acceptedAt) {
+                const acceptedTime = sessionData.acceptedAt.toDate ? sessionData.acceptedAt.toDate() : new Date(sessionData.acceptedAt);
+                updatePayload.complianceLagMinutes = Math.max(0, Math.ceil((Date.now() - acceptedTime.getTime()) / 60000));
+            }
+
+            batch.update(existingSessionRef, updatePayload);
 
             for (const itemId of itemIds) {
                 const itemRef = doc(db, `users/${userId}/items`, itemId);
@@ -119,11 +127,11 @@ export const startSession = async (userId, sessionData) => {
                 instructionReadyTime = serverTimestamp();
             }
 
-            // NEU: Berechne die Verzögerung in Minuten
+            // NEU: Math.ceil erzwingt harte Bestrafung von Zögern (jede angefangene Minute zählt voll)
             let complianceLagMinutes = null;
             if (sessionData.type === 'instruction' && sessionData.acceptedAt) {
                 const acceptedTime = sessionData.acceptedAt.toDate ? sessionData.acceptedAt.toDate() : new Date(sessionData.acceptedAt);
-                complianceLagMinutes = Math.max(0, Math.floor((Date.now() - acceptedTime.getTime()) / 60000));
+                complianceLagMinutes = Math.max(0, Math.ceil((Date.now() - acceptedTime.getTime()) / 60000));
             }
 
             const payload = {
@@ -140,7 +148,7 @@ export const startSession = async (userId, sessionData) => {
                 type: sessionData.type || 'voluntary',
                 periodId: sessionData.periodId || null,
                 acceptedAt: sessionData.acceptedAt || null,
-                complianceLagMinutes, // Hinzugefügt: Lag in die Datenbank schreiben
+                complianceLagMinutes, 
                 verifiedViaNfc: sessionData.verifiedViaNfc || false,
                 isDebtSession,
                 minDuration,
@@ -190,6 +198,17 @@ export const startTransitProtocol = async (userId, itemId) => {
     if (!userId || !itemId) throw new Error("Parameter fehlen.");
     const batch = writeBatch(db);
     
+    // NEU: Lag-Berechnung im Transit-Protokoll durch Abruf des acceptedAt
+    const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
+    const instrSnap = await getDoc(instrRef);
+    let complianceLagMinutes = null;
+    
+    if (instrSnap.exists() && instrSnap.data().acceptedAt) {
+        const acceptedData = instrSnap.data().acceptedAt;
+        const acceptedTime = acceptedData.toDate ? acceptedData.toDate() : new Date(acceptedData);
+        complianceLagMinutes = Math.max(0, Math.ceil((Date.now() - acceptedTime.getTime()) / 60000));
+    }
+
     const newSessionRef = doc(collection(db, `users/${userId}/sessions`));
     const payload = {
         itemIds: [itemId],
@@ -198,6 +217,7 @@ export const startTransitProtocol = async (userId, itemId) => {
         type: 'instruction',
         transitProtocolActive: true, 
         transitItemId: itemId,
+        complianceLagMinutes, // Der berechnete Lag wird direkt geschrieben
         startTime: serverTimestamp(),
         instructionReadyTime: serverTimestamp(),
         endTime: null,
@@ -209,7 +229,6 @@ export const startTransitProtocol = async (userId, itemId) => {
     const itemRef = doc(db, `users/${userId}/items`, itemId);
     batch.set(itemRef, { status: 'worn' }, { merge: true });
 
-    const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
     batch.set(instrRef, {
         transitProtocol: { active: true, sessionId: newSessionRef.id, startTime: serverTimestamp() },
         forcedRelease: { required: true, executed: false },
@@ -238,7 +257,6 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
 
     const startTime = sessionData.startTime?.toDate ? sessionData.startTime.toDate() : new Date(); 
     
-    // --- NEU: Virtueller Fortschritt (Discount Minutes auslesen und abspeichern) ---
     let sessionDiscountMinutes = 0;
     if (sessionData.type === 'instruction') {
         try {
@@ -284,8 +302,8 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
     const updateData = {
         endTime: serverTimestamp(),
         isActive: false,
-        durationMinutes, // Dies ist die strikt physische Dauer
-        discountMinutes: sessionDiscountMinutes, // NEU: Der virtuelle Fortschritt wird eingefroren
+        durationMinutes, 
+        discountMinutes: sessionDiscountMinutes, 
         feelings: feedback.feelings || [],
         finalNote: feedback.note || ''
     };
@@ -348,11 +366,9 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
         batch.set(itemRef, updatePayload, { merge: true });
     }
 
-    // --- NOT-ABBRUCH vs REGULÄRE BERECHNUNG ---
     let creditCalculated = false;
 
     if (feedback.emergencyBailout) {
-        // NOT-ABBRUCH (Emergency Bailout): Credit-Berechnung überspringen und Schulden eskalieren
         const tbBalance = await getTimeBankBalance(userId);
         const penaltyNc = tbBalance.nc < 0 ? Math.floor(Math.abs(tbBalance.nc) * 0.5) : 0;
         const penaltyLc = tbBalance.lc < 0 ? Math.floor(Math.abs(tbBalance.lc) * 0.5) : 0;
@@ -374,7 +390,6 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
             });
         }
     } else {
-        // REGULÄRER ABLAUF
         const sessionForCredit = { ...sessionData, startTime, endTime };
         const earnedResult = await calculateEarnedCredits(userId, sessionForCredit);
 
@@ -388,7 +403,6 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
                 let earnNylon = false;
                 let earnLingerie = false;
 
-                // STRIKTE PARALLEL-BERECHNUNG
                 for (const item of itemDetails) {
                     const mainCat = (item.mainCategory || '').toLowerCase();
                     if (mainCat === 'nylons' || mainCat === 'nylon') earnNylon = true;
@@ -412,7 +426,6 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
 
     if (sessionData.type === 'instruction') {
         const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
-        // NEU: Setze discountMinutes zurück auf 0, damit eine spätere Session nicht den gleichen Rabatt gutgeschrieben bekommt
         batch.set(instrRef, { isActive: false, activeSessionId: null, discountMinutes: 0 }, { merge: true });
         
         if (sessionData.transitProtocolActive) {
