@@ -1,16 +1,119 @@
-import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
+import { collection, query, where, getDocs, doc, setDoc, getDoc, orderBy } from 'firebase/firestore';
 
-export const acknowledgeWeeklyReport = async (userId) => {
-    if (!userId) throw new Error("UserID fehlt.");
+export const generateWeeklyReport = async (userId, lastTargetMinutes) => {
+  const now = new Date();
+  const dayOfWeek = now.getDay(); // 0 = Sonntag
+  
+  // Wir schauen zurück auf die Werktage der gerade endenden Woche
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+  monday.setHours(0, 0, 0, 0);
+
+  const friday = new Date(monday);
+  friday.setDate(monday.getDate() + 4);
+  friday.setHours(23, 59, 59, 999);
+
+  // --- KRANKHEITS-CHECK (Nenner-Korrektur) ---
+  const suspensionRef = collection(db, `users/${userId}/status/suspensions`);
+  const suspSnap = await getDocs(query(suspensionRef, where('type', '==', 'sick')));
+  
+  const sickDays = [];
+  suspSnap.forEach(doc => {
+    const data = doc.data();
+    const start = data.startDate?.toDate ? data.startDate.toDate() : new Date(data.startDate);
+    const end = data.endDate?.toDate ? data.endDate.toDate() : new Date(data.endDate);
     
-    try {
-        const docRef = doc(db, `users/${userId}/settings/protocol`);
-        await updateDoc(docRef, {
-            'weeklyReport.acknowledged': true
-        });
-    } catch (e) {
-        console.error("Fehler beim Quittieren des Wochenberichts:", e);
-        throw e;
+    // Prüfe für jeden Werktag, ob er in eine Krankheits-Suspension fällt
+    for (let i = 0; i < 5; i++) {
+        const checkDay = new Date(monday);
+        checkDay.setDate(monday.getDate() + i);
+        if (checkDay >= start && checkDay <= end) {
+            sickDays.push(checkDay.toISOString().split('T')[0]);
+        }
     }
+  });
+  const uniqueSickDays = [...new Set(sickDays)];
+  const sickDaysCount = uniqueSickDays.length;
+
+  // --- SESSION ABRUF ---
+  const q = query(
+    collection(db, `users/${userId}/sessions`),
+    where('startTime', '>=', monday),
+    where('startTime', '<=', friday),
+    where('type', '==', 'instruction'),
+    orderBy('startTime', 'asc')
+  );
+
+  const querySnapshot = await getDocs(q);
+  const sessions = querySnapshot.docs.map(doc => doc.data());
+
+  // Initialisierung der Audit-Daten für Mo-Fr
+  const days = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag'];
+  const dailyAudit = days.map((name, index) => {
+    const dayDate = new Date(monday);
+    dayDate.setDate(monday.getDate() + index);
+    const dayStr = dayDate.toISOString().split('T')[0];
+    const isSick = uniqueSickDays.includes(dayStr);
+
+    const dayMins = sessions
+      .filter(s => {
+        const sDate = s.startTime?.toDate ? s.startTime.toDate() : new Date(s.startTime);
+        return sDate.toISOString().split('T')[0] === dayStr;
+      })
+      .reduce((sum, s) => sum + (s.durationMinutes || 0), 0);
+
+    return { day: name, minutes: dayMins, isSick };
+  });
+
+  const totalMinutes = dailyAudit.reduce((sum, d) => sum + d.minutes, 0);
+  
+  // Der Divisor vermindert sich um die Anzahl der Ausfalltage (Mindestens 1 zur Sicherheit)
+  const divisor = Math.max(1, 5 - sickDaysCount);
+  const avgMinutes = Math.round(totalMinutes / divisor);
+  
+  // --- NEUE VERSCHÄRFTE LOGIK ---
+  let newTarget = lastTargetMinutes;
+  
+  if (avgMinutes > lastTargetMinutes) {
+    // Steigerung: Der Durchschnitt wird das neue Ziel
+    newTarget = avgMinutes;
+  } else {
+    // Stagnation: Altes Ziel bleibt (keine Senkung erlaubt)
+    newTarget = lastTargetMinutes;
+  }
+
+  // Hardcap bei 12 Stunden (720 Minuten)
+  newTarget = Math.min(newTarget, 720);
+
+  const report = {
+    weekId: monday.toISOString().split('T')[0],
+    generatedAt: new Date(),
+    dailyAudit,
+    sickDaysCount,
+    totalMinutes,
+    avgMinutes,
+    oldTarget: lastTargetMinutes,
+    newTarget,
+    success: avgMinutes >= lastTargetMinutes,
+    isEscalated: newTarget > lastTargetMinutes
+  };
+
+  await setDoc(doc(db, `users/${userId}/reports`, report.weekId), report);
+  
+  await setDoc(doc(db, `users/${userId}/status/targets`), {
+    dailyTargetMinutes: newTarget,
+    lastUpdate: new Date()
+  }, { merge: true });
+
+  return report;
+};
+
+export const getLatestReport = async (userId) => {
+  const q = query(
+    collection(db, `users/${userId}/reports`),
+    orderBy('generatedAt', 'desc')
+  );
+  const snap = await getDocs(q);
+  return snap.empty ? null : snap.docs[0].data();
 };

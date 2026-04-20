@@ -1,84 +1,123 @@
-import React, { useState } from 'react';
-import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Typography, Box, CircularProgress } from '@mui/material';
-import AssessmentIcon from '@mui/icons-material/Assessment';
-import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
-import useUIStore from '../../store/uiStore';
-import { acknowledgeWeeklyReport } from '../../services/ReportService';
+import React from 'react';
+import { 
+  Dialog, 
+  DialogTitle, 
+  DialogContent, 
+  Typography, 
+  Box, 
+  Button,
+  Divider
+} from '@mui/material';
+import { PALETTE } from '../../theme/obsidianDesign';
 
-export default function WeeklyReportDialog({ report, userId }) {
-    const [loading, setLoading] = useState(false);
-    const showToast = useUIStore(s => s.showToast);
+export default function WeeklyReportDialog({ open, onClose, report }) {
+  if (!report) return null;
 
-    // Der Dialog rendert nur, wenn tatsächlich ein Report-Objekt existiert
-    if (!report) return null;
+  const formatMins = (m) => {
+    const h = Math.floor(m / 60);
+    const mins = m % 60;
+    return h > 0 ? `${h}h ${mins}m` : `${mins}m`;
+  };
 
-    const handleAcknowledge = async () => {
-        if (!userId) return;
-        setLoading(true);
-        try {
-            await acknowledgeWeeklyReport(userId);
-            if (showToast) showToast("Wochenbericht quittiert.", "success");
-        } catch (e) {
-            console.error(e);
-            if (showToast) showToast("Fehler beim Quittieren.", "error");
-        } finally {
-            setLoading(false);
+  return (
+    <Dialog 
+      open={open} 
+      onClose={onClose}
+      PaperProps={{
+        sx: {
+          bgcolor: 'rgba(10, 10, 10, 0.95)',
+          backgroundImage: 'none',
+          border: `1px solid ${PALETTE.accents.gold}40`,
+          borderRadius: '16px',
+          maxWidth: '400px'
         }
-    };
+      }}
+    >
+      <DialogTitle sx={{ color: PALETTE.accents.gold, textAlign: 'center', fontWeight: 'bold' }}>
+        WÖCHENTLICHER COMPLIANCE-AUDIT
+      </DialogTitle>
+      
+      <DialogContent>
+        <Box sx={{ mb: 3 }}>
+          <Typography variant="body2" sx={{ color: '#aaa', mb: 2, textAlign: 'center' }}>
+            Audit der Werktage (Mo-Fr):
+          </Typography>
 
-    return (
-        <Dialog open={!!report} disableEscapeKeyDown fullWidth maxWidth="xs" PaperProps={DESIGN_TOKENS.dialog.paper}>
-            <DialogTitle sx={DESIGN_TOKENS.dialog.title.sx}>
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
-                    <AssessmentIcon color="primary" /> Wochenbericht
-                </Box>
-            </DialogTitle>
-            <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
-                <Typography variant="body2" color="text.secondary" paragraph align="center">
-                    Dein Protokoll für die vergangene Woche wurde vom System ausgewertet.
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 2 }}>
+            {report.dailyAudit && report.dailyAudit.map((dayData, idx) => (
+              <Box key={idx} sx={{ 
+                display: 'flex', 
+                justifyContent: 'space-between',
+                p: 1,
+                bgcolor: dayData.isSick ? 'rgba(211, 47, 47, 0.05)' : 'rgba(255,255,255,0.03)',
+                borderRadius: '4px',
+                borderLeft: dayData.isSick ? `3px solid ${PALETTE.accents.red}` : 'none'
+              }}>
+                <Typography sx={{ color: '#fff', fontSize: '0.9rem' }}>{dayData.day}:</Typography>
+                <Typography sx={{ 
+                  color: dayData.isSick ? PALETTE.accents.red : (dayData.minutes >= report.oldTarget ? PALETTE.accents.gold : '#777'),
+                  fontWeight: 'bold',
+                  fontSize: '0.9rem'
+                }}>
+                  {dayData.isSick ? "FREIGESTELLT (Krankheit)" : formatMins(dayData.minutes)}
                 </Typography>
-                
-                <Box sx={{ bgcolor: 'rgba(0,0,0,0.3)', p: 2, borderRadius: 2, mb: 2, border: `1px dashed ${PALETTE.accents.purple}40` }}>
-                    {report.femIndex !== undefined && (
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                            <Typography variant="body2" color="text.secondary">Fem-Index:</Typography>
-                            <Typography variant="body2" fontWeight="bold">{report.femIndex}</Typography>
-                        </Box>
-                    )}
-                    {report.compliance !== undefined && (
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                            <Typography variant="body2" color="text.secondary">Compliance Rate:</Typography>
-                            <Typography variant="body2" fontWeight="bold" color={report.compliance >= 90 ? PALETTE.accents.green : PALETTE.accents.red}>{report.compliance}%</Typography>
-                        </Box>
-                    )}
-                    {report.punishments !== undefined && (
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                            <Typography variant="body2" color="text.secondary">Strafen:</Typography>
-                            <Typography variant="body2" fontWeight="bold" color={report.punishments > 0 ? PALETTE.accents.red : PALETTE.accents.green}>{report.punishments}</Typography>
-                        </Box>
-                    )}
-                    {report.message && (
-                         <Typography variant="body2" sx={{ mt: 2, fontStyle: 'italic', textAlign: 'center', color: PALETTE.text.primary }}>
-                             "{report.message}"
-                         </Typography>
-                    )}
-                </Box>
+              </Box>
+            ))}
+          </Box>
 
-                <Typography variant="caption" color="error" align="center" display="block">
-                    Die Kenntnisnahme dieses Berichts ist verpflichtend für die Fortsetzung des Protokolls.
-                </Typography>
-            </DialogContent>
-            <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}>
-                <Button 
-                    fullWidth 
-                    variant="contained" 
-                    onClick={handleAcknowledge} 
-                    disabled={loading}
-                    sx={DESIGN_TOKENS.buttonGradient}
-                >
-                    {loading ? <CircularProgress size={24} color="inherit" /> : "Gelesen & Quittiert"}
-                </Button>
-            </DialogActions>
-        </Dialog>
-    );
+          <Divider sx={{ bgcolor: `${PALETTE.accents.gold}20`, my: 2 }} />
+
+          <Box sx={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center',
+            mt: 1,
+            p: 1.5,
+            border: `1px dashed ${PALETTE.accents.gold}60`,
+            borderRadius: '8px',
+            bgcolor: report.isEscalated ? 'rgba(212, 175, 55, 0.05)' : 'transparent'
+          }}>
+            <Typography sx={{ color: PALETTE.accents.gold, fontWeight: 'bold' }}>
+              NEUE VORGABE:
+            </Typography>
+            <Typography variant="h6" sx={{ color: '#fff', fontWeight: 'bold' }}>
+              {formatMins(report.newTarget)} / Tag
+            </Typography>
+          </Box>
+        </Box>
+
+        <Typography variant="body2" sx={{ 
+          color: report.isEscalated ? PALETTE.accents.gold : '#aaa', 
+          textAlign: 'center',
+          fontStyle: 'italic',
+          mt: 2
+        }}>
+          {report.isEscalated 
+            ? "Deine erbrachte Leistung übersteigt die Forderung. Das System eskaliert die Zielvorgabe permanent." 
+            : "Die Forderung wurde nicht überboten oder unterschritten. Die Zielvorgabe stagniert auf dem aktuellen Niveau."}
+        </Typography>
+        
+        {report.newTarget >= 720 && (
+          <Typography variant="caption" sx={{ color: PALETTE.accents.red, display: 'block', textAlign: 'center', mt: 1, fontWeight: 'bold' }}>
+            MAXIMALES KONDITIONIERUNGS-LEVEL ERREICHT (12H CAP)
+          </Typography>
+        )}
+      </DialogContent>
+
+      <Box sx={{ p: 2, textAlign: 'center' }}>
+        <Button 
+          fullWidth
+          onClick={onClose}
+          sx={{ 
+            color: PALETTE.accents.gold, 
+            borderColor: PALETTE.accents.gold,
+            '&:hover': { bgcolor: 'rgba(212, 175, 55, 0.1)' }
+          }} 
+          variant="outlined"
+        >
+          ICH AKZEPTIERE MEINE BESTIMMUNG
+        </Button>
+      </Box>
+    </Dialog>
+  );
 }
