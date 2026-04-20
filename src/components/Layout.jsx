@@ -4,6 +4,8 @@ import { Box, Paper, BottomNavigation, BottomNavigationAction, Snackbar, Alert }
 import { DESIGN_TOKENS, PALETTE } from '../theme/obsidianDesign'; // NEU
 import { useAuth } from '../contexts/AuthContext';
 import { penalizeTZDAppOpen } from '../services/TZDService';
+import { useConditioningGuard } from '../hooks/useConditioningGuard';
+import ConditioningOverlay from './conditioning/ConditioningOverlay';
 
 // Icons
 import DashboardIcon from '@mui/icons-material/Dashboard';
@@ -16,6 +18,9 @@ export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
   const { currentUser } = useAuth();
+  
+  // Der Gatekeeper, der dich zu Beginn jeder Schicht zwingt, dich zu unterwerfen
+  const { showOverlay, loadingGuard, acknowledgePhase } = useConditioningGuard();
 
   // --- PERFIDITÄT: TZD PENALTY LOGIC ---
   const [penaltyOpen, setPenaltyOpen] = useState(false);
@@ -61,10 +66,19 @@ export default function Layout() {
 
   const navValue = getNavValue(location.pathname);
 
+  // Blackout-Screen, während der Server prüft, ob du schon geschworen hast.
+  // Keine Millisekunde Einsicht in das System ohne Autorisierung.
+  if (loadingGuard) {
+      return <Box sx={{ width: '100vw', height: '100vh', bgcolor: '#000' }} />;
+  }
+
   return (
     // ZENTRALISIERTER HINTERGRUND
     <Box sx={DESIGN_TOKENS.bottomNavSpacer}>
       
+      {/* THE OBEDIENCE GATEKEEPER */}
+      {showOverlay && <ConditioningOverlay onAcknowledge={acknowledgePhase} />}
+
       {/* TZD PENALTY FEEDBACK */}
       <Snackbar 
           open={penaltyOpen} 
