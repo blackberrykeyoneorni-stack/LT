@@ -142,6 +142,8 @@ export const calculateTrend = (metricId, sessions, items) => {
         const daysInMonth = actualEnd.getDate();
         
         let monthlySum = 0;
+        let monthlyLagSum = 0;
+        let monthlyLagCount = 0;
         
         if (metricId === 'cpnh') {
             const validItems = items.filter(it => {
@@ -224,11 +226,16 @@ export const calculateTrend = (metricId, sessions, items) => {
                 val = daySessions.length > 0 ? (daySessions.filter(s => s.type === 'punishment').length / daySessions.length) * 100 : 0;
             }
             else if (metricId === 'compliance') {
-                const relevant = daySessions.filter(s => typeof s.complianceLagMinutes === 'number');
-                if (relevant.length > 0) {
-                    const sum = relevant.reduce((acc, s) => acc + s.complianceLagMinutes, 0);
-                    val = sum / relevant.length;
-                }
+                // Hier wird nur noch strikt aufaddiert, nicht mehr durch Tage geteilt.
+                const relevant = daySessions.filter(s => s.type === 'instruction' && s.complianceLagMinutes != null && s.complianceLagMinutes !== '');
+                relevant.forEach(s => {
+                    const num = Number(s.complianceLagMinutes);
+                    if (!isNaN(num) && num >= 0) {
+                        monthlyLagSum += num;
+                        monthlyLagCount++;
+                    }
+                });
+                val = 0; 
             }
             else if (metricId === 'voluntarism') {
                 let totalMs = 0;
@@ -268,7 +275,13 @@ export const calculateTrend = (metricId, sessions, items) => {
             monthlySum += val;
         }
         
-        const monthlyAvg = daysInMonth > 0 ? monthlySum / daysInMonth : 0;
+        let monthlyAvg = 0;
+        if (metricId === 'compliance') {
+            monthlyAvg = monthlyLagCount > 0 ? monthlyLagSum / monthlyLagCount : 0;
+        } else {
+            monthlyAvg = daysInMonth > 0 ? monthlySum / daysInMonth : 0;
+        }
+
         const monthName = startOfMonth.toLocaleDateString('de-DE', { month: 'short', year: '2-digit' });
         rawData.push({ name: monthName, value: monthlyAvg });
     }

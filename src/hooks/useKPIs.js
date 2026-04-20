@@ -310,12 +310,13 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
             totalDurationMs += duration;
             if (s.type === 'voluntary') voluntaryDurationMs += duration;
 
-            const rawLag = s.complianceLagMinutes;
-            const lagNum = Number(rawLag);
-            
-            if (!isNaN(lagNum) && lagNum >= 0) {
-                totalLagMinutes += lagNum;
-                lagCount++;
+            // STRIKTE FILTERUNG NACH INSTRUCTION UND GÜLTIGEM LAG
+            if (s.type === 'instruction' && s.complianceLagMinutes != null && s.complianceLagMinutes !== '') {
+                const lagNum = Number(s.complianceLagMinutes);
+                if (!isNaN(lagNum) && lagNum >= 0) {
+                    totalLagMinutes += lagNum;
+                    lagCount++;
+                }
             }
         });
         

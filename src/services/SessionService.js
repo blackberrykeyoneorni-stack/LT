@@ -119,6 +119,13 @@ export const startSession = async (userId, sessionData) => {
                 instructionReadyTime = serverTimestamp();
             }
 
+            // NEU: Berechne die Verzögerung in Minuten
+            let complianceLagMinutes = null;
+            if (sessionData.type === 'instruction' && sessionData.acceptedAt) {
+                const acceptedTime = sessionData.acceptedAt.toDate ? sessionData.acceptedAt.toDate() : new Date(sessionData.acceptedAt);
+                complianceLagMinutes = Math.max(0, Math.floor((Date.now() - acceptedTime.getTime()) / 60000));
+            }
+
             const payload = {
                 itemIds,
                 itemLedger,
@@ -133,6 +140,7 @@ export const startSession = async (userId, sessionData) => {
                 type: sessionData.type || 'voluntary',
                 periodId: sessionData.periodId || null,
                 acceptedAt: sessionData.acceptedAt || null,
+                complianceLagMinutes, // Hinzugefügt: Lag in die Datenbank schreiben
                 verifiedViaNfc: sessionData.verifiedViaNfc || false,
                 isDebtSession,
                 minDuration,
