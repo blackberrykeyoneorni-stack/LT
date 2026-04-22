@@ -8,9 +8,13 @@ import FactCheckIcon from '@mui/icons-material/FactCheck';
 import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
 import useUIStore from '../../store/uiStore';
 
-export default function AuditDialog({ open, onClose, currentItem, progress, onConfirm }) {
+export default function AuditDialog({ open, onClose, items, currentIndex, onConfirm }) {
     const currentCondition = useUIStore(s => s.currentCondition);
     const setCurrentCondition = useUIStore(s => s.setCurrentCondition);
+
+    // Dynamische Berechnung der erwarteten Props
+    const currentItem = items && items.length > 0 ? items[currentIndex] : null;
+    const progress = items ? { current: currentIndex + 1, total: items.length } : { current: 0, total: 0 };
 
     // Reset auf "Einwandfrei" bei jedem neuen Item im Audit-Zyklus
     useEffect(() => {
@@ -22,7 +26,7 @@ export default function AuditDialog({ open, onClose, currentItem, progress, onCo
     // Wenn kein Item geladen ist, rendere nichts (verhindert Crash)
     if (!currentItem) return null;
 
-    const progressPercent = (progress.current / progress.total) * 100;
+    const progressPercent = progress.total > 0 ? (progress.current / progress.total) * 100 : 0;
 
     return (
         <Dialog open={open} disableEscapeKeyDown fullWidth maxWidth="xs" PaperProps={DESIGN_TOKENS.dialog.paper}>
