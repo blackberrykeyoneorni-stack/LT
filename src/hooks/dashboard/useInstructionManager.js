@@ -1,4 +1,3 @@
-// src/hooks/dashboard/useInstructionManager.js
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { collection, doc, updateDoc, writeBatch, query, where, getDocs, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../firebase';
@@ -65,7 +64,9 @@ export default function useInstructionManager({
     // --- ABGELEITETE STATES ---
     const safeActiveSessions = activeSessions || [];
     const safeItems = items || [];
-    const isInstructionActive = safeActiveSessions.some(s => s.type === 'instruction');
+    
+    // NEU: Preparation-Sessions zählen ebenfalls als aktive Instruction im UI-Kontext
+    const isInstructionActive = safeActiveSessions.some(s => s.type === 'instruction' || s.type === 'preparation');
     const isNight = currentPeriod ? currentPeriod.includes('night') : false;
 
     // --- EFFECT 1: ZEIT-TICKER (Perioden und Feiertage berechnen) ---
@@ -81,16 +82,9 @@ export default function useInstructionManager({
         const day = d.getDay();
         const isWeekend = (day === 0 || day === 6);
         const isHoliday = checkIsHoliday(d);
-
-        // --- ZWANGS-OVERRIDE: Im Infiltrationsmodus existiert kein Wochenende ---
-        if (isStealthActive) {
-            setIsFreeDay(false);
-            setFreeDayReason('');
-        } else {
-            setIsFreeDay(isWeekend || isHoliday);
-            setFreeDayReason(isHoliday ? 'Holiday' : (isWeekend ? 'Weekend' : ''));
-        }
-    }, [now, currentPeriod, isStealthActive]);
+        setIsFreeDay(isWeekend || isHoliday);
+        setFreeDayReason(isHoliday ? 'Holiday' : (isWeekend ? 'Weekend' : ''));
+    }, [now, currentPeriod]);
 
     // --- EFFECT 2: INSTRUCTION LADEN ODER GENERIEREN ---
     useEffect(() => {
@@ -124,7 +118,7 @@ export default function useInstructionManager({
                             const qSession = query(
                                 collection(db, `users/${currentUser.uid}/sessions`),
                                 where('periodId', '==', instr.periodId),
-                                where('type', '==', 'instruction')
+                                where('type', 'in', ['instruction', 'preparation'])
                             );
                             const sessionSnap = await getDocs(qSession);
                             const hasEverStarted = !sessionSnap.empty;
@@ -162,7 +156,10 @@ export default function useInstructionManager({
     useEffect(() => {
         if (!currentUser || !currentInstruction || !currentInstruction.isAccepted || currentInstruction.evasionPenaltyTriggered) return;
         
-        const isThisInstructionRunning = safeActiveSessions.some(s => s.type === 'instruction' && s.periodId === currentInstruction.periodId);
+        // NEU: Preparation-Sessions retten ebenfalls vor der Flucht-Strafe
+        const isThisInstructionRunning = safeActiveSessions.some(s => 
+            (s.type === 'instruction' || s.type === 'preparation') && s.periodId === currentInstruction.periodId
+        );
         if (isThisInstructionRunning) return; 
 
         const timer = setInterval(async () => {
@@ -173,7 +170,7 @@ export default function useInstructionManager({
                 const qSession = query(
                     collection(db, `users/${currentUser.uid}/sessions`),
                     where('periodId', '==', currentInstruction.periodId),
-                    where('type', '==', 'instruction')
+                    where('type', 'in', ['instruction', 'preparation'])
                 );
                 const sessionSnap = await getDocs(qSession);
 

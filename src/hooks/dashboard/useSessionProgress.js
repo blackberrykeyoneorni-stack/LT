@@ -156,7 +156,7 @@ export default function useSessionProgress(currentUser, items) {
         const qHistory = query(
             collection(db, `users/${currentUser.uid}/sessions`),
             where('startTime', '>=', startOfDay),
-            where('type', 'in', ['instruction', 'tzd']) // TZD Zählt nun 1:1 für den Fortschritt
+            where('type', 'in', ['instruction', 'tzd']) 
         );
 
         const unsubHistory = onSnapshot(qHistory, (snapshot) => {
@@ -212,7 +212,6 @@ export default function useSessionProgress(currentUser, items) {
             };
         }
 
-        // Wertet nun Instruction und TZD als aktive Tragezeit
         const activeInstruction = activeSessions.find(s => 
             (s.type === 'instruction' || s.type === 'tzd') && 
             (!s.periodId || !s.periodId.includes('night'))
@@ -221,8 +220,9 @@ export default function useSessionProgress(currentUser, items) {
         let currentMinutes = 0;
         let isLive = false;
 
-        if (activeInstruction) {
-            const start = activeInstruction.startTime;
+        // NEU: Die Ziel-Zeitmessung startet nur, wenn instructionReadyTime existiert
+        if (activeInstruction && activeInstruction.instructionReadyTime) {
+            const start = activeInstruction.instructionReadyTime?.toDate ? activeInstruction.instructionReadyTime.toDate() : new Date(activeInstruction.instructionReadyTime);
             currentMinutes = Math.floor((now - start) / 60000) + discountMinutes;
             isLive = true;
         } else {

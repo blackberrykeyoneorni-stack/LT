@@ -15,6 +15,23 @@ export default function MonthDayCell({ date, sessions, suspensions, isToday, onC
     const hasPlanned = plannedSessions.length > 0;
     
     const activeSuspension = getSuspensionForDate(date, suspensions);
+    const isStealth = activeSuspension && activeSuspension.type === 'stealth_travel';
+
+    let bgColor = 'rgba(255,255,255,0.02)';
+    let borderColor = '1px solid rgba(255,255,255,0.05)';
+    
+    if (isToday) {
+        bgColor = 'rgba(255,255,255,0.08)';
+        borderColor = `1px solid ${PALETTE.primary.main}`;
+    } else if (activeSuspension) {
+        if (isStealth) {
+            bgColor = 'rgba(156, 39, 176, 0.05)'; 
+            borderColor = `1px solid ${PALETTE.accents.purple}44`;
+        } else {
+            bgColor = 'rgba(255, 215, 0, 0.05)'; 
+            borderColor = `1px solid ${PALETTE.accents.gold}44`;
+        }
+    }
 
     return (
         <Paper 
@@ -23,8 +40,8 @@ export default function MonthDayCell({ date, sessions, suspensions, isToday, onC
                 height: 80, p: 0.5, 
                 display: 'flex', flexDirection: 'column', justifyContent: 'flex-start',
                 position: 'relative', 
-                bgcolor: isToday ? 'rgba(255,255,255,0.08)' : (activeSuspension ? 'rgba(255, 215, 0, 0.05)' : 'rgba(255,255,255,0.02)'),
-                border: isToday ? `1px solid ${PALETTE.primary.main}` : (activeSuspension ? `1px solid ${PALETTE.accents.gold}44` : '1px solid rgba(255,255,255,0.05)'),
+                bgcolor: bgColor,
+                border: borderColor,
                 borderRadius: 1,
                 cursor: 'pointer',
                 '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' }
@@ -35,7 +52,7 @@ export default function MonthDayCell({ date, sessions, suspensions, isToday, onC
                     {date.getDate()}
                 </Typography>
                 {activeSuspension && (
-                    <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: PALETTE.accents.gold }} />
+                    <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: isStealth ? PALETTE.accents.purple : PALETTE.accents.gold }} />
                 )}
                 {hasActive && !activeSuspension && (
                     <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: PALETTE.accents.green }} />

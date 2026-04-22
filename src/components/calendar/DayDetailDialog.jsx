@@ -7,6 +7,7 @@ import BlockIcon from '@mui/icons-material/Block';
 import EventIcon from '@mui/icons-material/Event';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 import { isSameDay, formatDuration, getSuspensionForDate } from '../../utils/calendarUtils';
 import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
 
@@ -41,6 +42,7 @@ export default function DayDetailDialog({ open, onClose, date, sessions, suspens
     }, [rawDaySessions]);
 
     const activeSuspension = getSuspensionForDate(date, suspensions);
+    const isStealth = activeSuspension && activeSuspension.type === 'stealth_travel';
 
     return (
         <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm" PaperProps={DESIGN_TOKENS.dialog.paper}>
@@ -49,7 +51,7 @@ export default function DayDetailDialog({ open, onClose, date, sessions, suspens
                     <Typography variant="h6">{date.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' })}</Typography>
                     <Typography variant="caption" color="text.secondary">Tagesprotokoll</Typography>
                 </Box>
-                {!activeSuspension && (
+                {(!activeSuspension || isStealth) && (
                     <IconButton onClick={onOpenPlan} sx={{ color: PALETTE.primary.main }}>
                         <AddCircleOutlineIcon />
                     </IconButton>
@@ -60,14 +62,14 @@ export default function DayDetailDialog({ open, onClose, date, sessions, suspens
                 {activeSuspension && (
                     <Paper sx={{ 
                         p: 2, mb: 3, 
-                        bgcolor: `${PALETTE.accents.gold}15`, 
-                        border: `1px solid ${PALETTE.accents.gold}44`,
+                        bgcolor: isStealth ? `${PALETTE.accents.purple}15` : `${PALETTE.accents.gold}15`, 
+                        border: isStealth ? `1px solid ${PALETTE.accents.purple}44` : `1px solid ${PALETTE.accents.gold}44`,
                         display: 'flex', alignItems: 'center', gap: 2
                     }}>
-                        <BlockIcon sx={{ color: PALETTE.accents.gold, fontSize: 30 }} />
+                        {isStealth ? <TravelExploreIcon sx={{ color: PALETTE.accents.purple, fontSize: 30 }} /> : <BlockIcon sx={{ color: PALETTE.accents.gold, fontSize: 30 }} />}
                         <Box>
-                            <Typography variant="subtitle1" fontWeight="bold" sx={{ color: PALETTE.accents.gold }}>
-                                AUSFALLZEIT AKTIV
+                            <Typography variant="subtitle1" fontWeight="bold" sx={{ color: isStealth ? PALETTE.accents.purple : PALETTE.accents.gold }}>
+                                {isStealth ? "OPERATION: INFILTRATION" : "AUSFALLZEIT AKTIV"}
                             </Typography>
                             <Typography variant="body2" color="text.secondary">
                                 Grund: {activeSuspension.reason}
@@ -78,7 +80,7 @@ export default function DayDetailDialog({ open, onClose, date, sessions, suspens
                 )}
 
                 {groupedSessions.length === 0 ? (
-                    !activeSuspension && (
+                    (!activeSuspension || isStealth) && (
                         <Box sx={{ py: 4, textAlign: 'center', opacity: 0.5 }}>
                             <EventIcon sx={{ fontSize: 40, mb: 1 }} />
                             <Typography>Keine Einträge für diesen Tag.</Typography>

@@ -26,7 +26,7 @@ export const startSession = async (userId, sessionData) => {
         if (itemIds.length === 0) throw new Error("Keine Items ausgewählt.");
 
         let requiredItemIds = [];
-        if (sessionData.type === 'instruction') {
+        if (sessionData.type === 'instruction' || sessionData.type === 'preparation') {
             const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
             const instrSnap = await getDoc(instrRef);
             if (instrSnap.exists() && instrSnap.data().items) {
@@ -37,7 +37,8 @@ export const startSession = async (userId, sessionData) => {
         let existingSessionRef = null;
         let existingSessionData = null;
 
-        if (sessionData.type === 'instruction') {
+        // Wir prüfen nun auch bei preparation, ob es schon eine laufende Instruction gibt, um sie dort anzuhängen
+        if (sessionData.type === 'instruction' || sessionData.type === 'preparation') {
             const q = query(collection(db, `users/${userId}/sessions`), where('isActive', '==', true), where('type', '==', 'instruction'));
             const snap = await getDocs(q);
             if (!snap.empty) {
@@ -75,12 +76,10 @@ export const startSession = async (userId, sessionData) => {
 
             const allRequiredPresent = requiredItemIds.length > 0 && requiredItemIds.every(reqId => mergedItemIds.includes(reqId));
             let instructionReadyTime = existingSessionData.instructionReadyTime || null;
-            let newStartTime = existingSessionData.startTime;
 
+            // Das Ziel startet ERST, wenn alle benötigten Items am Körper sind
             if (allRequiredPresent && !instructionReadyTime) {
-                const now = serverTimestamp();
-                instructionReadyTime = now;
-                newStartTime = now; 
+                instructionReadyTime = serverTimestamp();
             }
 
             const updatePayload = {
@@ -88,7 +87,8 @@ export const startSession = async (userId, sessionData) => {
                 itemLedger: newItemLedger,
                 itemsDetails: newItemDetails,
                 instructionReadyTime: instructionReadyTime,
-                startTime: newStartTime
+                // Wenn es vorher nur preparation war, wird es durch den Abschluss der Sammlung zur echten instruction
+                type: allRequiredPresent ? 'instruction' : existingSessionData.type 
             };
 
             // NEU: Lag nachtragen, falls es beim Transit Protocol fehlte
@@ -108,7 +108,7 @@ export const startSession = async (userId, sessionData) => {
             return existingSessionRef.id;
 
         } else {
-            // --- DIE TILGUNGS-SITZUNG ---
+            // --- DIE TILGUNGS-SITZUNG ODER DIE ERSTE INITIALE SESSION ---
             let isDebtSession = false;
             let minDuration = 0;
             if (sessionData.type === 'debt' || sessionData.isDebtSession) {
@@ -123,13 +123,20 @@ export const startSession = async (userId, sessionData) => {
 
             const allRequiredPresent = requiredItemIds.length > 0 && requiredItemIds.every(reqId => itemIds.includes(reqId));
             let instructionReadyTime = null;
-            if (sessionData.type === 'instruction' && allRequiredPresent) {
+            let finalType = sessionData.type || 'voluntary';
+
+            if ((sessionData.type === 'instruction' || sessionData.type === 'preparation') && allRequiredPresent) {
                 instructionReadyTime = serverTimestamp();
+                finalType = 'instruction';
+            } else if (sessionData.type === 'preparation') {
+                // Wenn wir nur preparation starten und noch nicht fertig sind, bleibt es instruction, 
+                // aber ohne ReadyTime.
+                finalType = 'instruction'; 
             }
 
             // NEU: Math.ceil erzwingt harte Bestrafung von Zögern (jede angefangene Minute zählt voll)
             let complianceLagMinutes = null;
-            if (sessionData.type === 'instruction' && sessionData.acceptedAt) {
+            if ((finalType === 'instruction' || sessionData.type === 'preparation') && sessionData.acceptedAt) {
                 const acceptedTime = sessionData.acceptedAt.toDate ? sessionData.acceptedAt.toDate() : new Date(sessionData.acceptedAt);
                 complianceLagMinutes = Math.max(0, Math.ceil((Date.now() - acceptedTime.getTime()) / 60000));
             }
@@ -145,7 +152,7 @@ export const startSession = async (userId, sessionData) => {
                     customId: i.customId || null,
                     imageUrl: i.imageUrl || (i.images && i.images.length > 0 ? i.images[0] : null)
                 })),
-                type: sessionData.type || 'voluntary',
+                type: finalType,
                 periodId: sessionData.periodId || null,
                 acceptedAt: sessionData.acceptedAt || null,
                 complianceLagMinutes, 
@@ -169,7 +176,7 @@ export const startSession = async (userId, sessionData) => {
                 batch.set(itemRef, { status: 'worn' }, { merge: true });
             }
 
-            if (sessionData.type === 'instruction') {
+            if (finalType === 'instruction' || sessionData.type === 'preparation') {
                  const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
                  batch.set(instrRef, {
                      isActive: true,
@@ -177,7 +184,7 @@ export const startSession = async (userId, sessionData) => {
                  }, { merge: true });
             }
 
-            if (sessionData.type === 'punishment') {
+            if (finalType === 'punishment') {
                  const punRef = doc(db, `users/${userId}/status/punishment`);
                  batch.set(punRef, {
                      activeSessionId: newSessionRef.id
@@ -273,6 +280,7 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
         if (sessionData.instructionReadyTime) {
             complianceStartTime = sessionData.instructionReadyTime?.toDate ? sessionData.instructionReadyTime.toDate() : new Date(sessionData.instructionReadyTime);
         } else {
+            // Wenn es unfertig beendet wird, gab es keinen Erfüllungsfortschritt
             complianceStartTime = endTime; 
         }
     }

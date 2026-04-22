@@ -45,12 +45,10 @@ export default function InstructionDialog({
   const { startBindingScan, isScanning, stopScan } = useNFCGlobal();
   const { currentUser } = useAuth();
   
-  // State für UI-Phasen
-  const [viewState, setViewState] = useState('oath'); // 'oath' | 'preparation'
+  const [viewState, setViewState] = useState('oath'); 
   
-  // STAGING AREA STATE (Ankleide-Protokoll)
   const [verifiedItemIds, setVerifiedItemIds] = useState([]);
-  const [isMerging, setIsMerging] = useState(false); // NEU: Verhindert Störungen während der Datenbank-Verschmelzung
+  const [stagingStatus, setStagingStatus] = useState('idle'); 
   
   const [suggestedItem, setSuggestedItem] = useState(null);
   const [hardcoreDialogOpen, setHardcoreDialogOpen] = useState(false);
@@ -58,29 +56,24 @@ export default function InstructionDialog({
   const [hcPrefs, setHcPrefs] = useState({ enabled: false, probability: 15 });
   const [releaseMethod, setReleaseMethod] = useState(null);
 
-  // --- TIME BANK STATE ---
   const [credits, setCredits] = useState({ nc: 0, lc: 0 });
   const [creditReduction, setCreditReduction] = useState(0); 
   const [maxReduction, setMaxReduction] = useState(0); 
   const [creditType, setCreditType] = useState('lingerie');
   const [insolvencyData, setInsolvencyData] = useState({ isBlocked: false, currentDebt: 0, remainingCredit: 0 });
 
-  // Calculation State für UI
   const [projectedCost, setProjectedCost] = useState({ nc: 0, lc: 0 });
   const [isOverdraft, setIsOverdraft] = useState(false);
 
-  // Countdown State
   const [timeLeftStr, setTimeLeftStr] = useState('');
 
-  // LOGIK FÜR SLIDER-ANZEIGE
   const safePeriodId = (instruction?.periodId || "").toLowerCase();
   const isNightProtocol = safePeriodId.includes('night') || isNight;
   const showVault = safePeriodId ? !isNightProtocol : !isNight;
 
-  // Initialisierung: Prüfen ob bereits accepted und State-Säuberung bei Dialog-Öffnung
   useEffect(() => {
     if (open) {
-        setIsMerging(false);
+        setStagingStatus('idle');
     }
     if (instruction?.isAccepted) {
         setViewState('preparation');
@@ -89,16 +82,13 @@ export default function InstructionDialog({
     }
   }, [instruction, open]);
 
-  // NEU: Datenbank-Synchronisation für Amnesie-Schutz in der Umkleidekabine
+  // Synchronisiert die verifiedItemIds mit der Datenbank, falls man den Dialog schließt und wieder öffnet
   useEffect(() => {
       if (instruction?.periodId && activeSessions?.length > 0) {
-          const prepIds = activeSessions
-              .filter(s => s.type === 'preparation' && s.periodId === instruction.periodId)
-              .map(s => s.itemId);
-
-          if (prepIds.length > 0) {
+          const prepSession = activeSessions.find(s => s.type === 'instruction' && s.periodId === instruction.periodId);
+          if (prepSession && prepSession.itemIds) {
               setVerifiedItemIds(prev => {
-                  const merged = [...new Set([...prev, ...prepIds])];
+                  const merged = [...new Set([...prev, ...prepSession.itemIds])];
                   if (merged.length !== prev.length) return merged; 
                   return prev;
               });
@@ -106,7 +96,6 @@ export default function InstructionDialog({
       }
   }, [activeSessions, instruction]);
 
-  // Countdown Logic für Phase 2
   useEffect(() => {
       if (viewState === 'preparation' && instruction?.acceptedAt) {
           const interval = setInterval(() => {
@@ -127,69 +116,43 @@ export default function InstructionDialog({
       }
   }, [viewState, instruction]);
 
-  // --- STAGING AREA (ANKLEIDEN) LOGIK ---
-
   const handleVerifyItem = async (scannedItem) => {
       if (verifiedItemIds.includes(scannedItem.id)) return;
       
       try {
-          // Optimistisches UI-Update für schnelle Reaktionen
           setVerifiedItemIds(prev => [...prev, scannedItem.id]);
           
+          // Wir starten das Item einzeln. Der Service kümmert sich darum, es an die existierende
+          // Instruction-Session anzuhängen und die ReadyTime zu setzen, wenn wir komplett sind.
           await startSessionService(currentUser.uid, {
               items: [scannedItem],
               itemId: scannedItem.id,
               type: 'preparation', 
               periodId: instruction.periodId,
-              verifiedViaNfc: true
+              verifiedViaNfc: true,
+              acceptedAt: instruction.acceptedAt
           });
           
           if (showToast) showToast(`"${scannedItem.name}" am Körper. Materialzeit läuft.`, "success");
       } catch (e) {
           if (showToast) showToast("Fehler beim Erfassen des Items.", "error");
-          // Rollback bei Fehler
           setVerifiedItemIds(prev => prev.filter(id => id !== scannedItem.id));
       }
   };
 
-  // Beobachter: Prüft in Echtzeit, ob das Outfit nun komplett ist
   useEffect(() => {
       if (instruction?.items && verifiedItemIds.length > 0 && verifiedItemIds.length >= instruction.items.length) {
-          if (!isMerging) {
-              handleAllItemsVerified();
+          if (stagingStatus !== 'ready') {
+              if (isScanning) stopScan(); 
+              setStagingStatus('ready');
           }
       }
-  }, [verifiedItemIds, instruction, isMerging]);
+  }, [verifiedItemIds, instruction, stagingStatus, isScanning, stopScan]);
 
-  const handleAllItemsVerified = async () => {
-      setIsMerging(true); // UI Lockdown aktivieren
-      if (isScanning) stopScan(); // Beende kontinuierlichen Scan sofort
-      
-      try {
-          // 1. Beende alle temporären Staging/Preparation Sessions für die saubere Datenbank
-          const q = query(
-              collection(db, `users/${currentUser.uid}/sessions`), 
-              where('isActive', '==', true), 
-              where('type', '==', 'preparation')
-          );
-          const snap = await getDocs(q);
-          for (const document of snap.docs) {
-               await stopSession(currentUser.uid, document.id, { note: 'Ankleidephase beendet. Verschmelzung in Instruction.' });
-          }
-          
-          // 2. Starte die echte, offizielle Instruction Session
-          await handleSessionStart(true);
-      } catch (e) {
-          console.error(e);
-          if (showToast) showToast("Fehler beim Abschluss der Ankleidephase.", "error");
-          setIsMerging(false); // Lockdown aufheben, um Neuversuch zu ermöglichen
-      }
-  };
 
-  // Die "Kalte Füße" Falle - Der unbarmherzige Abbruch in der Umkleidekabine
   const handleColdFeet = async () => {
       try {
-          const q = query(collection(db, `users/${currentUser.uid}/sessions`), where('isActive', '==', true), where('type', '==', 'preparation'));
+          const q = query(collection(db, `users/${currentUser.uid}/sessions`), where('isActive', '==', true), where('type', '==', 'instruction'));
           const snap = await getDocs(q);
           for (const document of snap.docs) {
                await stopSession(currentUser.uid, document.id, { note: 'Abbruch (Kalte Füße)' });
@@ -216,15 +179,13 @@ export default function InstructionDialog({
       }
   };
 
-  // --- NFC SCAN LOGIC (STAGING ANGEPASST) ---
   const activateNfcScan = () => {
-      if (showToast) showToast("Scanner aktiv. Halte nacheinander alle Items an das Telefon.", "info");
-      // Aufruf mit true aktiviert den Continuous-Modus im NFCContext
+      if (showToast) showToast("Scanner aktiv. Halte das nächste Item an das Telefon.", "info");
       startBindingScan(handleNfcAutoStart, true);
   };
 
   const handleNfcAutoStart = async (scannedId) => {
-      if (viewState !== 'preparation' || isMerging) return;
+      if (viewState !== 'preparation') return;
       if (!instruction || !instruction.items) return;
       
       const scannedItem = items.find(i => 
@@ -239,7 +200,6 @@ export default function InstructionDialog({
 
       let isValid = false;
 
-      // Transit Protocol Logik bleibt erhalten
       if (instruction.transitProtocol && instruction.transitProtocol.active) {
           const transit = instruction.transitProtocol;
           let isLate = false;
@@ -278,7 +238,6 @@ export default function InstructionDialog({
       }
   };
 
-  // PHASE 1 ACTION: COMMITMENT (Der "Oath")
   const handleCommitment = async () => {
       triggerHardcoreCheck(async () => {
           if (creditReduction > 0) {
@@ -313,29 +272,6 @@ export default function InstructionDialog({
       });
   };
 
-  // PHASE 2 ACTION: SESSION START (Die Ausführung)
-  const handleSessionStart = async (viaNfc = false) => {
-      const itemsToStart = (instruction?.items || []).map(instrItem => items.find(i => i.id === instrItem.id)).filter(Boolean);
-      
-      if (itemsToStart.length > 0) {
-          try {
-              await startSessionService(currentUser.uid, {
-                  items: itemsToStart,
-                  itemId: itemsToStart[0].id,
-                  type: 'instruction',
-                  periodId: instruction.periodId,
-                  acceptedAt: instruction.acceptedAt, 
-                  verifiedViaNfc: viaNfc,
-                  instructionDurationMinutes: instruction.durationMinutes 
-              });
-              onClose();
-              if (showToast) showToast("Outfit komplett. Protokoll gestartet.", "success");
-          } catch (e) {
-              console.error(e);
-              if (showToast) showToast("Fehler beim Session-Start.", "error");
-          }
-      }
-  };
 
   useEffect(() => {
     const loadData = async () => {
@@ -530,8 +466,6 @@ export default function InstructionDialog({
 
   const dialogPaperStyle = DESIGN_TOKENS.dialog?.paper?.sx || { borderRadius: '28px', bgcolor: '#1e1e1e' };
 
-  // ---------------- RENDER METHODS ----------------
-
   const renderOathPhase = () => {
       const originalDuration = instruction.durationMinutes || 0;
       const currentDuration = originalDuration - creditReduction;
@@ -686,16 +620,6 @@ export default function InstructionDialog({
   };
 
   const renderPreparationPhase = () => {
-      if (isMerging) {
-          return (
-              <Box sx={{ textAlign: 'center', py: 5 }}>
-                  <CircularProgress color="primary" sx={{ mb: 3 }} />
-                  <Typography variant="h6" color="primary">Verschmelzung läuft...</Typography>
-                  <Typography variant="body2" color="text.secondary">Bitte warten. Das Protokoll wird gesichert und gestartet.</Typography>
-              </Box>
-          );
-      }
-
       const displayItems = (instruction?.items || []).map(instrItem => 
           items.find(i => i.id === instrItem.id) || instrItem
       );
@@ -786,18 +710,26 @@ export default function InstructionDialog({
                 )})}
             </Box>
 
-            <Alert severity="info" sx={{ mb: 3, textAlign: 'left', bgcolor: 'rgba(2, 136, 209, 0.1)' }}>
-                {itemsSelectedCount < totalRequired ? `Ziehe alle Items an. Fortschritt: ${itemsSelectedCount}/${totalRequired}` : "Alle Items angezogen. Bestätigung läuft..."}
+            <Alert severity={stagingStatus === 'ready' ? "success" : "info"} sx={{ mb: 3, textAlign: 'left', bgcolor: stagingStatus === 'ready' ? 'rgba(76, 175, 80, 0.1)' : 'rgba(2, 136, 209, 0.1)' }}>
+                {stagingStatus === 'ready' ? "Outfit komplett. Zeitmessung für Ziel gestartet." : `Ziehe alle Items an. Fortschritt: ${itemsSelectedCount}/${totalRequired}`}
             </Alert>
 
             {/* ACTION BUTTONS (STAGING) */}
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
-                <Button fullWidth variant="outlined" size="large" onClick={activateNfcScan}
-                        startIcon={<NfcIcon />}
-                        disabled={isScanning || itemsSelectedCount >= totalRequired}
-                        sx={{ py: 1.5, borderColor: 'rgba(255,255,255,0.3)', color: 'text.primary' }}>
-                        {isScanning ? "SCANNER LÄUFT..." : "ITEMS SCANNEN (NFC)"}
-                </Button>
+                {stagingStatus !== 'ready' ? (
+                    <Button fullWidth variant="outlined" size="large" onClick={activateNfcScan}
+                            startIcon={<NfcIcon />}
+                            disabled={isScanning}
+                            sx={{ py: 1.5, borderColor: 'rgba(255,255,255,0.3)', color: 'text.primary' }}>
+                            {isScanning ? "SCANNER LÄUFT..." : "ITEMS SCANNEN (NFC)"}
+                    </Button>
+                ) : (
+                    <Button fullWidth variant="contained" size="large" onClick={onClose}
+                            startIcon={<CheckCircleIcon />}
+                            sx={{ ...DESIGN_TOKENS.buttonGradient, py: 1.5 }}>
+                            Umkleide verlassen
+                    </Button>
+                )}
                 
                 {/* Die Falle für Kalte Füße */}
                 {isColdFeetAllowed && (
@@ -806,7 +738,7 @@ export default function InstructionDialog({
                     </Button>
                 )}
 
-                <Button color="inherit" onClick={onClose} sx={{ mt: 1 }}>Später fortsetzen</Button>
+                {stagingStatus !== 'ready' && <Button color="inherit" onClick={onClose} sx={{ mt: 1 }}>Später fortsetzen</Button>}
             </Box>
         </Box>
       );

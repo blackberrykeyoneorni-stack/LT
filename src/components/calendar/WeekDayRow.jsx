@@ -4,6 +4,7 @@ import BlockIcon from '@mui/icons-material/Block';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import EventIcon from '@mui/icons-material/Event';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
+import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 import { isSameDay, calculateEffectiveMinutes, formatDuration, getSuspensionForDate } from '../../utils/calendarUtils';
 import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
 
@@ -23,12 +24,33 @@ export default function WeekDayRow({ date, sessions, suspensions, isToday, onCli
     
     const hasActiveSession = actualSessions.some(s => s.isActive);
     const activeSuspension = getSuspensionForDate(date, suspensions);
+    const isStealth = activeSuspension && activeSuspension.type === 'stealth_travel';
 
     const dayName = date.toLocaleDateString('de-DE', { weekday: 'short' }).toUpperCase();
     const dayNumber = date.getDate();
     const isFuture = date > new Date();
 
     const isEmpty = nylonMinutes === 0 && lingerieMinutes === 0 && !hasActiveSession && plannedSessions.length === 0;
+
+    // Dynamische Styles für reguläre Suspension vs Infiltration
+    let rowBorder = '1px solid rgba(255,255,255,0.1)';
+    let rowBg = undefined;
+    let numColor = 'text.primary';
+
+    if (isToday) {
+        rowBorder = `4px solid ${PALETTE.primary.main}`;
+        numColor = PALETTE.primary.main;
+    } else if (activeSuspension) {
+        if (isStealth) {
+            rowBorder = `4px solid ${PALETTE.accents.purple}`;
+            rowBg = 'rgba(156, 39, 176, 0.03)';
+            numColor = PALETTE.accents.purple;
+        } else {
+            rowBorder = `4px solid ${PALETTE.accents.gold}`;
+            rowBg = 'rgba(255, 215, 0, 0.03)';
+            numColor = PALETTE.accents.gold;
+        }
+    }
 
     return (
         <Paper 
@@ -37,8 +59,8 @@ export default function WeekDayRow({ date, sessions, suspensions, isToday, onCli
                 mb: 1, p: 1.5, 
                 display: 'flex', alignItems: 'center', gap: 2,
                 ...DESIGN_TOKENS.glassCard,
-                borderLeft: isToday ? `4px solid ${PALETTE.primary.main}` : (activeSuspension ? `4px solid ${PALETTE.accents.gold}` : '1px solid rgba(255,255,255,0.1)'),
-                bgcolor: activeSuspension ? 'rgba(255, 215, 0, 0.03)' : undefined,
+                borderLeft: rowBorder,
+                bgcolor: rowBg,
                 opacity: isFuture && !activeSuspension && plannedSessions.length === 0 ? 0.6 : 1,
                 cursor: 'pointer',
                 transition: 'all 0.2s',
@@ -50,11 +72,11 @@ export default function WeekDayRow({ date, sessions, suspensions, isToday, onCli
                 minWidth: 50, borderRight: '1px solid rgba(255,255,255,0.1)', pr: 2
             }}>
                 <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 'bold' }}>{dayName}</Typography>
-                <Typography variant="h5" sx={{ fontWeight: 600, color: isToday ? PALETTE.primary.main : (activeSuspension ? PALETTE.accents.gold : 'text.primary') }}>{dayNumber}</Typography>
+                <Typography variant="h5" sx={{ fontWeight: 600, color: numColor }}>{dayNumber}</Typography>
             </Box>
 
             <Box sx={{ flex: 1 }}>
-                {activeSuspension ? (
+                {activeSuspension && !isStealth ? (
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         <BlockIcon sx={{ fontSize: 18, color: PALETTE.accents.gold }} />
                         <Typography variant="body2" sx={{ color: PALETTE.accents.gold, fontWeight: 'bold', letterSpacing: 1 }}>
@@ -66,6 +88,18 @@ export default function WeekDayRow({ date, sessions, suspensions, isToday, onCli
                     </Box>
                 ) : (
                     <>
+                        {isStealth && (
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: isEmpty ? 0 : 1 }}>
+                                <TravelExploreIcon sx={{ fontSize: 18, color: PALETTE.accents.purple }} />
+                                <Typography variant="caption" sx={{ color: PALETTE.accents.purple, fontWeight: 'bold', letterSpacing: 1 }}>
+                                    INFILTRATION
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
+                                    {activeSuspension.reason}
+                                </Typography>
+                            </Box>
+                        )}
+                        
                         {isEmpty ? (
                             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                 <Typography variant="body2" color="text.disabled" sx={{ fontStyle: 'italic' }}>
