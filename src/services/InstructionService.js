@@ -1,15 +1,11 @@
+// src/services/InstructionService.js
 import { db } from '../firebase';
 import { collection, serverTimestamp, query, where, getDocs, doc, setDoc, getDoc, orderBy, limit } from 'firebase/firestore';
 import { DEFAULT_PROTOCOL_RULES } from '../config/defaultRules';
 
 // --- HELPER FUNKTIONEN ---
 
-/**
- * Zieht die festgelegte Tragedauer AUSSCHLIESSLICH aus dem fixen Wochenziel (Protocol).
- * Keine doppelte Buchführung mehr.
- */
 const calculateTargetDuration = async (uid, prefs, periodId) => {
-    // Bei Nacht-Anweisungen einen Standardwert oder 480 (8h) zurückgeben
     if (periodId && periodId.includes('night')) {
         return parseInt(prefs.nightDurationMinutes || 480, 10);
     }
@@ -25,32 +21,24 @@ const calculateTargetDuration = async (uid, prefs, periodId) => {
             goalHours = parseFloat(prefs.dailyTargetHours);
         }
         
-        // Umrechnung der fixierten Stunden in exakte Minuten
         return Math.round(goalHours * 60);
     } catch (e) {
         console.error("Fehler bei der Ermittlung der Tragedauer:", e);
-        return 240; // Fallback 4 Stunden
+        return 240; 
     }
 };
 
-/**
- * Helper: Berechnet ob Item ruhen muss (STRIKT NUR NYLONS)
- * Berücksichtigt die Ruhezeit (restingHours) seit dem letzten Tragen.
- */
 const isItemInRecovery = (item, restingHours = 24) => {
-    // 1. Kategorien Check: Nur wenn Hauptkategorie exakt 'Nylons' ist
     if (!item.mainCategory || item.mainCategory !== 'Nylons') {
         return false;
     }
 
-    // 2. Zeit Check
     if (!item.lastWorn) {
         return false;
     }
 
     const lastWornDate = item.lastWorn.toDate ? item.lastWorn.toDate() : new Date(item.lastWorn);
 
-    // Sicherheitscheck für ungültige Daten
     if (isNaN(lastWornDate.getTime())) {
         return false;
     }
@@ -59,15 +47,11 @@ const isItemInRecovery = (item, restingHours = 24) => {
     return hoursSince < restingHours;
 };
 
-/**
- * Zukünftige Pläne für Pre-Locking laden.
- * Berechnet rückwirkend die Erholungszeit, um zu garantieren, dass geplante Items einsatzbereit sind.
- */
 const getFutureBlockedItemIds = async (uid, items, currentDurationMinutes, restingHours) => {
     try {
         const now = new Date();
         const futureLimit = new Date();
-        futureLimit.setDate(futureLimit.getDate() + 14); // 14 Tage maximaler Vorschau-Horizont
+        futureLimit.setDate(futureLimit.getDate() + 14);
 
         const q = query(
             collection(db, `users/${uid}/sessions`),
@@ -94,15 +78,12 @@ const getFutureBlockedItemIds = async (uid, items, currentDurationMinutes, resti
                 const item = items.find(i => i.id === id);
                 if (!item) return;
 
-                // Nur Nylons benötigen Recovery-Zeiten
                 const isNylon = item.mainCategory === 'Nylons';
                 const itemRestingMs = isNylon ? (restingHours * 60 * 60 * 1000) : 0;
                 const wearDurationMs = currentDurationMinutes * 60 * 1000;
                 
-                // Berechnet, wann das Item wieder verfügbar wäre, wenn wir es JETZT tragen
                 const availableAgainAt = new Date(now.getTime() + wearDurationMs + itemRestingMs);
 
-                // Blockiere das Item heute, wenn seine Wiederverfügbarkeit mit dem zukünftigen Plan kollidiert
                 if (availableAgainAt >= plannedStart) {
                     blockedIds.push(id);
                 }
@@ -111,27 +92,21 @@ const getFutureBlockedItemIds = async (uid, items, currentDurationMinutes, resti
 
         return [...new Set(blockedIds)];
     } catch (e) {
-        console.warn("Konnte zukünftige Pläne nicht laden (ignoriere):", e);
         return [];
     }
 };
 
-/**
- * Prüft, ob es für HEUTE und diese periodId einen expliziten Plan im Kalender gibt.
- * Falls ja, werden diese Items priorisiert behandelt.
- */
 const checkTodayPlan = async (uid, allItems, periodId) => {
     try {
         if (!periodId) return [];
         const isNight = periodId.includes('night');
         const targetPeriod = isNight ? 'night' : 'day';
 
-        // Konstruiere Mitternachtsgrenzen für das Datum aus periodId (z.B. "2026-03-19-day")
         const dateParts = periodId.split('-');
         if (dateParts.length < 3) return [];
         
         const year = parseInt(dateParts[0]);
-        const month = parseInt(dateParts[1]) - 1; // JS months are 0-indexed
+        const month = parseInt(dateParts[1]) - 1;
         const day = parseInt(dateParts[2]);
 
         const targetDateStart = new Date(year, month, day, 0, 0, 0, 0);
@@ -158,19 +133,14 @@ const checkTodayPlan = async (uid, allItems, periodId) => {
         });
 
         if (plannedItemIds.length > 0) {
-            console.log(`InstructionService: Plan für ${periodId} gefunden!`, plannedItemIds);
             return allItems.filter(i => plannedItemIds.includes(i.id));
         }
         return [];
     } catch (e) {
-        console.error("Fehler beim Prüfen des Tagesplans:", e);
         return [];
     }
 };
 
-/**
- * Lädt die letzte generierte Instruction aus der Datenbank.
- */
 export const getLastInstruction = async (uid) => {
     try {
         const docRef = doc(db, `users/${uid}/status/dailyInstruction`);
@@ -181,15 +151,10 @@ export const getLastInstruction = async (uid) => {
         }
         return null;
     } catch (e) {
-        console.error("Error fetching last instruction:", e);
         return null;
     }
 };
 
-/**
- * Hilfsfunktion: Lädt Protokoll-Settings für Forced Release.
- * Kombiniert Default-Werte mit User-Einstellungen.
- */
 const getProtocolSettings = async (userId) => {
     try {
         const settingsRef = doc(db, `users/${userId}/settings/protocol`);
@@ -210,16 +175,10 @@ const getProtocolSettings = async (userId) => {
                 }
             };
         }
-    } catch (e) {
-        console.error("Error loading protocol settings:", e);
-    }
+    } catch (e) {}
     return DEFAULT_PROTOCOL_RULES;
 };
 
-/**
- * Holt die relevanten Sessions der letzten X Stunden, um den echten LastWorn-Zeitpunkt zu bestimmen.
- * Dies ist robuster als nur item.lastWorn zu vertrauen (Frontend-Logik-Parität).
- */
 const getRecentSessionsMap = async (uid, lookbackHours = 48) => {
     try {
         const now = new Date();
@@ -232,19 +191,17 @@ const getRecentSessionsMap = async (uid, lookbackHours = 48) => {
         );
 
         const snap = await getDocs(q);
-        const map = {}; // itemId -> Date
+        const map = {}; 
 
         snap.forEach(doc => {
             const data = doc.data();
-            const endDate = data.endTime ? data.endTime.toDate() : new Date(); // Fallback für laufende
+            const endDate = data.endTime ? data.endTime.toDate() : new Date();
 
-            // Sammle IDs (da Sessions mehrere Items haben können)
             const ids = [];
             if (data.itemId) ids.push(data.itemId);
             if (data.itemIds && Array.isArray(data.itemIds)) ids.push(...data.itemIds);
 
             ids.forEach(id => {
-                // Wir wollen das *neueste* End-Datum wissen
                 if (!map[id] || endDate > map[id]) {
                     map[id] = endDate;
                 }
@@ -253,33 +210,24 @@ const getRecentSessionsMap = async (uid, lookbackHours = 48) => {
 
         return map;
     } catch (e) {
-        console.error("Fehler beim Laden der Recent Sessions:", e);
         return {};
     }
 };
 
-// --- CORE FUNKTIONEN ---
-
-/**
- * Überprüft die Einhaltung der Nacht-Regeln (Checkpoints).
- * Prüft um 01:30, 03:00, 04:30, 06:00 und 07:29 Uhr.
- */
 export const verifyNightCompliance = async (userId, referenceDate = new Date()) => {
     try {
         const year = referenceDate.getFullYear();
         const month = referenceDate.getMonth();
         const day = referenceDate.getDate();
 
-        // Checkpoints definieren (lokale Zeit)
         const checkpoints = [
-            new Date(year, month, day, 1, 30, 0), // 01:30 Uhr
-            new Date(year, month, day, 3, 0, 0),  // 03:00 Uhr
-            new Date(year, month, day, 4, 30, 0), // 04:30 Uhr
-            new Date(year, month, day, 6, 0, 0),  // 06:00 Uhr
-            new Date(year, month, day, 7, 29, 0)  // 07:29 Uhr
+            new Date(year, month, day, 1, 30, 0), 
+            new Date(year, month, day, 3, 0, 0),  
+            new Date(year, month, day, 4, 30, 0), 
+            new Date(year, month, day, 6, 0, 0),  
+            new Date(year, month, day, 7, 29, 0)  
         ];
 
-        // Suchfenster für Sessions: Von Gestern 16:00 Uhr bis Heute.
         const searchStart = new Date(year, month, day - 1, 16, 0, 0);
 
         const q = query(
@@ -302,14 +250,13 @@ export const verifyNightCompliance = async (userId, referenceDate = new Date()) 
             });
         });
 
-        // Sessions sortieren und lückenlose Ketten (Toleranz 15 Min) verschmelzen
         rawSessions.sort((a, b) => a.start - b.start);
         const sessions = [];
         if (rawSessions.length > 0) {
             let current = { ...rawSessions[0] };
             for (let i = 1; i < rawSessions.length; i++) {
                 const next = rawSessions[i];
-                if ((next.start - current.end) <= 15 * 60000) { // 15 Min Toleranz für Session-Schnitt
+                if ((next.start - current.end) <= 15 * 60000) { 
                     current.end = new Date(Math.max(current.end, next.end));
                 } else {
                     sessions.push(current);
@@ -322,7 +269,6 @@ export const verifyNightCompliance = async (userId, referenceDate = new Date()) 
         let allCheckpointsCovered = true;
         const missedCheckpoints = [];
 
-        // Jeden Checkpoint prüfen
         checkpoints.forEach(cp => {
             const isCovered = sessions.some(s => s.start <= cp && s.end >= cp);
 
@@ -333,7 +279,7 @@ export const verifyNightCompliance = async (userId, referenceDate = new Date()) 
         });
 
         const offset = referenceDate.getTimezoneOffset() * 60000;
-        const dateKey = new Date(referenceDate.getTime() - offset).toISOString().split('T')[0]; // YYYY-MM-DD
+        const dateKey = new Date(referenceDate.getTime() - offset).toISOString().split('T')[0]; 
         
         await setDoc(doc(db, `users/${userId}/status/nightCompliance`), {
             date: dateKey,
@@ -342,23 +288,15 @@ export const verifyNightCompliance = async (userId, referenceDate = new Date()) 
             lastChecked: serverTimestamp()
         }, { merge: true });
 
-        console.log(`Night Compliance Check für ${dateKey}: ${allCheckpointsCovered ? 'ERFOLG' : 'FEHLSCHLAG'}`, missedCheckpoints);
-
         return allCheckpointsCovered;
 
     } catch (e) {
-        console.error("Fehler bei verifyNightCompliance:", e);
         return false;
     }
 };
 
-/**
- * Hauptfunktion zur Generierung der täglichen Anweisung.
- * Berücksichtigt: Plan, Einstellungen, Wahrscheinlichkeiten, Recovery.
- */
 export const generateAndSaveInstruction = async (uid, items, activeSessions, periodId) => {
     try {
-        // 1. Hole Präferenzen
         const prefsSnap = await getDoc(doc(db, `users/${uid}/settings/preferences`));
         const prefs = prefsSnap.exists() ? prefsSnap.data() : {};
 
@@ -371,27 +309,38 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
 
         const recentSessionsMap = await getRecentSessionsMap(uid, restingHours + 5);
 
-        // --- STEALTH MODUS KOFFER PRÜFUNG ---
+        // --- STEALTH MODUS: KOFFER PRÜFUNG & PRE-BLOCKING ---
         let isStealth = false;
-        let packedItemIds = [];
-        const suspQ = query(collection(db, `users/${uid}/suspensions`), where('status', '==', 'active'), where('type', '==', 'stealth_travel'));
-        const suspSnap = await getDocs(suspQ);
-        if (!suspSnap.empty) {
-            isStealth = true;
-            packedItemIds = suspSnap.docs[0].data().packedItemIds || [];
-            console.log("InstructionService: Stealth-Modus erkannt. Limitiere Inventar auf Koffer.");
-        }
+        let activePackedDayIds = [];
+        let activePackedNightIds = [];
+        let futurePackedItemIds = [];
 
-        // 2. CHECK: GIBT ES EINEN PLAN FÜR HEUTE?
+        const suspQ = query(collection(db, `users/${uid}/suspensions`), where('status', 'in', ['active', 'scheduled']), where('type', '==', 'stealth_travel'));
+        const suspSnap = await getDocs(suspQ);
+
+        suspSnap.forEach(doc => {
+            const data = doc.data();
+            const dayIds = data.packedItemsDay || [];
+            const nightIds = data.packedItemsNight || [];
+            const legacyIds = data.packedItemIds || []; 
+            
+            const allTripIds = [...new Set([...dayIds, ...nightIds, ...legacyIds])];
+
+            if (data.status === 'active') {
+                isStealth = true;
+                activePackedDayIds = dayIds.length > 0 ? dayIds : legacyIds;
+                activePackedNightIds = nightIds.length > 0 ? nightIds : legacyIds.filter(id => {
+                    const itm = items.find(i => i.id === id);
+                    return itm && itm.subCategory === 'Strumpfhose';
+                });
+            } else if (data.status === 'scheduled') {
+                futurePackedItemIds.push(...allTripIds);
+            }
+        });
+
         const plannedItems = await checkTodayPlan(uid, items, periodId);
         let selectedItems = [...plannedItems];
         let isPlannedInstruction = plannedItems.length > 0;
-
-        if (isPlannedInstruction) {
-            console.log("InstructionService: Plan für heute gefunden. Setze Anker-Items:", plannedItems.map(i => i.id));
-        }
-
-        // --- SMART HYBRID SELECTION (WURZEL-DÄMPFUNG) ---
 
         const safeActiveSessions = Array.isArray(activeSessions) ? activeSessions : [];
         const allActiveIds = new Set();
@@ -412,32 +361,28 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
             });
         });
 
-        // Blockiere zusätzlich die Kategorien der heute fest geplanten Anker-Items
         selectedItems.forEach(item => {
             const key = item.subCategory || item.mainCategory || 'Sonstiges';
             activeCategoryKeys.add(key);
         });
 
-        // Predictive Pre-Locking für zukünftige Pläne
         const futureBlockedIds = await getFutureBlockedItemIds(uid, items, durationMinutes, restingHours);
-
         const isNightInstruction = periodId && periodId.includes('night');
 
         // 3. Filterung der verfügbaren Items
         const availableItems = items.filter(i => {
-            // Bereits gesetzte Plan-Items aus dem Pool nehmen
             if (selectedItems.some(si => si.id === i.id)) return false;
-
             if (i.status !== 'active') return false;
 
             if (isStealth) {
-                if (!packedItemIds.includes(i.id)) return false;
-                
                 if (isNightInstruction) {
-                    if (i.subCategory !== 'Strumpfhose') return false;
+                    if (!activePackedNightIds.includes(i.id)) return false;
                 } else {
-                    if (i.subCategory !== 'Kniestrümpfe') return false;
+                    if (!activePackedDayIds.includes(i.id)) return false;
                 }
+            } else {
+                // Koffer-Pre-Locking: Bereits gepackte Items stehen nicht zur Verfügung
+                if (futurePackedItemIds.includes(i.id)) return false;
             }
 
             if (allActiveIds.has(i.id)) return false;
@@ -455,16 +400,14 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                 }
             }
 
-            if (isItemInRecovery(effectiveItem, restingHours)) return false;
+            if (!isStealth && isItemInRecovery(effectiveItem, restingHours)) return false;
 
             const itemSub = (i.subCategory || '').toLowerCase();
-            if (i.mainCategory === 'Accessoires' && (itemSub.includes('buttplug') || itemSub.includes('dildo'))) { return false;
-            }
+            if (i.mainCategory === 'Accessoires' && (itemSub.includes('buttplug') || itemSub.includes('dildo'))) { return false; }
 
             if (futureBlockedIds.includes(i.id)) return false;
 
             const itemPeriod = i.suitablePeriod || 'Beide';
-
             if (isNightInstruction) {
                 if (itemPeriod === 'Tag') return false;
             } else {
@@ -495,7 +438,6 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
             } else {
                 targetItemCount = 1;
             }
-            console.log(`InstructionService: Nacht-Modus aktiv. Random=${rndCount.toFixed(2)} -> TargetCount=${targetItemCount}`);
         } else {
             if (maxItems === 1) {
                 targetItemCount = 1;
@@ -514,10 +456,8 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                     targetItemCount = 1;
                 }
             }
-            console.log(`InstructionService: Tag-Modus. MaxItems=${maxItems}, Random=${rndCount.toFixed(2)} -> TargetCount=${targetItemCount}`);
         }
 
-        // Dynamische Auffüllung der Slots (Ignoriert Limits, falls Plan-Items das Limit bereits überschreiten)
         const slotsToFill = targetItemCount - selectedItems.length;
 
         if (slotsToFill > 0) {
@@ -552,7 +492,6 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
 
                 const itemsInGroup = groups[chosenCategoryKey];
                 
-                // --- NEGLECT-WEIGHTING ALGORITHMUS (Nur für Nylons) ---
                 let groupTotalItemWeight = 0;
                 const weightedItemsInGroup = itemsInGroup.map(item => {
                     let itemWeight = 1; 
@@ -655,7 +594,6 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                                         subCategory: penaltyItem.subCategory || ''
                                     }
                                 };
-                                console.log("InstructionService: Transit Protocol aktiviert. Doppel-Direktive generiert für Subkategorie:", targetSubCategory);
                             }
                         }
                     }
@@ -663,7 +601,6 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
             }
         }
 
-        // --- FORCED RELEASE LOGIK (DYNAMISCH) ---
         let forcedRelease = { required: false, executed: false, method: null };
 
         if (isNightInstruction) {
@@ -685,7 +622,6 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                 } else {
                     forcedRelease.method = 'toy_anal';
                 }
-                console.log("InstructionService: Forced Release Triggered via Settings!", forcedRelease.method);
             }
         }
 

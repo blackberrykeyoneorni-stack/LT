@@ -1,3 +1,4 @@
+// src/pages/Settings.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import { 
     doc, getDoc, setDoc, writeBatch, serverTimestamp, collection, getDocs, query, where 
@@ -19,7 +20,7 @@ import {
   Chip, Stack, Switch, Slider, Snackbar, Alert, IconButton,
   Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions,
   CircularProgress, List, ListItem, ListItemText, FormControl, InputLabel, Select, MenuItem,
-  Divider, Avatar, FormControlLabel, Checkbox, FormGroup
+  Divider, Avatar, FormControlLabel, Checkbox
 } from '@mui/material';
 
 import { DESIGN_TOKENS, PALETTE } from '../theme/obsidianDesign';
@@ -34,7 +35,7 @@ import UploadIcon from '@mui/icons-material/Upload';
 export default function Settings() {
   const { currentUser, logout } = useAuth();
   const { isBiometricActive, updateStatus } = useSecurity();
-  const { startBindingScan, isScanning } = useNFCGlobal();
+  const { startBindingScan } = useNFCGlobal();
   
   const [brands, setBrands] = useState([]); const [newBrand, setNewBrand] = useState('');
   const [materials, setMaterials] = useState([]); const [newMaterial, setNewMaterial] = useState('');
@@ -66,8 +67,13 @@ export default function Settings() {
   const [suspensionDialogMode, setSuspensionDialogMode] = useState('plan'); 
   const [newSuspension, setNewSuspension] = useState({ type: 'medical', reason: '', startDate: '', endDate: '' });
   const [allItems, setAllItems] = useState([]);
-  const [stealthItems, setStealthItems] = useState([]); 
-  const [requiredPackAmounts, setRequiredPackAmounts] = useState({ days: 0, nights: 0 });
+  
+  const [stealthConfig, setStealthConfig] = useState({
+      dayIntensity: 1,
+      nightIntensity: 1,
+      allowedDaySubCategories: []
+  });
+  const [systemPackedItems, setSystemPackedItems] = useState({ day: [], night: [] });
 
   const [loading, setLoading] = useState(true); 
   const [backupLoading, setBackupLoading] = useState(false); 
@@ -205,7 +211,6 @@ export default function Settings() {
           showToast("Alle Einstellungen erfolgreich gespeichert.", "success");
 
       } catch (e) {
-          console.error("Save Error:", e);
           showToast("Fehler beim Speichern: " + e.message, "error");
       } finally {
           setIsSavingAll(false);
@@ -226,12 +231,40 @@ export default function Settings() {
       
       const start = new Date(newSuspension.startDate);
       const end = new Date(newSuspension.endDate);
-      const diffTime = Math.abs(end - start);
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; 
       
       if (newSuspension.type === 'stealth_travel') {
-          setRequiredPackAmounts({ days: diffDays, nights: diffDays });
-          setStealthItems([]);
+          if (stealthConfig.allowedDaySubCategories.length === 0) {
+              showToast("Bitte wähle mindestens eine erlaubte Subkategorie für den Tag aus.", "error");
+              return;
+          }
+
+          const diffTime = Math.abs(end - start);
+          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+          const nights = diffDays > 1 ? diffDays - 1 : 1; 
+
+          const neededDay = diffDays * stealthConfig.dayIntensity;
+          const neededNight = nights * stealthConfig.nightIntensity;
+
+          let availableNight = allItems.filter(i => i.status === 'active' && i.subCategory === 'Strumpfhose');
+          let availableDay = allItems.filter(i => i.status === 'active' && stealthConfig.allowedDaySubCategories.includes(i.subCategory));
+
+          availableNight.sort((a, b) => (a.wearCount || 0) - (b.wearCount || 0));
+          availableDay.sort((a, b) => (a.wearCount || 0) - (b.wearCount || 0));
+
+          if (availableNight.length < neededNight) {
+              showToast(`Bestand zu gering: ${neededNight} Strumpfhosen benötigt, ${availableNight.length} sauber.`, "error");
+              return;
+          }
+          if (availableDay.length < neededDay) {
+              showToast(`Bestand zu gering: ${neededDay} Tag-Items benötigt, ${availableDay.length} sauber.`, "error");
+              return;
+          }
+
+          setSystemPackedItems({ 
+              day: availableDay.slice(0, neededDay), 
+              night: availableNight.slice(0, neededNight) 
+          });
+          
           setNewSuspension(prev => ({...prev, reason: currentReason}));
           setSuspensionDialogMode('pack');
           return;
@@ -252,21 +285,19 @@ export default function Settings() {
       try {
           const payload = {
               ...newSuspension,
-              packedItemIds: stealthItems
+              packedItemsDay: systemPackedItems.day.map(i => i.id),
+              packedItemsNight: systemPackedItems.night.map(i => i.id)
           };
           await addSuspension(currentUser.uid, payload);
-          showToast("Operation: Infiltration registriert. Loadout gespeichert.", "success");
+          showToast("Operation registriert. Loadout diktiert und gesichert.", "success");
           setSuspensionDialog(false);
           setSuspensionDialogMode('plan');
           loadSuspensions();
           setNewSuspension({ type: 'medical', reason: '', startDate: '', endDate: '' });
+          setStealthConfig({ dayIntensity: 1, nightIntensity: 1, allowedDaySubCategories: [] });
       } catch (e) {
           showToast(e.message, "error");
       }
-  };
-
-  const handleToggleStealthItem = (id) => {
-      setStealthItems(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
   };
 
   const handleDeleteSuspension = async (id) => {
@@ -428,14 +459,16 @@ export default function Settings() {
   if (loading) return <Box sx={{ display: 'flex', justifyContent: 'center', mt: 10 }}><CircularProgress /></Box>;
 
   const allCategoryOptions = [];
+  const onlySubCategories = [];
   Object.keys(catStructure).forEach(main => {
       allCategoryOptions.push({ label: `HAUPT: ${main}`, value: main });
-      if(catStructure[main]) catStructure[main].forEach(sub => allCategoryOptions.push({ label: `• ${sub}`, value: sub }));
+      if(catStructure[main]) {
+          catStructure[main].forEach(sub => {
+              allCategoryOptions.push({ label: `• ${sub}`, value: sub });
+              if (sub !== 'Strumpfhose') onlySubCategories.push(sub);
+          });
+      }
   });
-
-  const packedSocksCount = allItems.filter(i => stealthItems.includes(i.id) && i.subCategory === 'Kniestrümpfe').length;
-  const packedTightsCount = allItems.filter(i => stealthItems.includes(i.id) && i.subCategory === 'Strumpfhose').length;
-  const isPackValid = packedSocksCount >= requiredPackAmounts.days && packedTightsCount >= requiredPackAmounts.nights;
 
   return (
     <Container maxWidth="md" disableGutters sx={{ pt: 1, pb: 15, px: 0.5 }}>
@@ -667,96 +700,75 @@ export default function Settings() {
                     <TextField fullWidth label="Beschreibung" value={newSuspension.reason} onChange={e => setNewSuspension({...newSuspension, reason: e.target.value})} margin="dense" placeholder="z.B. Grippe" />
                     <TextField fullWidth type="date" label="Startdatum" InputLabelProps={{ shrink: true }} value={newSuspension.startDate} onChange={e => setNewSuspension({...newSuspension, startDate: e.target.value})} margin="dense" />
                     <TextField fullWidth type="date" label="Enddatum" InputLabelProps={{ shrink: true }} value={newSuspension.endDate} onChange={e => setNewSuspension({...newSuspension, endDate: e.target.value})} margin="dense" />
+                    
+                    {newSuspension.type === 'stealth_travel' && (
+                        <Box sx={{ mt: 2, p: 2, bgcolor: 'rgba(255,255,255,0.05)', borderRadius: 2 }}>
+                            <Typography variant="subtitle2" sx={{ color: PALETTE.accents.purple, mb: 2 }}>Infiltrations-Parameter</Typography>
+                            <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+                                <TextField type="number" label="Tages-Stücke" value={stealthConfig.dayIntensity} onChange={e => setStealthConfig({...stealthConfig, dayIntensity: parseInt(e.target.value) || 1})} size="small" fullWidth />
+                                <TextField type="number" label="Nacht-Stücke" value={stealthConfig.nightIntensity} onChange={e => setStealthConfig({...stealthConfig, nightIntensity: parseInt(e.target.value) || 1})} size="small" fullWidth />
+                            </Box>
+                            <FormControl fullWidth size="small">
+                                <InputLabel>Erlaubte Tages-Subkategorien</InputLabel>
+                                <Select
+                                    multiple
+                                    value={stealthConfig.allowedDaySubCategories}
+                                    onChange={e => setStealthConfig({...stealthConfig, allowedDaySubCategories: e.target.value})}
+                                    renderValue={(selected) => selected.join(', ')}
+                                >
+                                    {onlySubCategories.map(sub => (
+                                        <MenuItem key={sub} value={sub}>
+                                            <Checkbox checked={stealthConfig.allowedDaySubCategories.indexOf(sub) > -1} />
+                                            <ListItemText primary={sub} />
+                                        </MenuItem>
+                                    ))}
+                                </Select>
+                            </FormControl>
+                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+                                *Nachts ist die Subkategorie "Strumpfhose" zwingend vorgeschrieben.
+                            </Typography>
+                        </Box>
+                    )}
+
                 </DialogContent>
                 <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}><Button onClick={() => setSuspensionDialog(false)} color="inherit">Abbrechen</Button><Button onClick={handleAddSuspension} variant="contained" sx={DESIGN_TOKENS.buttonGradient}>Weiter</Button></DialogActions>
             </>
         ) : (
             <>
                 <DialogTitle sx={{ ...DESIGN_TOKENS.dialog.title.sx, color: PALETTE.accents.purple, justifyContent: 'center' }}>
-                    <TravelExploreIcon sx={{ mr: 1 }} /> DIGITALER KOFFER
+                    <TravelExploreIcon sx={{ mr: 1 }} /> DIKTAT: KOFFERINHALT
                 </DialogTitle>
                 <DialogContent sx={{ ...DESIGN_TOKENS.dialog.content.sx, maxHeight: '60vh', overflowY: 'auto' }}>
                     <Alert severity="warning" sx={{ mb: 2, bgcolor: 'rgba(255,255,255,0.05)', color: '#fff' }}>
-                        Wähle exakt aus, welche Items physisch im Koffer sind.
-                        Das Protokoll greift nur auf dieses Loadout zu. 
+                        Die folgenden Items wurden algorithmisch für deine Mission vorausgewählt. Du hast diese Items zwingend in das Gepäck zu überführen.
                     </Alert>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-around', mb: 3, p: 2, bgcolor: 'rgba(0,0,0,0.5)', borderRadius: 2 }}>
-                        <Box sx={{ textAlign: 'center' }}>
-                            <Typography variant="h6" sx={{ color: packedSocksCount >= requiredPackAmounts.days ? PALETTE.accents.green : PALETTE.accents.red }}>
-                                {packedSocksCount} / {requiredPackAmounts.days}
-                            </Typography>
-                            <Typography variant="caption">Kniestrümpfe</Typography>
-                        </Box>
-                        <Box sx={{ textAlign: 'center' }}>
-                            <Typography variant="h6" sx={{ color: packedTightsCount >= requiredPackAmounts.nights ? PALETTE.accents.green : PALETTE.accents.red }}>
-                                {packedTightsCount} / {requiredPackAmounts.nights}
-                            </Typography>
-                            <Typography variant="caption">Strumpfhosen</Typography>
-                        </Box>
-                    </Box>
 
-                    <Typography variant="subtitle2" sx={{ color: PALETTE.primary.main, mb: 1 }}>Verfügbare Kniestrümpfe</Typography>
+                    <Typography variant="subtitle2" sx={{ color: PALETTE.primary.main, mb: 1, mt: 3 }}>Tagtrage-Loadout</Typography>
                     <Stack spacing={1} sx={{ mb: 3 }}>
-                        {allItems.filter(i => i.subCategory === 'Kniestrümpfe').map(i => {
-                            const isChecked = stealthItems.includes(i.id);
+                        {systemPackedItems.day.map(i => {
                             const imgSrc = i.imageUrl || (i.images && i.images.length > 0 ? i.images[0] : null);
                             return (
-                                <Paper 
-                                    key={i.id} 
-                                    onClick={() => handleToggleStealthItem(i.id)}
-                                    elevation={0}
-                                    sx={{ 
-                                        display: 'flex', alignItems: 'center', p: 1, cursor: 'pointer',
-                                        bgcolor: isChecked ? 'rgba(255, 174, 227, 0.08)' : 'rgba(255,255,255,0.03)',
-                                        border: `1px solid ${isChecked ? PALETTE.primary.main : 'transparent'}`,
-                                        borderRadius: 2, transition: 'all 0.2s ease-in-out'
-                                    }}
-                                >
-                                    <Checkbox checked={isChecked} onChange={() => handleToggleStealthItem(i.id)} onClick={(e) => e.stopPropagation()} />
-                                    <Avatar src={imgSrc} variant="rounded" sx={{ width: 48, height: 48, mx: 1, bgcolor: 'rgba(255,255,255,0.1)' }}>
-                                        {!imgSrc && (i.name ? i.name.charAt(0).toUpperCase() : '?')}
-                                    </Avatar>
+                                <Paper key={i.id} elevation={0} sx={{ display: 'flex', alignItems: 'center', p: 1, bgcolor: 'rgba(255,255,255,0.03)', border: `1px solid ${PALETTE.primary.main}`, borderRadius: 2 }}>
+                                    <Avatar src={imgSrc} variant="rounded" sx={{ width: 40, height: 40, mx: 1, bgcolor: 'rgba(255,255,255,0.1)' }}>{!imgSrc && (i.name ? i.name.charAt(0).toUpperCase() : '?')}</Avatar>
                                     <Box sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1, overflow: 'hidden' }}>
-                                        <Typography variant="subtitle2" noWrap sx={{ fontWeight: isChecked ? 'bold' : 'normal', color: isChecked ? PALETTE.primary.main : 'text.primary' }}>
-                                            {i.brand ? `${i.brand} - ` : ''}{i.name || 'Unbenannt'}
-                                        </Typography>
-                                        <Typography variant="caption" color="text.secondary" noWrap>
-                                            ID: {i.customId || i.id}
-                                        </Typography>
+                                        <Typography variant="subtitle2" noWrap sx={{ color: PALETTE.primary.main }}>{i.brand ? `${i.brand} - ` : ''}{i.name || 'Unbenannt'}</Typography>
+                                        <Typography variant="caption" color="text.secondary" noWrap>ID: {i.customId || i.id} • {i.subCategory}</Typography>
                                     </Box>
                                 </Paper>
                             );
                         })}
                     </Stack>
 
-                    <Typography variant="subtitle2" sx={{ color: PALETTE.primary.main, mb: 1 }}>Verfügbare Strumpfhosen</Typography>
+                    <Typography variant="subtitle2" sx={{ color: PALETTE.primary.main, mb: 1 }}>Nachttrage-Loadout (Strumpfhosen)</Typography>
                     <Stack spacing={1}>
-                        {allItems.filter(i => i.subCategory === 'Strumpfhose').map(i => {
-                            const isChecked = stealthItems.includes(i.id);
+                        {systemPackedItems.night.map(i => {
                             const imgSrc = i.imageUrl || (i.images && i.images.length > 0 ? i.images[0] : null);
                             return (
-                                <Paper 
-                                    key={i.id} 
-                                    onClick={() => handleToggleStealthItem(i.id)}
-                                    elevation={0}
-                                    sx={{ 
-                                        display: 'flex', alignItems: 'center', p: 1, cursor: 'pointer',
-                                        bgcolor: isChecked ? 'rgba(255, 174, 227, 0.08)' : 'rgba(255,255,255,0.03)',
-                                        border: `1px solid ${isChecked ? PALETTE.primary.main : 'transparent'}`,
-                                        borderRadius: 2, transition: 'all 0.2s ease-in-out'
-                                    }}
-                                >
-                                    <Checkbox checked={isChecked} onChange={() => handleToggleStealthItem(i.id)} onClick={(e) => e.stopPropagation()} />
-                                    <Avatar src={imgSrc} variant="rounded" sx={{ width: 48, height: 48, mx: 1, bgcolor: 'rgba(255,255,255,0.1)' }}>
-                                        {!imgSrc && (i.name ? i.name.charAt(0).toUpperCase() : '?')}
-                                    </Avatar>
+                                <Paper key={i.id} elevation={0} sx={{ display: 'flex', alignItems: 'center', p: 1, bgcolor: 'rgba(255,255,255,0.03)', border: `1px solid ${PALETTE.primary.main}`, borderRadius: 2 }}>
+                                    <Avatar src={imgSrc} variant="rounded" sx={{ width: 40, height: 40, mx: 1, bgcolor: 'rgba(255,255,255,0.1)' }}>{!imgSrc && (i.name ? i.name.charAt(0).toUpperCase() : '?')}</Avatar>
                                     <Box sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1, overflow: 'hidden' }}>
-                                        <Typography variant="subtitle2" noWrap sx={{ fontWeight: isChecked ? 'bold' : 'normal', color: isChecked ? PALETTE.primary.main : 'text.primary' }}>
-                                            {i.brand ? `${i.brand} - ` : ''}{i.name || 'Unbenannt'}
-                                        </Typography>
-                                        <Typography variant="caption" color="text.secondary" noWrap>
-                                            ID: {i.customId || i.id}
-                                        </Typography>
+                                        <Typography variant="subtitle2" noWrap sx={{ color: PALETTE.primary.main }}>{i.brand ? `${i.brand} - ` : ''}{i.name || 'Unbenannt'}</Typography>
+                                        <Typography variant="caption" color="text.secondary" noWrap>ID: {i.customId || i.id} • {i.subCategory}</Typography>
                                     </Box>
                                 </Paper>
                             );
@@ -764,8 +776,8 @@ export default function Settings() {
                     </Stack>
                 </DialogContent>
                 <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}>
-                    <Button onClick={() => setSuspensionDialogMode('plan')} color="inherit">Zurück</Button>
-                    <Button onClick={handleConfirmPack} disabled={!isPackValid} variant="contained" sx={{ bgcolor: PALETTE.accents.purple }}>Bestätigen</Button>
+                    <Button onClick={() => setSuspensionDialogMode('plan')} color="inherit">Abbrechen</Button>
+                    <Button onClick={handleConfirmPack} variant="contained" sx={{ bgcolor: PALETTE.accents.purple }}>Verstanden & Akzeptiert</Button>
                 </DialogActions>
             </>
         )}

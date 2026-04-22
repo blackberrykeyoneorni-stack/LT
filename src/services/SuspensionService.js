@@ -1,13 +1,10 @@
+// src/services/SuspensionService.js
 import { db } from '../firebase';
 import { collection, addDoc, query, where, getDocs, updateDoc, doc, Timestamp, orderBy, deleteDoc, getDoc, writeBatch } from 'firebase/firestore';
 import { DEFAULT_PROTOCOL_RULES } from '../config/defaultRules';
 
 const COLLECTION = 'suspensions';
 
-/**
- * Erstellt eine neue geplante Aussetzung.
- * REGEL: Startdatum muss > Heute sein (Pre-Planning Constraint).
- */
 export const addSuspension = async (userId, data) => {
     const start = new Date(data.startDate);
     const todayEnd = new Date();
@@ -22,22 +19,18 @@ export const addSuspension = async (userId, data) => {
         reason: data.reason,
         startDate: Timestamp.fromDate(new Date(data.startDate)),
         endDate: Timestamp.fromDate(new Date(data.endDate)),
-        packedItemIds: data.packedItemIds || [], // NEU: Koffer-Array speichern
+        packedItemIds: data.packedItemIds || [], 
+        packedItemsDay: data.packedItemsDay || [], 
+        packedItemsNight: data.packedItemsNight || [],
         createdAt: Timestamp.now(),
         status: 'scheduled'
     });
 };
 
-/**
- * Löscht eine noch nicht gestartete (scheduled) Aussetzung vollständig.
- */
 export const deleteScheduledSuspension = async (userId, suspensionId) => {
     await deleteDoc(doc(db, `users/${userId}/${COLLECTION}`, suspensionId));
 };
 
-/**
- * Lädt NUR aktive oder geplante Aussetzungen (für Dashboard/Checks).
- */
 export const getSuspensions = async (userId) => {
     const q = query(
         collection(db, `users/${userId}/${COLLECTION}`),
@@ -54,9 +47,6 @@ export const getSuspensions = async (userId) => {
     }));
 };
 
-/**
- * Lädt ALLE Aussetzungen (auch vergangene) für den Kalender.
- */
 export const getAllSuspensions = async (userId) => {
     try {
         const q = query(
@@ -72,20 +62,13 @@ export const getAllSuspensions = async (userId) => {
             endDate: d.data().endDate?.toDate ? d.data().endDate.toDate() : new Date(d.data().endDate)
         }));
     } catch (e) {
-        console.error("Error loading history:", e);
         return [];
     }
 };
 
-/**
- * Prüft beim App-Start, ob HEUTE eine Aussetzung aktiv ist.
- * Schaltet 'scheduled' automatisch auf 'active' um, wenn die Zeit gekommen ist.
- * FIX: Beendet bei Aktivierung AUTOMATISCH alle laufenden TZD-Strafen.
- */
 export const checkActiveSuspension = async (userId) => {
     const now = new Date();
     
-    // Sicherheits-Fallback
     const timeRules = DEFAULT_PROTOCOL_RULES?.time || { 
         dayStartHour: 7, 
         dayStartMinute: 30, 
@@ -93,7 +76,6 @@ export const checkActiveSuspension = async (userId) => {
         nightStartMinute: 0 
     };
 
-    // 1. Gibt es bereits eine aktive Aussetzung?
     const qActive = query(
         collection(db, `users/${userId}/${COLLECTION}`),
         where('status', '==', 'active')
@@ -105,15 +87,12 @@ export const checkActiveSuspension = async (userId) => {
         const data = docSnap.data();
         const end = data.endDate.toDate();
 
-        // Check: Ist sie abgelaufen?
         const endOfSuspension = new Date(end);
         endOfSuspension.setHours(timeRules.nightStartHour, timeRules.nightStartMinute, 0, 0);
 
         if (endOfSuspension < now) {
-            // Aussetzung ist vorbei -> Status auf 'completed'
             await updateDoc(doc(db, `users/${userId}/${COLLECTION}`, docSnap.id), { status: 'completed' });
             
-            // --- NEU: STEALTH-SCHULDEN EINTREIBEN ---
             if (data.type === 'stealth_travel') {
                 const qLedger = query(collection(db, `users/${userId}/punishmentLedger`), where('status', '==', 'pending'), where('isStealthAkkumulation', '==', true));
                 const ledgerSnap = await getDocs(qLedger);
@@ -121,15 +100,13 @@ export const checkActiveSuspension = async (userId) => {
                     const batch = writeBatch(db);
                     ledgerSnap.forEach(ticket => batch.update(ticket.ref, { isStealthAkkumulation: false }));
                     await batch.commit();
-                    console.log(`Stealth Mode regulär beendet. ${ledgerSnap.size} Straf-Tickets scharfgeschaltet.`);
                 }
             }
             
-            // Suspension Flag im Daily Doc entfernen, damit Protokoll wieder greifen kann
             await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), { 
                 activeSuspension: false,
                 suspensionReason: null,
-                stealthModeActive: false // NEU: Stealth abschalten
+                stealthModeActive: false 
             });
             
             return null;
@@ -137,7 +114,6 @@ export const checkActiveSuspension = async (userId) => {
         return { id: docSnap.id, ...data, startDate: data.startDate.toDate(), endDate: end };
     }
 
-    // 2. Gibt es eine geplante Aussetzung, die heute starten muss?
     const qScheduled = query(
         collection(db, `users/${userId}/${COLLECTION}`),
         where('status', '==', 'scheduled')
@@ -149,44 +125,33 @@ export const checkActiveSuspension = async (userId) => {
         const start = data.startDate.toDate();
         const end = data.endDate.toDate();
         
-        // Startzeitpunkt prüfen (z.B. 07:30)
         const startOfSuspension = new Date(start);
         startOfSuspension.setHours(timeRules.dayStartHour, timeRules.dayStartMinute, 0, 0);
 
         if (startOfSuspension <= now) {
-            // ZEIT ERREICHT -> AKTIVIERUNG
             await updateDoc(doc(db, `users/${userId}/${COLLECTION}`, d.id), { status: 'active' });
             
-            // --- CRITICAL FIX: KOLLISIONS-BEREINIGUNG ---
-            // Wenn die Aussetzung startet, müssen Altlasten (TZD vom Vortag) sofort sterben.
-            
-            // A) TZD Status Doc killen (das Overlay verschwindet)
             await updateDoc(doc(db, `users/${userId}/status/tzd`), {
                 isActive: false,
                 result: 'terminated_by_suspension',
                 endTime: Timestamp.now()
             });
 
-            // WEICHE: Stealth vs. Normale Aussetzung
             if (data.type === 'stealth_travel') {
                 await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), {
-                    evasionPenaltyTriggered: false, // WICHTIG: Stoppt die 150% Logik
+                    evasionPenaltyTriggered: false, 
                     tzdDurationMinutes: 0,
-                    stealthModeActive: true // NEU: Aktiviert den Stealth-Instruction-Service
+                    stealthModeActive: true 
                 });
             } else {
-                // B) Daily Instruction säubern (Die Strafe wird deaktiviert)
                 await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), {
-                    evasionPenaltyTriggered: false, // WICHTIG: Stoppt die 150% Logik
+                    evasionPenaltyTriggered: false, 
                     tzdDurationMinutes: 0,
-                    activeSuspension: true, // Markiert User als 'entschuldigt'
+                    activeSuspension: true, 
                     suspensionReason: data.reason
                 });
             }
             
-            console.log(`Suspension activated. TZD terminated. Reason: ${data.reason}`);
-            // ----------------------------------------------
-
             return { id: d.id, ...data, status: 'active', startDate: start, endDate: end };
         }
     }
@@ -194,13 +159,9 @@ export const checkActiveSuspension = async (userId) => {
     return null;
 };
 
-/**
- * Beendet eine Aussetzung vorzeitig (z.B. frühere Entlassung aus Krankenhaus).
- */
 export const terminateSuspension = async (userId, suspensionId) => {
     const suspRef = doc(db, `users/${userId}/${COLLECTION}`, suspensionId);
     
-    // --- NEU: STEALTH-SCHULDEN BEI VORZEITIGEM ABBRUCH EINTREIBEN ---
     const suspSnap = await getDoc(suspRef);
     if (suspSnap.exists() && suspSnap.data().type === 'stealth_travel') {
         const qLedger = query(collection(db, `users/${userId}/punishmentLedger`), where('status', '==', 'pending'), where('isStealthAkkumulation', '==', true));
@@ -209,7 +170,6 @@ export const terminateSuspension = async (userId, suspensionId) => {
             const batch = writeBatch(db);
             ledgerSnap.forEach(ticket => batch.update(ticket.ref, { isStealthAkkumulation: false }));
             await batch.commit();
-            console.log(`Stealth Mode vorzeitig beendet. ${ledgerSnap.size} Straf-Tickets scharfgeschaltet.`);
         }
     }
     
@@ -218,10 +178,9 @@ export const terminateSuspension = async (userId, suspensionId) => {
         terminatedAt: Timestamp.now()
     });
     
-    // Auch das Daily Flag resetten, damit man sofort wieder teilnehmen kann
     await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), { 
         activeSuspension: false,
         suspensionReason: null,
-        stealthModeActive: false // NEU: Stealth beim Abbruch resetten
+        stealthModeActive: false 
     });
 };
