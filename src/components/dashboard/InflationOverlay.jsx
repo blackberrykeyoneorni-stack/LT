@@ -3,12 +3,16 @@ import { Dialog, DialogTitle, DialogContent, DialogActions, Box, Typography, But
 import { PALETTE, DESIGN_TOKENS } from '../../theme/obsidianDesign';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 
-export default function InflationOverlay({ open, noticeData, onAcknowledge }) {
-    if (!noticeData) return null;
+export default function InflationOverlay({ open, data, noticeData, onClose, onAcknowledge }) {
+    // Weiche: Akzeptiert sowohl alte als auch neue Prop-Namen, um Bugs beim Rendering zu verhindern.
+    const actualData = data || noticeData;
+    const handleAck = onClose || onAcknowledge;
+
+    if (!actualData) return null;
 
     return (
         <Dialog 
-            open={open} 
+            open={open !== false} 
             disableEscapeKeyDown 
             PaperProps={{ 
                 sx: { 
@@ -28,19 +32,19 @@ export default function InflationOverlay({ open, noticeData, onAcknowledge }) {
                     </Typography>
                     
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mb: 2 }}>
-                        {noticeData.deductedNc > 0 && (
+                        {actualData.deductedNc > 0 && (
                             <Box sx={{ p: 2, bgcolor: 'rgba(255,0,0,0.1)', border: `1px solid ${PALETTE.accents.red}`, borderRadius: 2 }}>
                                 <Typography variant="caption" color="text.secondary" display="block">Nylon Credits (NC)</Typography>
                                 <Typography variant="h4" sx={{ color: PALETTE.accents.red, fontWeight: 'bold' }}>
-                                    -{noticeData.deductedNc}
+                                    -{actualData.deductedNc}
                                 </Typography>
                             </Box>
                         )}
-                        {noticeData.deductedLc > 0 && (
+                        {actualData.deductedLc > 0 && (
                             <Box sx={{ p: 2, bgcolor: 'rgba(255,0,0,0.1)', border: `1px solid ${PALETTE.accents.red}`, borderRadius: 2 }}>
                                 <Typography variant="caption" color="text.secondary" display="block">Lingerie Credits (LC)</Typography>
                                 <Typography variant="h4" sx={{ color: PALETTE.accents.red, fontWeight: 'bold' }}>
-                                    -{noticeData.deductedLc}
+                                    -{actualData.deductedLc}
                                 </Typography>
                             </Box>
                         )}
@@ -55,7 +59,7 @@ export default function InflationOverlay({ open, noticeData, onAcknowledge }) {
                 <Button 
                     fullWidth 
                     variant="contained" 
-                    onClick={onAcknowledge} 
+                    onClick={handleAck} 
                     sx={{ bgcolor: PALETTE.accents.red, color: '#000', fontWeight: 'bold', '&:hover': { bgcolor: '#fff' } }}
                 >
                     TRIBUT AKZEPTIEREN

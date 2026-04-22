@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
+import { runTimeBankAuditor } from '../services/TimeBankService';
 
 export function useConditioningGuard() {
     const { currentUser } = useAuth();
@@ -40,6 +41,9 @@ export function useConditioningGuard() {
     const checkPhase = useCallback(async () => {
         if (!currentUser) return;
         try {
+            // NEU: Triggere den TimeBank-Auditor unauffällig im Hintergrund
+            runTimeBankAuditor(currentUser.uid).catch(err => console.error("Auditor Background Error:", err));
+
             const phase = calculatePhase();
             setCurrentPhase(phase);
 

@@ -1,6 +1,8 @@
 import { useCallback, useMemo } from 'react';
 import { useItems } from '../../contexts/ItemContext';
 import useUIStore from '../../store/uiStore';
+import { useAuth } from '../../contexts/AuthContext';
+import { clearInflationNotice } from '../../services/TimeBankService';
 
 /**
  * useDashboardActions
@@ -11,6 +13,7 @@ export const useDashboardActions = () => {
   const { items, updateItem } = useItems();
   const showToast = useUIStore(s => s.showToast);
   const setLaundryOpen = useUIStore(s => s.setLaundryOpen);
+  const { currentUser } = useAuth();
 
   // Filtert die Items für den Wäschekorb
   const washingItems = useMemo(() => 
@@ -43,9 +46,22 @@ export const useDashboardActions = () => {
     }
   }, [washingItems, updateItem, showToast, setLaundryOpen]);
 
+  // Tribut bestätigen und Notification löschen
+  const handleAcknowledgeInflation = useCallback(async () => {
+    if (!currentUser) return;
+    try {
+        await clearInflationNotice(currentUser.uid);
+        showToast("Tribut akzeptiert. Salden aktualisiert.", "success");
+    } catch (e) {
+        console.error("Fehler beim Bestätigen des Tributs:", e);
+        showToast("Netzwerkfehler beim Quittieren.", "error");
+    }
+  }, [currentUser, showToast]);
+
   return {
     washingItems,
     handleWashItem,
-    handleWashAll
+    handleWashAll,
+    handleAcknowledgeInflation
   };
 };

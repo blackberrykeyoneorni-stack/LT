@@ -1,5 +1,5 @@
 import { db } from '../firebase';
-import { doc, getDoc, updateDoc, setDoc, increment, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, setDoc, increment, serverTimestamp, collection, query, where, getDocs, deleteField } from 'firebase/firestore';
 
 // KONFIGURATION DER SCHULDENFALLE
 const DEBT_CONFIG = {
@@ -399,5 +399,21 @@ export const runTimeBankAuditor = async (userId) => {
         await applyWeeklyInflation(userId);
     } catch (e) {
         console.error("Fehler im TimeBank Auditor:", e);
+    }
+};
+
+/**
+ * Löscht die Tribut-Notiz aus der Datenbank mittels deleteField().
+ */
+export const clearInflationNotice = async (userId) => {
+    try {
+        const docRef = doc(db, `users/${userId}/status/timeBank`);
+        await updateDoc(docRef, {
+            pendingInflationNotice: deleteField()
+        });
+        console.log("TimeBank: Inflation notice cleared by user.");
+    } catch (e) {
+        console.error("Fehler beim Löschen der Tribut-Notiz:", e);
+        throw e;
     }
 };
