@@ -1,6 +1,12 @@
-import React from 'react';
+// src/pages/ItemDetail.jsx
+import React, { useState, useEffect } from 'react';
 import { Box, Container, CircularProgress, Paper, Button } from '@mui/material';
 import { DESIGN_TOKENS } from '../theme/obsidianDesign';
+
+// Contexts & Services
+import { useAuth } from '../contexts/AuthContext';
+import useUIStore from '../store/uiStore';
+import { getUniformityStatus } from '../services/UniformityService';
 
 // LOGIC HOOK
 import { useItemDetailLogic } from '../hooks/useItemDetailLogic';
@@ -15,6 +21,9 @@ import ItemHistory from '../components/item-detail/ItemHistory';
 import ArchiveDialog from '../components/item-detail/ArchiveDialog';
 
 export default function ItemDetail() {
+    const { currentUser } = useAuth();
+    const showToast = useUIStore(s => s.showToast);
+    
     const { 
         item, loading, isEditing, isBusy, recoveryInfo, 
         formData, dropdowns, stats, historyEvents, archiveDialog,
@@ -22,6 +31,23 @@ export default function ItemDetail() {
         setIsEditing, setFormData, setArchiveDialog,
         actions 
     } = useItemDetailLogic();
+
+    // --- ERZWUNGENE MONOTONIE STATE ---
+    const [uniformity, setUniformity] = useState({ active: false });
+
+    useEffect(() => {
+        if (currentUser) {
+            getUniformityStatus(currentUser.uid).then(status => setUniformity(status));
+        }
+    }, [currentUser]);
+
+    const handleStartSession = (...args) => {
+        if (uniformity.active && !uniformity.itemIds?.includes(item.id)) {
+            showToast("SYSTEM SPERRE: Uniform-Protokoll aktiv.", "error");
+            return;
+        }
+        actions.startSession(...args);
+    };
 
     if (loading) return <Box sx={{ display: 'flex', justifyContent: 'center', mt: 10 }}><CircularProgress color="primary" /></Box>;
     if (!item) return null;
@@ -49,7 +75,7 @@ export default function ItemDetail() {
                         <ActionPanel 
                             isBusy={isBusy} 
                             recoveryInfo={recoveryInfo} 
-                            onStartSession={actions.startSession} 
+                            onStartSession={handleStartSession} 
                         />
                     )}
 

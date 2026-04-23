@@ -10,6 +10,8 @@ import { formatDuration } from '../utils/formatters';
 
 // COMPONENTS
 import AddItemDrawer from '../components/inventory/AddItemDrawer'; 
+import { getUniformityStatus } from '../services/UniformityService';
+import useUIStore from '../store/uiStore';
 
 // FRAMER MOTION
 import { motion } from 'framer-motion';
@@ -31,6 +33,7 @@ import Inventory2Icon from '@mui/icons-material/Inventory2';
 import CheckroomIcon from '@mui/icons-material/Checkroom'; 
 import FingerprintIcon from '@mui/icons-material/Fingerprint';
 import LocalLaundryServiceIcon from '@mui/icons-material/LocalLaundryService'; 
+import LockIcon from '@mui/icons-material/Lock';
 
 // DESIGN SYSTEM
 import { DESIGN_TOKENS, PALETTE, MOTION } from '../theme/obsidianDesign';
@@ -55,6 +58,7 @@ export default function Inventory() {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
   const locationRouter = useLocation();
+  const showToast = useUIStore(s => s.showToast);
 
   const { startGlobalScan, isScanning: nfcScanning } = useNFCGlobal();
 
@@ -67,6 +71,7 @@ export default function Inventory() {
   // UI States
   const [filterOpen, setFilterOpen] = useState(false);
   const [addItemOpen, setAddItemOpen] = useState(false); 
+  const [uniformity, setUniformity] = useState({ active: false });
 
   // --- PERSISTENT FILTER VALUES ---
   const [filterStatus, setFilterStatus] = usePersistentState('inv_filterStatus', 'active');
@@ -109,6 +114,17 @@ export default function Inventory() {
       }
     };
     loadSettings();
+  }, [currentUser]);
+
+  // UNIFORMITY STATUS LADEN
+  useEffect(() => {
+    if (currentUser) {
+      getUniformityStatus(currentUser.uid).then(status => {
+        if (status.active && status.expiresAt > new Date()) {
+          setUniformity(status);
+        }
+      });
+    }
   }, [currentUser]);
 
   // ROUTER STATE LISTENER
@@ -216,6 +232,14 @@ export default function Inventory() {
     setFilteredItems(res);
   }, [items, filterCategory, filterSubCategory, filterBrand, filterMaterial, filterMinRating, filterStatus, filterLocation, sortBy, scannedLocation, restingHours]); 
 
+  const handleItemClick = (id) => {
+    if (uniformity.active && !uniformity.itemIds?.includes(id)) {
+      showToast("SYSTEM SPERRE: Uniform-Protokoll aktiv.", "error");
+      return;
+    }
+    navigate(`/item/${id}`);
+  };
+
   const getDisplayName = (item) => item.name || `${item.brand} ${item.model}`;
   const getImage = (item) => {
     if (item.imageUrl) return item.imageUrl;
@@ -262,6 +286,7 @@ export default function Inventory() {
             const imgUrl = getImage(item);
             const isWashing = item.status === 'washing';
             const isArchived = item.status === 'archived';
+            const isLockedByUniformity = uniformity.active && !uniformity.itemIds?.includes(item.id);
 
             let borderColor = 'rgba(255, 0, 127, 0.3)'; 
             let imgFilter = 'none';
@@ -290,9 +315,22 @@ export default function Inventory() {
                     <Card sx={{ 
                         height: '100%', display: 'flex', flexDirection: 'column',
                         ...DESIGN_TOKENS.glassCard, borderColor: borderColor,
+                        filter: isLockedByUniformity ? 'grayscale(1) blur(1px)' : 'none',
+                        opacity: isLockedByUniformity ? 0.6 : 1,
+                        '&:hover': { transform: isLockedByUniformity ? 'none' : 'translateY(-4px)', boxShadow: isLockedByUniformity ? 'none' : `0 8px 20px ${PALETTE.primary.main}40` }
                     }}>
-                        <CardActionArea sx={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'stretch' }} onClick={() => navigate('/item/' + item.id)}>
+                        <CardActionArea sx={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'stretch' }} onClick={() => handleItemClick(item.id)}>
                         <Box sx={{ position: 'relative', pt: '100%', bgcolor: 'rgba(0,0,0,0.4)', overflow: 'hidden' }}>
+                            {isLockedByUniformity && (
+                                <Box sx={{ 
+                                  position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, 
+                                  zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  bgcolor: 'rgba(0,0,0,0.5)'
+                                }}>
+                                  <LockIcon sx={{ color: PALETTE.accents.red, fontSize: '2.5rem' }} />
+                                </Box>
+                            )}
+
                             {imgUrl ? (
                                 <CardMedia component="img" image={imgUrl} alt={getDisplayName(item)} sx={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', objectFit: 'cover', filter: imgFilter }} />
                             ) : (<CheckroomIcon sx={{ position: 'absolute', top: '35%', left: '35%', fontSize: 40, opacity: 0.3, color: PALETTE.primary.main }} />)}
@@ -313,12 +351,13 @@ export default function Inventory() {
                                         border: `1px solid ${idChipColor}40`,
                                         height: '22px',       
                                         fontSize: '0.7rem',  
-                                        '& .MuiChip-icon': { marginLeft: '4px' } 
+                                        '& .MuiChip-icon': { marginLeft: '4px' },
+                                        zIndex: 5 
                                     }} 
                                 />
                             )}
 
-                            {isWashing && <LocalLaundryServiceIcon sx={{ position: 'absolute', bottom: 8, right: 8, color: PALETTE.accents.blue, filter: `drop-shadow(0 0 6px ${PALETTE.accents.blue})` }} />}
+                            {isWashing && <LocalLaundryServiceIcon sx={{ position: 'absolute', bottom: 8, right: 8, color: PALETTE.accents.blue, filter: `drop-shadow(0 0 6px ${PALETTE.accents.blue})`, zIndex: 5 }} />}
                             
                         </Box>
                         <CardContent sx={{ flexGrow: 1, p: 1.5 }}>
@@ -406,9 +445,11 @@ export default function Inventory() {
         </Box>
       </Drawer>
 
-      <Fab sx={{ position: 'fixed', bottom: 90, right: 20, bgcolor: PALETTE.primary.main, color: '#000', boxShadow: `0 0 20px ${PALETTE.primary.main}80`, '&:hover': {bgcolor: PALETTE.primary.dark} }} onClick={() => setAddItemOpen(true)}>
-        <AddIcon />
-      </Fab>
+      {!uniformity.active && (
+          <Fab sx={{ position: 'fixed', bottom: 90, right: 20, bgcolor: PALETTE.primary.main, color: '#000', boxShadow: `0 0 20px ${PALETTE.primary.main}80`, '&:hover': {bgcolor: PALETTE.primary.dark} }} onClick={() => setAddItemOpen(true)}>
+            <AddIcon />
+          </Fab>
+      )}
     </Container>
   );
 }

@@ -454,6 +454,31 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
                 message: `Not-Abbruch der Tilgung! 50% Strafaufschlag auf bestehende Schulden.`
             });
         }
+
+        // --- FORCED UNIFORMITY TRIGGER (50% CHANCE) ---
+        if (Math.random() < 0.50) {
+            const expiresAt = new Date(Date.now() + 96 * 60 * 60 * 1000); // Exakt 96 Stunden
+            const uniformityRef = doc(db, `users/${userId}/status/uniformity`);
+            const snapshotIds = currentItemIds.length > 0 ? currentItemIds : allSessionItemIds;
+            
+            batch.set(uniformityRef, {
+                active: true,
+                itemIds: snapshotIds, // Snapshot der beim Abbruch getragenen Items
+                triggeredAt: serverTimestamp(),
+                expiresAt: expiresAt
+            }, { merge: true });
+
+            updateData.finalNote = 'NOT-ABBRUCH (50% Strafe + ERZWUNGENE MONOTONIE 96h)';
+
+            for (const id of snapshotIds) {
+                await addItemHistoryEntry(userId, id, {
+                    type: 'uniformity_triggered',
+                    message: `Erzwungene Monotonie durch Not-Abbruch getriggert! Item ist für 96 Stunden als Straf-Uniform verriegelt.`
+                });
+            }
+        }
+        // ----------------------------------------------------
+
     } else {
         const sessionForCredit = { ...sessionData, startTime, endTime };
         const earnedResult = await calculateEarnedCredits(userId, sessionForCredit);

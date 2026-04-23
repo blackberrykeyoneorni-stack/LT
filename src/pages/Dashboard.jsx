@@ -19,6 +19,7 @@ import { loadMonthlyBudget } from '../services/BudgetService';
 import { stopSession as stopSessionService, startSession as startSessionService } from '../services/SessionService';
 import { isImmunityActive } from '../services/OfferService';
 import { runTimeBankAuditor, spendCredits } from '../services/TimeBankService'; 
+import { getUniformityStatus } from '../services/UniformityService';
 
 // Hooks
 import useSessionProgress from '../hooks/dashboard/useSessionProgress';
@@ -36,6 +37,7 @@ import ActionButtons from '../components/dashboard/ActionButtons';
 import ActiveSessionsList from '../components/dashboard/ActiveSessionsList';
 import InfoTiles from '../components/dashboard/InfoTiles';
 import DashboardDialogManager from '../components/dashboard/DashboardDialogManager';
+import UniformityReleaseDialog from '../components/dialogs/ReleaseProtocolDialog'; // Beispiel-Pfad für den Release Dialog
 
 import { DESIGN_TOKENS, PALETTE, MOTION } from '../theme/obsidianDesign';
 import { 
@@ -44,7 +46,7 @@ import {
 import { Icons } from '../theme/appIcons';
 import LocalLaundryServiceIcon from '@mui/icons-material/LocalLaundryService';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
-import LockIcon from '@mui/icons-material/Lock'; 
+import LockIcon from '@mui/icons-material/Lock';
 import ShieldIcon from '@mui/icons-material/Shield'; 
 import WaterDropIcon from '@mui/icons-material/WaterDrop';
 
@@ -53,12 +55,12 @@ export default function Dashboard() {
   const { items, loading: itemsLoading } = useItems();
   const navigate = useNavigate();
   const { startBindingScan, isScanning: isNfcScanning } = useNFCGlobal();
-  
+
   // Logic Hooks
   const { washingItems, handleWashItem, handleWashAll } = useDashboardActions();
   const { activeSessions, progress, loading: sessionsLoading, dailyTargetHours, registerRelease: hookRegisterRelease } = useSessionProgress(currentUser, items);
-  const kpis = useKPIs(items, activeSessions); 
-  const { femIndex, femIndexLoading, indexDetails, phase, subScores } = useFemIndex(kpis); 
+  const kpis = useKPIs(items, activeSessions);
+  const { femIndex, femIndexLoading, indexDetails, phase, subScores } = useFemIndex(kpis);
 
   // Store Connections (Zentraler Controller)
   const { 
@@ -76,7 +78,7 @@ export default function Dashboard() {
   // Local States
   const [auditDue, setAuditDue] = useState(false);
   const [punishmentStatus, setPunishmentStatus] = useState({ active: false, deferred: false, reason: null, durationMinutes: 0 });
-  const [pendingPunishments, setPendingPunishments] = useState([]); 
+  const [pendingPunishments, setPendingPunishments] = useState([]);
   const [monthlyBudget, setMonthlyBudget] = useState(0);
   const [currentSpent, setCurrentSpent] = useState(0); 
   const [maxInstructionItems, setMaxInstructionItems] = useState(1);
@@ -85,6 +87,9 @@ export default function Dashboard() {
   
   const [timeBankData, setTimeBankData] = useState({ nc: 0, lc: 0 });
   const [weeklyReport, setWeeklyReport] = useState(null);
+  
+  // --- ERZWUNGENE MONOTONIE STATE ---
+  const [uniformity, setUniformity] = useState({ active: false });
 
   // Derived State
   const isPunishmentRunning = (activeSessions || []).some(s => s.type === 'punishment');
@@ -152,7 +157,7 @@ export default function Dashboard() {
           }); 
       }, 20); 
   }, [handleAcceptOath, setIsHoldingOath, setOathProgress]);
-  
+
   const cancelOathPress = useCallback(() => { 
       clearInterval(oathTimerRef.current); 
       setIsHoldingOath(false); 
@@ -201,7 +206,7 @@ export default function Dashboard() {
 
           const instrRef = doc(db, `users/${currentUser.uid}/status/dailyInstruction`);
           const instrSnap = await getDoc(instrRef);
-          
+
           if (instrSnap.exists()) {
               const data = instrSnap.data();
               const currentDiscount = data.discountMinutes || 0;
@@ -210,8 +215,8 @@ export default function Dashboard() {
               await updateDoc(instrRef, { discountMinutes: newDiscount });
 
               let successMessage = `Freikauf autorisiert (-${minutesToBuy} Min).`;
-              if (paymentType === 'both') successMessage = `Freikauf autorisiert (-${minutesToBuy} Min). System erzwang kombinierte LC & NC Zahlung.`;
-              else if (paymentType === 'nylon') successMessage = `Freikauf autorisiert (-${minutesToBuy} Min). System erzwang NC Zahlung.`;
+              if (paymentType === 'both') successMessage = `Freikauf autorisiert (-${minutesToBuy} Min).\nSystem erzwang kombinierte LC & NC Zahlung.`;
+              else if (paymentType === 'nylon') successMessage = `Freikauf autorisiert (-${minutesToBuy} Min).\nSystem erzwang NC Zahlung.`;
               else if (paymentType === 'lingerie') successMessage = `Freikauf autorisiert (-${minutesToBuy} Min). System erzwang LC Zahlung.`;
 
               showToast(successMessage, "success");
@@ -229,7 +234,7 @@ export default function Dashboard() {
             const [
                 _, pSnap, statusData, auditResult, budgetResult, bSnap, suspResult, immuneResult
             ] = await Promise.all([
-                runTimeBankAuditor(currentUser.uid),
+              runTimeBankAuditor(currentUser.uid),
                 getDoc(doc(db, `users/${currentUser.uid}/settings/preferences`)),
                 getActivePunishment(currentUser.uid),
                 isAuditDue(currentUser.uid),
@@ -276,11 +281,18 @@ export default function Dashboard() {
         unsubProtocol();
         unsubLedger();
     };
-  }, [currentUser, setImmunityActive]); 
+  }, [currentUser, setImmunityActive]);
+
+  // UNIFORMITY STATUS LADEN (Laufend aktualisiert durch Session-Wechsel)
+  useEffect(() => {
+    if (currentUser) {
+        getUniformityStatus(currentUser.uid).then(status => setUniformity(status));
+    }
+  }, [currentUser, activeSessions]);
 
   const handlePunishmentScanTrigger = async (ticketId, instrumentType, instrumentItem, isManual = false) => { 
       const executeAndClose = async () => {
-          useUIStore.getState().setPunishmentScanOpen(false); 
+          useUIStore.getState().setPunishmentScanOpen(false);
           const result = await executePunishmentTicket(currentUser.uid, ticketId, instrumentType, instrumentItem.id);
           
           if (result.success) {
@@ -303,7 +315,7 @@ export default function Dashboard() {
               } else { 
                   useUIStore.getState().showToast("Falscher Tag oder falsches Instrument!", "error"); 
               } 
-          }); 
+          });
       }
   };
 
@@ -311,10 +323,9 @@ export default function Dashboard() {
       if (tzdActive) { showToast("STOPPEN VERWEIGERT.", "error"); return; }
       
       try { 
-          await stopSessionService(currentUser.uid, session.id, { feelings: [], note: '', ...options }); 
-          
+          await stopSessionService(currentUser.uid, session.id, { feelings: [], note: '', ...options });
           if(session.type === 'punishment') { 
-              await clearPunishment(currentUser.uid); 
+              await clearPunishment(currentUser.uid);
               setPunishmentStatus({ active: false, deferred: false, reason: null, durationMinutes: 0 });
           } 
           
@@ -324,12 +335,12 @@ export default function Dashboard() {
               showToast("Session beendet.", "success");
           }
       } catch(e){ 
-          showToast("Fehler beim Beenden", "error"); 
+          showToast("Fehler beim Beenden", "error");
       } 
   };
 
   const handleStartAudit = async () => { 
-      const auditItems = await initializeAudit(currentUser.uid, items); 
+      const auditItems = await initializeAudit(currentUser.uid, items);
       useUIStore.getState().setPendingAuditItems(auditItems); 
       useUIStore.getState().setCurrentAuditIndex(0); 
       useUIStore.getState().setAuditOpen(true); 
@@ -340,11 +351,11 @@ export default function Dashboard() {
       await confirmAuditItem(currentUser.uid, pendingAuditItems[currentAuditIndex].id, currentCondition, true); 
       showToast(`${pendingAuditItems[currentAuditIndex].name} geprüft`, "success"); 
       if(currentAuditIndex < pendingAuditItems.length - 1) {
-          setCurrentAuditIndex(prev => prev + 1); 
+          setCurrentAuditIndex(prev => prev + 1);
       } else { 
           setAuditOpen(false); 
           setAuditDue(false); 
-          showToast("Audit abgeschlossen", "success"); 
+          showToast("Audit abgeschlossen", "success");
       } 
   };
 
@@ -352,12 +363,12 @@ export default function Dashboard() {
       useUIStore.getState().setReleaseStep('confirm'); 
       useUIStore.getState().setReleaseTimer(600); 
       useUIStore.getState().setReleaseIntensity(3); 
-      useUIStore.getState().setReleaseDialogOpen(true); 
+      useUIStore.getState().setReleaseDialogOpen(true);
   };
 
   const handleStartReleaseTimer = () => { 
       useUIStore.getState().setReleaseStep('timer'); 
-      if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current); 
+      if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current);
       releaseTimerInterval.current = setInterval(() => { 
           useUIStore.getState().setReleaseTimer(prev => { 
               if(prev <= 1) { 
@@ -367,7 +378,7 @@ export default function Dashboard() {
               } 
               return prev - 1; 
           }); 
-      }, 1000); 
+      }, 1000);
   };
 
   const handleSkipTimer = () => { 
@@ -377,11 +388,11 @@ export default function Dashboard() {
 
   const handleReleaseDecision = async (outcome) => { 
       try { 
-          await hookRegisterRelease(outcome, useUIStore.getState().releaseIntensity); 
+          await hookRegisterRelease(outcome, useUIStore.getState().releaseIntensity);
           if (outcome === 'maintained') useUIStore.getState().showToast("Disziplin bewiesen.", "success"); 
-          else useUIStore.getState().showToast("Sessions beendet.", "warning"); 
+          else useUIStore.getState().showToast("Sessions beendet.", "warning");
       } catch (e) { 
-          useUIStore.getState().showToast("Fehler beim Release", "error"); 
+          useUIStore.getState().showToast("Fehler beim Release", "error");
       } finally { 
           useUIStore.getState().setReleaseDialogOpen(false); 
           if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current); 
@@ -425,6 +436,8 @@ export default function Dashboard() {
       );
   }
 
+  const isLockedDown = inDebt || uniformity.active;
+
   return (
     <Box sx={DESIGN_TOKENS.bottomNavSpacer}>
       <Container maxWidth="md" sx={{ pt: 2, pb: 4 }}>
@@ -441,14 +454,27 @@ export default function Dashboard() {
                 )}
             </Box>
 
+            {/* UNIFORMITY BLOCK */}
+            {uniformity.active && (
+                <Paper sx={{ p: 3, mb: 3, bgcolor: 'rgba(211, 47, 47, 0.1)', border: `1px solid ${PALETTE.accents.red}` }}>
+                    <Typography variant="subtitle1" color="error" sx={{ fontWeight: 'bold', mb: 1, display: 'flex', alignItems: 'center' }}>
+                        <LockIcon sx={{ mr: 1 }}/> ERZWUNGENE MONOTONIE AKTIV
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                        Alle regulären Funktionen sind gesperrt. Du bist für 96 Stunden in deine Straf-Uniform verriegelt.
+                    </Typography>
+                </Paper>
+            )}
+
             {/* SCHULDENTILGUNG BLOCK */}
-            {inDebt && !hasActiveDebtSession && (
+            {inDebt && !hasActiveDebtSession && !uniformity.active && (
                 <Paper sx={{ p: 3, mb: 3, bgcolor: 'rgba(211, 47, 47, 0.1)', border: `1px solid ${PALETTE.accents.red}` }}>
                     <Typography variant="subtitle1" color="error" sx={{ fontWeight: 'bold', mb: 1, display: 'flex', alignItems: 'center' }}>
                         <LockIcon sx={{ mr: 1 }}/> SCHULDENTILGUNG ERFORDERLICH
                     </Typography>
                     <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                        Dein Konto ist im Minus (NC: {timeBankData.nc}, LC: {timeBankData.lc}). Alle freiwilligen Sessions sind systemseitig gesperrt, bis die Tilgung abgeschlossen ist.
+                        Dein Konto ist im Minus (NC: {timeBankData.nc}, LC: {timeBankData.lc}).
+                        Alle freiwilligen Sessions sind systemseitig gesperrt, bis die Tilgung abgeschlossen ist.
                     </Typography>
                     <Button 
                         variant="contained" 
@@ -523,7 +549,8 @@ export default function Dashboard() {
                 subScores={subScores}   
             />
 
-            <Box sx={{ opacity: inDebt ? 0.4 : 1, pointerEvents: inDebt ? 'none' : 'auto' }}>
+            {/* Hier greift der Lockdown für die ActionButtons */}
+            <Box sx={{ opacity: isLockedDown ? 0.4 : 1, pointerEvents: isLockedDown ? 'none' : 'auto' }}>
                 <ActionButtons 
                     punishmentStatus={punishmentStatus} 
                     punishmentRunning={isPunishmentRunning}
@@ -540,7 +567,7 @@ export default function Dashboard() {
                     tzdActive={tzdActive}
                     onOpenInstruction={() => useUIStore.getState().setInstructionOpen(true)}
                     onStartPunishment={() => {
-                        useUIStore.getState().setPunishmentScanMode('start'); 
+                        useUIStore.getState().setPunishmentScanMode('start');
                         useUIStore.getState().setPunishmentScanOpen(true); 
                     }}
                     onStartAudit={handleStartAudit}
@@ -653,6 +680,13 @@ export default function Dashboard() {
           handleReleaseDecision={handleReleaseDecision} 
           handleConfirmAuditItem={handleConfirmAuditItem} 
           indexDetails={indexDetails} activeSessions={activeSessions || []} 
+      />
+
+      {/* NEU: Release Dialog wird getriggert, wenn Strafe vorbei ist */}
+      <UniformityReleaseDialog 
+          open={uniformity.active && new Date() >= uniformity.expiresAt} 
+          statusData={uniformity}
+          onReleased={() => setUniformity({ active: false })}
       />
     </Box>
   );

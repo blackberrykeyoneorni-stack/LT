@@ -309,6 +309,48 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
 
         const recentSessionsMap = await getRecentSessionsMap(uid, restingHours + 5);
 
+        // --- NEU: FORCED UNIFORMITY (ERZWUNGENE MONOTONIE) CHECK ---
+        const uniformityRef = doc(db, `users/${uid}/status/uniformity`);
+        const uniformitySnap = await getDoc(uniformityRef);
+        
+        if (uniformitySnap.exists()) {
+            const uniData = uniformitySnap.data();
+            const now = new Date();
+            const expiresAt = uniData.expiresAt?.toDate ? uniData.expiresAt.toDate() : new Date(uniData.expiresAt);
+
+            if (uniData.active && expiresAt > now) {
+                const uniformityItems = items.filter(i => uniData.itemIds && uniData.itemIds.includes(i.id));
+                
+                if (uniformityItems.length > 0) {
+                    const titleNames = uniformityItems.map(i => i.subCategory || i.name || 'Item').join(' & ');
+
+                    const instructionData = {
+                        periodId,
+                        generatedAt: serverTimestamp(),
+                        isAccepted: false,
+                        isPlanned: false,
+                        itemName: `STRAF-UNIFORM: ${titleNames}`,
+                        durationMinutes, 
+                        stealthModeActive: false, 
+                        uniformityLockActive: true,
+                        forcedRelease: { required: false, executed: false, method: null },
+                        transitProtocol: { active: false },
+                        items: uniformityItems.map(i => ({
+                            id: i.id,
+                            name: i.subCategory || i.name || 'Unbenanntes Item',
+                            brand: i.brand || '',
+                            img: i.imageUrl || (i.images && i.images[0]) || null,
+                            subCategory: i.subCategory || ''
+                        }))
+                    };
+
+                    await setDoc(doc(db, `users/${uid}/status/dailyInstruction`), instructionData);
+                    return instructionData;
+                }
+            }
+        }
+        // -----------------------------------------------------------
+
         // --- STEALTH MODUS: KOFFER PRÜFUNG & PRE-BLOCKING ---
         let isStealth = false;
         let activePackedDayIds = [];
