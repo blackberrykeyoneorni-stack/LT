@@ -16,15 +16,15 @@ export default function useTZDAndGamble({
     // --- LOKALE STATES ---
     const [tzdActive, setTzdActive] = useState(false);
     const [tzdStartTime, setTzdStartTime] = useState(null); 
-    const [isCheckingProtocol, setIsCheckingProtocol] = useState(true); 
+    const [isCheckingProtocol, setIsCheckingProtocol] = useState(true);
     
     // NEU: Reines Daten-Objekt statt UI-Store Flag (Entkopplung)
-    const [gambleOffer, setGambleOffer] = useState(null); 
+    const [gambleOffer, setGambleOffer] = useState(null);
     const [hasGambledThisSession, setHasGambledThisSession] = useState(false);
     const [immunityActive, setImmunityActive] = useState(false);
 
     // --- ABGELEITETE STATES ---
-    const isInstructionActive = activeSessions.some(s => s.type === 'instruction');
+    const isInstructionActive = activeSessions.some(s => s.type === 'instruction' && s.instructionReadyTime);
 
     // --- EFFECT: TZD Check + GAMBLE TRIGGER (5-Minuten-Auditor) ---
     useEffect(() => {
@@ -70,12 +70,12 @@ export default function useTZDAndGamble({
                                 setHasGambledThisSession(true);
                             }
                         } else {
-                            setHasGambledThisSession(true); 
+                            setHasGambledThisSession(true);
                         }
                     }
 
                     if (isInstructionActive && !isStealthActive) { 
-                        const triggered = await checkForTZDTrigger(currentUser.uid, activeSessions, items); 
+                        const triggered = await checkForTZDTrigger(currentUser.uid, activeSessions, items);
                         if (triggered) {
                             setTzdActive(true);
                             setTzdStartTime(new Date()); 
@@ -90,7 +90,7 @@ export default function useTZDAndGamble({
         };
 
         if (currentUser && !itemsLoading) { 
-            checkTZD(); 
+            checkTZD();
             interval = setInterval(checkTZD, 300000); 
         }
         return () => clearInterval(interval);
@@ -125,7 +125,6 @@ export default function useTZDAndGamble({
             }
 
             await startTZD(currentUser.uid, currentStake, null, 1440, 'spiel_tzd');
-
             if (showToast) showToast("VERLOREN. 24h Zeitloses Diktat aktiviert.", "error");
             setTzdActive(true);
             setTzdStartTime(new Date());

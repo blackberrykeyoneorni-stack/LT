@@ -472,8 +472,82 @@ export const terminateTZD = async (userId, success = true, customResult = null) 
     }
 };
 
+/**
+ * Dynamic Bailout Protocol
+ * Abzug von 40% des positiven Bestandes (Minimum 400), währungsspezifisch.
+ */
 export const emergencyBailout = async (userId) => {
-    await registerPunishment(userId, "NOT-ABBRUCH: Zeitloses Diktat verweigert", 90);
+    // 1. TZD Status abrufen für Währungs-Symmetrie
+    const status = await getTZDStatus(userId);
+    let chargeNc = false;
+    let chargeLc = false;
+
+    if (status && status.isActive && status.lockedItems && status.lockedItems.length > 0) {
+        status.lockedItems.forEach(item => {
+            const cat = (item.mainCategory || '').toLowerCase();
+            const sub = (item.subCategory || '').toLowerCase();
+            const name = (item.name || '').toLowerCase();
+
+            if (cat.includes('nylon') || sub.includes('nylon') || name.includes('nylon') || 
+                cat.includes('strumpfhose') || sub.includes('strumpfhose') || name.includes('strumpfhose') ||
+                cat.includes('tights') || sub.includes('tights') || name.includes('tights')) {
+                chargeNc = true;
+            }
+            if (cat.includes('dessous') || sub.includes('dessous') || name.includes('dessous') ||
+                cat.includes('lingerie') || sub.includes('lingerie') || name.includes('lingerie') ||
+                cat.includes('höschen') || sub.includes('höschen') || name.includes('höschen') ||
+                cat.includes('panty') || sub.includes('panty') || name.includes('panty') ||
+                cat.includes('bh') || sub.includes('bh') || name.includes('bh') ||
+                cat.includes('bra') || sub.includes('bra') || name.includes('bra')) {
+                chargeLc = true;
+            }
+        });
+    }
+    
+    // Fallback: Wenn Währung nicht exakt bestimmbar, beide belasten (System gewinnt immer)
+    if (!chargeNc && !chargeLc) {
+        chargeNc = true;
+        chargeLc = true;
+    }
+
+    // 2. Bestandsprüfung
+    const tbRef = doc(db, `users/${userId}/status/timeBank`);
+    const tbSnap = await getDoc(tbRef);
+    let ncBalance = 0;
+    let lcBalance = 0;
+    if (tbSnap.exists()) {
+        ncBalance = tbSnap.data().nc || 0;
+        lcBalance = tbSnap.data().lc || 0;
+    }
+
+    // 3. Die Leerung & 4. Der Boden
+    let deductionNc = 0;
+    let deductionLc = 0;
+    const MIN_PENALTY = 400;
+    const RATE = 0.40;
+
+    if (chargeNc) {
+        const positiveNc = Math.max(0, ncBalance);
+        deductionNc = Math.max(MIN_PENALTY, Math.floor(positiveNc * RATE));
+    }
+    if (chargeLc) {
+        const positiveLc = Math.max(0, lcBalance);
+        deductionLc = Math.max(MIN_PENALTY, Math.floor(positiveLc * RATE));
+    }
+
+    // TimeBank Update (Atomar)
+    const tbUpdates = {};
+    if (deductionNc > 0) tbUpdates.nc = increment(-deductionNc);
+    if (deductionLc > 0) tbUpdates.lc = increment(-deductionLc);
+    if (Object.keys(tbUpdates).length > 0) {
+        tbUpdates.lastTransaction = serverTimestamp();
+        await updateDoc(tbRef, tbUpdates);
+    }
+
+    // 5. Das Ledger aktualisieren
+    const punishmentMsg = `NOT-ABBRUCH TZD: Bailout erkauft. Währung dezimiert (NC: -${deductionNc}, LC: -${deductionLc}).`;
+    
+    await registerPunishment(userId, punishmentMsg, 90);
     await terminateTZD(userId, false, 'aborted_emergency');
 };
 

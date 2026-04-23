@@ -83,8 +83,19 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
                 if (singleItem) sessionItems = [singleItem];
             }
 
-            const startTime = session.startTime?.toDate ? session.startTime.toDate() : new Date(session.startTime);
-            const durationMinutes = Math.floor((new Date() - startTime) / 60000);
+            // Gesamtdauer der Session (Relevant für ProgressBars und Locks)
+            // Startet erst, wenn die Anweisung GÄNZLICH erfüllt ist (instructionReadyTime)
+            const fallbackStartTime = session.startTime?.toDate ? session.startTime.toDate() : new Date(session.startTime);
+            let sessionComplianceStartTime = fallbackStartTime;
+            
+            if (session.type === 'instruction' && session.instructionReadyTime) {
+                const readyData = session.instructionReadyTime;
+                sessionComplianceStartTime = readyData.toDate ? readyData.toDate() : new Date(readyData);
+            } else if (session.type === 'preparation') {
+                sessionComplianceStartTime = new Date(); // Dauer bleibt faktisch 0, bis es zur instruction wird
+            }
+
+            const durationMinutes = Math.max(0, Math.floor((new Date() - sessionComplianceStartTime) / 60000));
             
             const minDuration = session.minDuration || 0;
             const isPunishment = session.type === 'punishment';
@@ -119,6 +130,11 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
                 borderColor = PALETTE.accents.gold;
                 chipColor = PALETTE.accents.gold;
                 chipBg = '#000000'; 
+            } else if (session.type === 'preparation') {
+                typeLabel = "UMKLEIDE (STAGING)";
+                borderColor = PALETTE.accents.blue;
+                chipColor = PALETTE.accents.blue;
+                chipBg = '#000000';
             }
 
             return (
@@ -162,51 +178,61 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
                                 )}
                             </Box>
 
-                            {/* ITEM LISTE */}
+                            {/* INDIVIDUELLE ITEM LISTE */}
                             {sessionItems.length > 0 && (
                                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 2 }}>
-                                    {sessionItems.map((item, idx) => (
-                                        <Box 
-                                            key={item.id || idx} 
-                                            onClick={() => onNavigateItem(item.id)}
-                                            sx={{ 
-                                                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                                                p: 1, borderRadius: 1, 
-                                                bgcolor: 'rgba(255,255,255,0.05)',
-                                                cursor: 'pointer',
-                                                transition: 'background 0.2s',
-                                                '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' }
-                                            }}
-                                        >
-                                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                                                <Avatar 
-                                                    src={item.imageUrl || item.image} 
-                                                    variant="rounded" 
-                                                    sx={{ width: 40, height: 40, border: `1px solid ${PALETTE.primary.main}` }}
-                                                />
-                                                <Box>
-                                                    <Typography variant="body2" sx={{ fontWeight: 'bold', color: 'text.primary' }}>
-                                                        {item.name}
-                                                    </Typography>
-                                                    <Typography variant="caption" color="text.secondary">
-                                                        {item.brand}
-                                                    </Typography>
-                                                </Box>
-                                            </Box>
+                                    {sessionItems.map((item, idx) => {
+                                        // Individuelle Zeit aus dem Ledger holen
+                                        let itemStartTime = fallbackStartTime;
+                                        if (session.itemLedger && session.itemLedger[item.id] && session.itemLedger[item.id].joinedAt) {
+                                            const joinedData = session.itemLedger[item.id].joinedAt;
+                                            itemStartTime = joinedData.toDate ? joinedData.toDate() : new Date(joinedData);
+                                        }
+                                        const itemDurationMinutes = Math.max(0, Math.floor((new Date() - itemStartTime) / 60000));
 
-                                            <Chip 
-                                                label={formatDuration(durationMinutes)} 
-                                                size="small" 
-                                                variant="outlined"
+                                        return (
+                                            <Box 
+                                                key={item.id || idx} 
+                                                onClick={() => onNavigateItem(item.id)}
                                                 sx={{ 
-                                                    height: '20px', 
-                                                    fontSize: '0.7rem', 
-                                                    borderColor: 'rgba(255,255,255,0.2)', 
-                                                    color: 'text.secondary' 
+                                                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                                    p: 1, borderRadius: 1, 
+                                                    bgcolor: 'rgba(255,255,255,0.05)',
+                                                    cursor: 'pointer',
+                                                    transition: 'background 0.2s',
+                                                    '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' }
                                                 }}
-                                            />
-                                        </Box>
-                                    ))}
+                                            >
+                                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                                                    <Avatar 
+                                                        src={item.imageUrl || item.image} 
+                                                        variant="rounded" 
+                                                        sx={{ width: 40, height: 40, border: `1px solid ${PALETTE.primary.main}` }}
+                                                    />
+                                                    <Box>
+                                                        <Typography variant="body2" sx={{ fontWeight: 'bold', color: 'text.primary' }}>
+                                                            {item.name}
+                                                        </Typography>
+                                                        <Typography variant="caption" color="text.secondary">
+                                                            {item.brand}
+                                                        </Typography>
+                                                    </Box>
+                                                </Box>
+
+                                                <Chip 
+                                                    label={formatDuration(itemDurationMinutes)} 
+                                                    size="small" 
+                                                    variant="outlined"
+                                                    sx={{ 
+                                                        height: '20px', 
+                                                        fontSize: '0.7rem', 
+                                                        borderColor: 'rgba(255,255,255,0.2)', 
+                                                        color: 'text.secondary' 
+                                                    }}
+                                                />
+                                            </Box>
+                                        );
+                                    })}
                                 </Box>
                             )}
 
@@ -230,7 +256,17 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
 
                             {/* ACTIONS */}
                             <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
-                                {isPunishment ? (
+                                {session.type === 'preparation' ? (
+                                    <Button 
+                                        variant="outlined" 
+                                        size="small"
+                                        fullWidth
+                                        disabled
+                                        sx={{ borderColor: 'rgba(255,255,255,0.1)', color: 'text.disabled' }}
+                                    >
+                                        VERIFIKATION AUSSTEHEND
+                                    </Button>
+                                ) : isPunishment ? (
                                     <Button 
                                         variant="contained"
                                         size="small"
