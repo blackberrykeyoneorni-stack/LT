@@ -178,6 +178,12 @@ export const calculateEarnedCredits = async (userId, session) => {
         const target = Number(session.targetDurationMinutes) || 0;
         if (target > 0 && durationMinutes > target) {
             eligibleMinutes = durationMinutes - target;
+            
+            // THERMAL YIELD BONUS
+            if (session.thermalYieldActive && session.thermalYieldMultiplier) {
+                eligibleMinutes = eligibleMinutes * session.thermalYieldMultiplier;
+                console.log(`TimeBank: Thermal Yield applied. Overtime multiplied by ${session.thermalYieldMultiplier}`);
+            }
         }
     }
 
@@ -415,5 +421,55 @@ export const clearInflationNotice = async (userId) => {
     } catch (e) {
         console.error("Fehler beim Löschen der Tribut-Notiz:", e);
         throw e;
+    }
+};
+
+/**
+ * Wendet den Thermal Bleed Bonus an (Injektion, Schuldenerlass, Amnestie)
+ */
+export const applyThermalBonus = async (userId, bonusDetails) => {
+    try {
+        const docRef = doc(db, `users/${userId}/status/timeBank`);
+        const docSnap = await getDoc(docRef);
+        if (!docSnap.exists()) return null;
+
+        const data = docSnap.data();
+        
+        // 1. Zinsen einfrieren, um Rechnungsfehler zu vermeiden
+        const interestPayload = await _applyPendingInterest(userId, data);
+        const updates = { ...interestPayload };
+        
+        let currentNc = interestPayload.nc !== undefined ? interestPayload.nc : data.nc;
+        let currentLc = interestPayload.lc !== undefined ? interestPayload.lc : data.lc;
+
+        // 2. Bonus anwenden
+        if (bonusDetails.type === 'dividend') {
+            const amount = bonusDetails.amount;
+            updates.nc = Math.min(currentNc + amount, DEBT_CONFIG.MAX_CREDIT_MINUTES);
+            updates.lc = Math.min(currentLc + amount, DEBT_CONFIG.MAX_CREDIT_MINUTES);
+        } 
+        else if (bonusDetails.type === 'debt_relief') {
+            if (currentNc < 0) {
+                // Multiplikator 0.85 = 15% Rabatt in Richtung 0
+                updates.nc = Math.floor(currentNc * 0.85); 
+            }
+            if (currentLc < 0) {
+                updates.lc = Math.floor(currentLc * 0.85);
+            }
+        }
+        else if (bonusDetails.type === 'amnesty') {
+            updates.tzdAmnestyUntil = new Date(Date.now() + 18 * 60 * 60 * 1000); 
+        }
+
+        // 3. Atomares Update inkl. Reset des Zins-Ankers
+        updates.lastTransaction = serverTimestamp();
+        updates.lastInterestDate = serverTimestamp();
+        
+        await updateDoc(docRef, updates);
+        console.log(`TimeBank: Thermal Bonus applied: ${bonusDetails.type}`);
+        return true;
+    } catch (e) {
+        console.error("Fehler beim Anwenden des Thermal Bonus:", e);
+        return false;
     }
 };

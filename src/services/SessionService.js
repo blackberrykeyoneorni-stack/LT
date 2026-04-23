@@ -1,7 +1,7 @@
 import { db } from '../firebase';
 import { collection, doc, writeBatch, serverTimestamp, getDoc, setDoc, increment, query, where, getDocs } from 'firebase/firestore';
 import { updateWearStats, addItemHistoryEntry, setItemStatus } from './ItemService';
-import { addCredits, getTimeBankBalance, calculateEarnedCredits } from './TimeBankService';
+import { addCredits, getTimeBankBalance, calculateEarnedCredits, applyThermalBonus } from './TimeBankService';
 import { registerPunishment } from './PunishmentService';
 
 export const startSession = async (userId, sessionData) => {
@@ -129,21 +129,68 @@ export const startSession = async (userId, sessionData) => {
                 instructionReadyTime = serverTimestamp();
                 finalType = 'instruction';
             } else if (sessionData.type === 'preparation') {
-                // Wenn wir nur preparation starten und noch nicht fertig sind, bleibt es instruction, 
-                // aber ohne ReadyTime.
                 finalType = 'instruction'; 
             }
 
-            // NEU: Math.ceil erzwingt harte Bestrafung von Zögern (jede angefangene Minute zählt voll)
             let complianceLagMinutes = null;
             if ((finalType === 'instruction' || sessionData.type === 'preparation') && sessionData.acceptedAt) {
                 const acceptedTime = sessionData.acceptedAt.toDate ? sessionData.acceptedAt.toDate() : new Date(sessionData.acceptedAt);
                 complianceLagMinutes = Math.max(0, Math.ceil((Date.now() - acceptedTime.getTime()) / 60000));
             }
 
+            // THERMAL BLEED: Abkühlung & Trigger-Prüfung
+            let thermalYieldPayload = {};
+            if (finalType === 'instruction' || finalType === 'voluntary' || sessionData.type === 'debt') {
+                try {
+                    const thermalRef = doc(db, `users/${userId}/status/thermal`);
+                    const thermalSnap = await getDoc(thermalRef);
+                    
+                    if (thermalSnap.exists()) {
+                        const tData = thermalSnap.data();
+                        if (tData.isHot && tData.lastSessionEndTime) {
+                            const endTime = tData.lastSessionEndTime.toDate ? tData.lastSessionEndTime.toDate() : new Date(tData.lastSessionEndTime);
+                            const gapMinutes = Math.floor((Date.now() - endTime.getTime()) / 60000);
+                            
+                            let triggerChance = 0;
+                            if (gapMinutes <= 15) triggerChance = 1.0;
+                            else if (gapMinutes <= 45) triggerChance = 0.40;
+                            
+                            if (Math.random() < triggerChance) {
+                                const roll = Math.random();
+                                let bonusData = null;
+                                
+                                if (roll < 0.40) {
+                                    // 40% Chance auf Yield
+                                    thermalYieldPayload = { thermalYieldActive: true, thermalYieldMultiplier: 1.5 };
+                                } else if (roll < 0.70) {
+                                    // 30% Chance auf Dividend
+                                    const amount = Math.floor(Math.random() * (250 - 50 + 1)) + 50;
+                                    bonusData = { type: 'dividend', amount };
+                                } else if (roll < 0.90) {
+                                    // 20% Chance auf Amnesty (18 Stunden)
+                                    bonusData = { type: 'amnesty' };
+                                } else {
+                                    // 10% Chance auf Debt Relief (15%)
+                                    bonusData = { type: 'debt_relief' };
+                                }
+                                
+                                if (bonusData) {
+                                    await applyThermalBonus(userId, bonusData);
+                                }
+                            }
+                            // Unabhängig vom Sieg wird die Hitze bei Neuzündung verbraucht
+                            batch.set(thermalRef, { isHot: false }, { merge: true });
+                        }
+                    }
+                } catch (e) {
+                    console.error("Fehler bei Thermal Bleed Berechnung:", e);
+                }
+            }
+
             const payload = {
                 itemIds,
                 itemLedger,
+                ...thermalYieldPayload,
                 itemsDetails: items.map(i => ({
                     id: i.id,
                     name: i.name || i.subCategory || 'Unbekannt',
@@ -285,6 +332,16 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
         }
     }
     const durationMinutes = Math.round((endTime - complianceStartTime) / 60000);
+
+    // THERMAL BLEED: Ladevorgang (Wärmepolster aufbauen)
+    if (durationMinutes >= 240 && (sessionData.type === 'instruction' || sessionData.type === 'voluntary' || sessionData.isDebtSession)) {
+        const thermalRef = doc(db, `users/${userId}/status/thermal`);
+        batch.set(thermalRef, {
+            lastSessionEndTime: serverTimestamp(),
+            lastSessionDuration: durationMinutes,
+            isHot: true
+        }, { merge: true });
+    }
 
     let nightSuccess = null;
     const isInstruction = sessionData.type === 'instruction';
