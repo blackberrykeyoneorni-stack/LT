@@ -1,3 +1,4 @@
+// src/hooks/dashboard/useSessionProgress.js
 import { useState, useEffect } from 'react';
 import { collection, query, where, onSnapshot, doc, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
@@ -95,7 +96,9 @@ export default function useSessionProgress(currentUser, items) {
 
            if (needsVerification) {
                const checkAndVerify = async () => {
-                   if (new Date().getHours() >= 6) {
+                   const d = new Date();
+                   // NEU: Watcher löst exakt ab 07:30 Uhr aus
+                   if (d.getHours() > 7 || (d.getHours() === 7 && d.getMinutes() >= 30)) {
                        if (intervalId) clearInterval(intervalId);
                        await verifyNightCompliance(currentUser.uid);
                    }
@@ -103,7 +106,9 @@ export default function useSessionProgress(currentUser, items) {
                
                checkAndVerify(); 
                
-               if (new Date().getHours() < 6 && !intervalId) {
+               const d = new Date();
+               // NEU: Intervall bleibt bestehen, bis es 07:30 Uhr ist
+               if (!(d.getHours() > 7 || (d.getHours() === 7 && d.getMinutes() >= 30)) && !intervalId) {
                    intervalId = setInterval(checkAndVerify, 60000);
                }
            } else {
@@ -188,24 +193,13 @@ export default function useSessionProgress(currentUser, items) {
         let targetMinutes = (dailyTargetHours * 60);
         if (targetMinutes < 0) targetMinutes = 0; 
         
+        // Harter Reset am späten Abend (Nacht-Phase beginnt)
         if (now.getHours() >= nightStartHour) {
             return {
                 currentContinuousMinutes: discountMinutes,
                 dailyTargetMinutes: targetMinutes,
                 percentage: 0,
                 isDailyGoalMet: false, 
-                isLive: false,
-                nightCompliance,
-                discountMinutes
-            };
-        }
-
-        if (nightCompliance === false) {
-            return {
-                currentContinuousMinutes: discountMinutes, 
-                dailyTargetMinutes: targetMinutes,
-                percentage: 0,
-                isDailyGoalMet: false,
                 isLive: false,
                 nightCompliance,
                 discountMinutes
@@ -220,7 +214,6 @@ export default function useSessionProgress(currentUser, items) {
         let currentMinutes = 0;
         let isLive = false;
 
-        // NEU: Die Ziel-Zeitmessung startet nur, wenn instructionReadyTime existiert
         if (activeInstruction && activeInstruction.instructionReadyTime) {
             const start = activeInstruction.instructionReadyTime?.toDate ? activeInstruction.instructionReadyTime.toDate() : new Date(activeInstruction.instructionReadyTime);
             currentMinutes = Math.floor((now - start) / 60000) + discountMinutes;

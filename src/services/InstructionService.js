@@ -220,6 +220,7 @@ export const verifyNightCompliance = async (userId, referenceDate = new Date()) 
         const month = referenceDate.getMonth();
         const day = referenceDate.getDate();
 
+        // 5 exakte Checkpoints: Der letzte erzwingt Tragedauer bis 07:29 Uhr
         const checkpoints = [
             new Date(year, month, day, 1, 30, 0), 
             new Date(year, month, day, 3, 0, 0),  
@@ -309,7 +310,7 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
 
         const recentSessionsMap = await getRecentSessionsMap(uid, restingHours + 5);
 
-        // --- NEU: FORCED UNIFORMITY (ERZWUNGENE MONOTONIE) CHECK ---
+        // --- FORCED UNIFORMITY (ERZWUNGENE MONOTONIE) CHECK ---
         const uniformityRef = doc(db, `users/${uid}/status/uniformity`);
         const uniformitySnap = await getDoc(uniformityRef);
         
@@ -423,7 +424,6 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                     if (!activePackedDayIds.includes(i.id)) return false;
                 }
             } else {
-                // Koffer-Pre-Locking: Bereits gepackte Items stehen nicht zur Verfügung
                 if (futurePackedItemIds.includes(i.id)) return false;
             }
 

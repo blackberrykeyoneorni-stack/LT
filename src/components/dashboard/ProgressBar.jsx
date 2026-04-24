@@ -1,3 +1,4 @@
+// src/components/dashboard/ProgressBar.jsx
 import React from 'react';
 import { Box, Typography, LinearProgress, Paper, Stack } from '@mui/material';
 import NightlightRoundIcon from '@mui/icons-material/NightlightRound';
@@ -91,7 +92,7 @@ export default function ProgressBar({ currentMinutes, targetHours, isGoalMetToda
             {/* Footer Zeile: Status Text und Mond */}
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Typography variant="caption" sx={{ color: activeColor, fontWeight: 'bold', textTransform: 'uppercase' }}>
-                    {isStrictlySuccessful ? "ZIEL ERREICHT" : "IN PROGRESS"}
+                    {isStrictlySuccessful ? "ZIEL ERREICHT" : (isGoalMetToday && nightFailed ? "ZEIT ERFÜLLT (ERFOLG VERWEIGERT)" : "IN PROGRESS")}
                 </Typography>
 
                 <Stack direction="row" spacing={0.5} alignItems="center">
