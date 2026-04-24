@@ -37,7 +37,7 @@ import ActionButtons from '../components/dashboard/ActionButtons';
 import ActiveSessionsList from '../components/dashboard/ActiveSessionsList';
 import InfoTiles from '../components/dashboard/InfoTiles';
 import DashboardDialogManager from '../components/dashboard/DashboardDialogManager';
-import UniformityReleaseDialog from '../components/dialogs/ReleaseProtocolDialog'; // Beispiel-Pfad für den Release Dialog
+import UniformityReleaseDialog from '../components/dialogs/ReleaseProtocolDialog'; 
 
 import { DESIGN_TOKENS, PALETTE, MOTION } from '../theme/obsidianDesign';
 import { 
@@ -83,7 +83,7 @@ export default function Dashboard() {
   const [currentSpent, setCurrentSpent] = useState(0); 
   const [maxInstructionItems, setMaxInstructionItems] = useState(1);
   const releaseTimerInterval = useRef(null);
-  const oathTimerRef = useRef(null); // NEU: Oath Timer in der UI Schicht
+  const oathTimerRef = useRef(null); 
   
   const [timeBankData, setTimeBankData] = useState({ nc: 0, lc: 0 });
   const [weeklyReport, setWeeklyReport] = useState(null);
@@ -104,6 +104,10 @@ export default function Dashboard() {
   const inDebt = ncDebt > 0 || lcDebt > 0;
   const debtMinDuration = Math.max(ncDebt, lcDebt);
   const hasActiveDebtSession = (activeSessions || []).some(s => s.type === 'debt' || s.isDebtSession);
+
+  // --- GETRENNTE LOCKDOWN LOGIK ---
+  const isActionButtonsLocked = inDebt; 
+  const isPrivilegeLocked = inDebt || uniformity.active;
 
   // --- HOOK INTEGRATION: TZD & GAMBLE MANAGER ---
   const {
@@ -177,6 +181,11 @@ export default function Dashboard() {
   };
 
   const handleBuyDiscount = async (minutesToBuy) => {
+      if (uniformity.active) {
+          showToast("Freikauf verweigert. In Straf-Uniform keine Privilegien.", "error");
+          return;
+      }
+
       if (!currentUser || !currentInstruction || !currentInstruction.items || currentInstruction.items.length === 0) {
           showToast("Freikauf gescheitert. Keine aktive Anweisung gefunden.", "error");
           return;
@@ -185,7 +194,6 @@ export default function Dashboard() {
       let hasNylon = false;
       let hasLingerie = false;
 
-      // STRIKTE PRÜFUNG DER HAUPTKATEGORIEN
       currentInstruction.items.forEach(item => {
           const mainCat = (item.mainCategory || '').toLowerCase();
           if (mainCat === 'nylons' || mainCat === 'nylon') hasNylon = true;
@@ -283,7 +291,6 @@ export default function Dashboard() {
     };
   }, [currentUser, setImmunityActive]);
 
-  // UNIFORMITY STATUS LADEN (Laufend aktualisiert durch Session-Wechsel)
   useEffect(() => {
     if (currentUser) {
         getUniformityStatus(currentUser.uid).then(status => setUniformity(status));
@@ -330,7 +337,7 @@ export default function Dashboard() {
           } 
           
           if (options.emergencyBailout) {
-              showToast("Not-Abbruch! 50% Strafaufschlag angewendet.", "error");
+              showToast("Not-Abbruch! Strafaufschlag angewendet.", "error");
           } else {
               showToast("Session beendet.", "success");
           }
@@ -436,8 +443,6 @@ export default function Dashboard() {
       );
   }
 
-  const isLockedDown = inDebt || uniformity.active;
-
   return (
     <Box sx={DESIGN_TOKENS.bottomNavSpacer}>
       <Container maxWidth="md" sx={{ pt: 2, pb: 4 }}>
@@ -461,20 +466,20 @@ export default function Dashboard() {
                         <LockIcon sx={{ mr: 1 }}/> ERZWUNGENE MONOTONIE AKTIV
                     </Typography>
                     <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                        Alle regulären Funktionen sind gesperrt. Du bist für 96 Stunden in deine Straf-Uniform verriegelt.
+                        Inventar verriegelt. Nur die Straf-Uniform ist zulässig. Erfülle deine regulären Anweisungen, danach darfst du ablegen. Freiwillige Sessions und Privilegien sind für 96h deaktiviert.
                     </Typography>
                 </Paper>
             )}
 
             {/* SCHULDENTILGUNG BLOCK */}
-            {inDebt && !hasActiveDebtSession && !uniformity.active && (
+            {inDebt && !hasActiveDebtSession && (
                 <Paper sx={{ p: 3, mb: 3, bgcolor: 'rgba(211, 47, 47, 0.1)', border: `1px solid ${PALETTE.accents.red}` }}>
                     <Typography variant="subtitle1" color="error" sx={{ fontWeight: 'bold', mb: 1, display: 'flex', alignItems: 'center' }}>
                         <LockIcon sx={{ mr: 1 }}/> SCHULDENTILGUNG ERFORDERLICH
                     </Typography>
                     <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                         Dein Konto ist im Minus (NC: {timeBankData.nc}, LC: {timeBankData.lc}).
-                        Alle freiwilligen Sessions sind systemseitig gesperrt, bis die Tilgung abgeschlossen ist.
+                        Alle regulären Funktionen sind gesperrt, bis die Tilgung gestartet ist.
                     </Typography>
                     <Button 
                         variant="contained" 
@@ -482,30 +487,32 @@ export default function Dashboard() {
                         fullWidth 
                         onClick={async () => {
                             let requiredItems = [];
-                            const activeItems = items.filter(i => i.status === 'active');
                             
-                            // STRIKTE PRÜFUNG BEI ZWANGS-ZUWEISUNG
-                            if (ncDebt > 0) {
-                                let nylon = activeItems.find(i => {
-                                    const mCat = (i.mainCategory || '').toLowerCase();
-                                    return mCat === 'nylons' || mCat === 'nylon';
-                                });
-                                // Zwangszuweisung: Fallback auf Wäschekorb, falls kein aktives Nylon vorhanden
-                                if (!nylon) {
-                                    nylon = items.find(i => i.status === 'washing' && ((i.mainCategory || '').toLowerCase() === 'nylons' || (i.mainCategory || '').toLowerCase() === 'nylon'));
+                            // HYBRID-ZWANG: Tilgung zwingt zur Straf-Uniform, falls aktiv
+                            if (uniformity.active && uniformity.itemIds) {
+                                requiredItems = items.filter(i => uniformity.itemIds.includes(i.id));
+                            } else {
+                                const activeItems = items.filter(i => i.status === 'active');
+                                if (ncDebt > 0) {
+                                    let nylon = activeItems.find(i => {
+                                        const mCat = (i.mainCategory || '').toLowerCase();
+                                        return mCat === 'nylons' || mCat === 'nylon';
+                                    });
+                                    if (!nylon) {
+                                        nylon = items.find(i => i.status === 'washing' && ((i.mainCategory || '').toLowerCase() === 'nylons' || (i.mainCategory || '').toLowerCase() === 'nylon'));
+                                    }
+                                    if (nylon) requiredItems.push(nylon);
                                 }
-                                if (nylon) requiredItems.push(nylon);
-                            }
-                            if (lcDebt > 0) {
-                                let lingerie = activeItems.find(i => {
-                                    const mCat = (i.mainCategory || '').toLowerCase();
-                                    return mCat === 'dessous' || mCat === 'lingerie';
-                                });
-                                // Zwangszuweisung: Fallback auf Wäschekorb, falls keine aktiven Dessous vorhanden
-                                if (!lingerie) {
-                                    lingerie = items.find(i => i.status === 'washing' && ((i.mainCategory || '').toLowerCase() === 'dessous' || (i.mainCategory || '').toLowerCase() === 'lingerie'));
+                                if (lcDebt > 0) {
+                                    let lingerie = activeItems.find(i => {
+                                        const mCat = (i.mainCategory || '').toLowerCase();
+                                        return mCat === 'dessous' || mCat === 'lingerie';
+                                    });
+                                    if (!lingerie) {
+                                        lingerie = items.find(i => i.status === 'washing' && ((i.mainCategory || '').toLowerCase() === 'dessous' || (i.mainCategory || '').toLowerCase() === 'lingerie'));
+                                    }
+                                    if (lingerie) requiredItems.push(lingerie);
                                 }
-                                if (lingerie) requiredItems.push(lingerie);
                             }
                             
                             if (requiredItems.length === 0) {
@@ -557,8 +564,8 @@ export default function Dashboard() {
                 subScores={subScores}   
             />
 
-            {/* Hier greift der Lockdown für die ActionButtons */}
-            <Box sx={{ opacity: isLockedDown ? 0.4 : 1, pointerEvents: isLockedDown ? 'none' : 'auto' }}>
+            {/* Hier greift der Action-Lockdown (nur Schulden sperren Aktionen) */}
+            <Box sx={{ opacity: isActionButtonsLocked ? 0.4 : 1, pointerEvents: isActionButtonsLocked ? 'none' : 'auto' }}>
                 <ActionButtons 
                     punishmentStatus={punishmentStatus} 
                     punishmentRunning={isPunishmentRunning}
@@ -592,7 +599,7 @@ export default function Dashboard() {
             />
 
             {!isPunishmentRunning && (
-                <Box sx={{ mb: 4, opacity: isLockedDown ? 0.4 : 1, pointerEvents: isLockedDown ? 'none' : 'auto' }}>
+                <Box sx={{ mb: 4, opacity: isPrivilegeLocked ? 0.4 : 1, pointerEvents: isPrivilegeLocked ? 'none' : 'auto' }}>
                     <Button
                         fullWidth
                         onClick={handleOpenRelease}
@@ -677,7 +684,14 @@ export default function Dashboard() {
           washingItems={washingItems} onWashItem={handleWashItem} onWashAll={handleWashAll}
           handleConfirmForcedRelease={handleConfirmForcedRelease} handleFailForcedRelease={handleFailForcedRelease} handleRefuseForcedRelease={handleRefuseForcedRelease}
           timeBankData={timeBankData} handleAcknowledgeInflation={handleAcknowledgeInflation} offerOpen={offerOpen} gambleStake={gambleStake} 
-          handleGambleAccept={handleGambleAccept} handleGambleDecline={handleGambleDecline} hasVoluntarySession={hasVoluntarySession} isForcedGamble={isForcedGamble}
+          handleGambleAccept={() => {
+              if (uniformity.active) {
+                  showToast("Gamble verweigert. In Straf-Uniform keine Privilegien.", "error");
+                  return;
+              }
+              handleGambleAccept();
+          }} 
+          handleGambleDecline={handleGambleDecline} hasVoluntarySession={hasVoluntarySession} isForcedGamble={isForcedGamble}
           weeklyReport={weeklyReport} currentUser={currentUser} 
           currentInstruction={currentInstruction} startOathPress={startOathPress} cancelOathPress={cancelOathPress}
           handleDeclineOath={handleDeclineOath} handleStartRequest={handleStartRequest} navigate={navigate} isFreeDay={isFreeDay} freeDayReason={freeDayReason} 
@@ -690,7 +704,6 @@ export default function Dashboard() {
           indexDetails={indexDetails} activeSessions={activeSessions || []} 
       />
 
-      {/* NEU: Release Dialog wird getriggert, wenn Strafe vorbei ist */}
       <UniformityReleaseDialog 
           open={uniformity.active && uniformity.expiresAt && new Date() >= (typeof uniformity.expiresAt.toDate === 'function' ? uniformity.expiresAt.toDate() : new Date(uniformity.expiresAt))} 
           statusData={uniformity}

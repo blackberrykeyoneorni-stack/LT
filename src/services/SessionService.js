@@ -16,6 +16,18 @@ export const startSession = async (userId, sessionData) => {
             throw new Error("TIME BANKRUPTCY. Freiwillige Sessions systemseitig gesperrt.");
         }
 
+        // --- GATEKEEPER FÜR ERZWUNGENE MONOTONIE (Privilegien-Entzug) ---
+        if (sessionData.type === 'voluntary') {
+            const uniRef = doc(db, `users/${userId}/status/uniformity`);
+            const uniSnap = await getDoc(uniRef);
+            if (uniSnap.exists() && uniSnap.data().active) {
+                const expiresAt = uniSnap.data().expiresAt?.toDate ? uniSnap.data().expiresAt.toDate() : new Date(uniSnap.data().expiresAt);
+                if (expiresAt > new Date()) {
+                    throw new Error("ERZWUNGENE MONOTONIE. Freiwillige Sessions (Privilegien) sind gesperrt.");
+                }
+            }
+        }
+
         const items = sessionData.items || [];
         const itemIds = items.map(i => i.id);
 
@@ -38,7 +50,6 @@ export const startSession = async (userId, sessionData) => {
         let existingSessionRef = null;
         let existingSessionData = null;
 
-        // Wir prüfen nun auch bei preparation, ob es schon eine laufende Instruction gibt, um sie dort anzuhängen
         if (sessionData.type === 'instruction' || sessionData.type === 'preparation') {
             const q = query(collection(db, `users/${userId}/sessions`), where('isActive', '==', true), where('type', '==', 'instruction'));
             const snap = await getDocs(q);
@@ -78,7 +89,6 @@ export const startSession = async (userId, sessionData) => {
             const allRequiredPresent = requiredItemIds.length > 0 && requiredItemIds.every(reqId => mergedItemIds.includes(reqId));
             let instructionReadyTime = existingSessionData.instructionReadyTime || null;
 
-            // Das Ziel startet ERST, wenn alle benötigten Items am Körper sind
             if (allRequiredPresent && !instructionReadyTime) {
                 instructionReadyTime = serverTimestamp();
             }
@@ -88,7 +98,6 @@ export const startSession = async (userId, sessionData) => {
                 itemLedger: newItemLedger,
                 itemsDetails: newItemDetails,
                 instructionReadyTime: instructionReadyTime,
-                // Wenn es vorher nur preparation war, wird es durch den Abschluss der Sammlung zur echten instruction
                 type: allRequiredPresent ? 'instruction' : existingSessionData.type 
             };
 
@@ -111,7 +120,6 @@ export const startSession = async (userId, sessionData) => {
             return existingSessionRef.id;
 
         } else {
-            // --- DIE TILGUNGS-SITZUNG ODER DIE ERSTE INITIALE SESSION ---
             let isDebtSession = false;
             let minDuration = 0;
             if (sessionData.type === 'debt' || sessionData.isDebtSession) {
@@ -166,26 +174,20 @@ export const startSession = async (userId, sessionData) => {
                                 let bonusData = null;
                                 
                                 if (roll < 0.40) {
-                                    // 40% Chance auf Yield
                                     thermalYieldPayload = { thermalYieldActive: true, thermalYieldMultiplier: 1.5 };
                                 } else if (roll < 0.70) {
-                                    // 30% Chance auf Dividend
                                     const amount = Math.floor(Math.random() * (250 - 50 + 1)) + 50;
                                     bonusData = { type: 'dividend', amount };
                                 } else if (roll < 0.90) {
-                                    // 20% Chance auf Amnesty (18 Stunden)
                                     bonusData = { type: 'amnesty' };
                                 } else {
-                                    // 10% Chance auf Debt Relief (15%)
                                     bonusData = { type: 'debt_relief' };
                                 }
                                 
-                                // PENDING BONUS PROTOKOL: Bonus wird verzögert im Session-Payload gespeichert
                                 if (bonusData) {
                                     thermalYieldPayload.pendingThermalBonus = bonusData;
                                 }
                             }
-                            // Unabhängig vom Sieg wird die Hitze bei Neuzündung verbraucht
                             batch.set(thermalRef, { isHot: false }, { merge: true });
                         }
                     }
@@ -341,7 +343,6 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
     }
     const durationMinutes = Math.round((endTime - complianceStartTime) / 60000);
 
-    // THERMAL BLEED: Ladevorgang (Wärmepolster aufbauen)
     if (durationMinutes >= 240 && (sessionData.type === 'instruction' || sessionData.type === 'voluntary' || sessionData.isDebtSession)) {
         const thermalRef = doc(db, `users/${userId}/status/thermal`);
         batch.set(thermalRef, {
@@ -508,13 +509,12 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
         }
 
     } else {
-        // --- PENDING THERMAL BONUS AUSWERTUNG ---
         if (sessionData.pendingThermalBonus) {
             let bonusQualifies = false;
             if (sessionData.type === 'voluntary') {
                 if (durationMinutes >= 180) bonusQualifies = true;
             } else {
-                bonusQualifies = true; // Zwangssessions, die regulär beendet wurden
+                bonusQualifies = true; 
             }
 
             if (bonusQualifies) {
@@ -526,7 +526,6 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
                 updateData.finalNote = updateData.finalNote ? `${updateData.finalNote} | ${failMsg}` : failMsg;
             }
         }
-        // ----------------------------------------
 
         const sessionForCredit = { ...sessionData, startTime, endTime };
         const earnedResult = await calculateEarnedCredits(userId, sessionForCredit);
