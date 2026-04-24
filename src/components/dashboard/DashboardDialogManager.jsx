@@ -106,7 +106,7 @@ export default function DashboardDialogManager({
                 step={releaseStep} timer={releaseTimer} intensity={releaseIntensity}
                 onStartTimer={handleStartReleaseTimer} onSkipTimer={handleSkipTimer}
                 onDecision={handleReleaseDecision}
-                onIntensityChange={(v) => useUIStore.getState().setReleaseIntensity(v)}
+                setIntensity={(v) => useUIStore.getState().setReleaseIntensity(v)} 
             />
 
             {instructionStatus?.forcedReleaseRequired && !instructionStatus?.forcedReleaseExecuted && (

@@ -376,15 +376,17 @@ export default function Dashboard() {
   const handleStartReleaseTimer = () => { 
       useUIStore.getState().setReleaseStep('timer'); 
       if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current);
+      
+      // Zustand Race-Condition Fix: Synchrones Lesen des States statt asynchroner Callback-Verschachtelung
       releaseTimerInterval.current = setInterval(() => { 
-          useUIStore.getState().setReleaseTimer(prev => { 
-              if(prev <= 1) { 
-                  clearInterval(releaseTimerInterval.current); 
-                  useUIStore.getState().setReleaseStep('decision'); 
-                  return 0; 
-              } 
-              return prev - 1; 
-          }); 
+          const currentTimer = useUIStore.getState().releaseTimer;
+          if (currentTimer <= 1) {
+              clearInterval(releaseTimerInterval.current);
+              useUIStore.getState().setReleaseTimer(0);
+              useUIStore.getState().setReleaseStep('decision');
+          } else {
+              useUIStore.getState().setReleaseTimer(currentTimer - 1);
+          }
       }, 1000);
   };
 
@@ -564,7 +566,6 @@ export default function Dashboard() {
                 subScores={subScores}   
             />
 
-            {/* Hier greift der Action-Lockdown (nur Schulden sperren Aktionen) */}
             <Box sx={{ opacity: isActionButtonsLocked ? 0.4 : 1, pointerEvents: isActionButtonsLocked ? 'none' : 'auto' }}>
                 <ActionButtons 
                     punishmentStatus={punishmentStatus} 
