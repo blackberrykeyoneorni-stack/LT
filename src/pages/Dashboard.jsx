@@ -486,22 +486,30 @@ export default function Dashboard() {
                             
                             // STRIKTE PRÜFUNG BEI ZWANGS-ZUWEISUNG
                             if (ncDebt > 0) {
-                                const nylon = activeItems.find(i => {
+                                let nylon = activeItems.find(i => {
                                     const mCat = (i.mainCategory || '').toLowerCase();
                                     return mCat === 'nylons' || mCat === 'nylon';
                                 });
+                                // Zwangszuweisung: Fallback auf Wäschekorb, falls kein aktives Nylon vorhanden
+                                if (!nylon) {
+                                    nylon = items.find(i => i.status === 'washing' && ((i.mainCategory || '').toLowerCase() === 'nylons' || (i.mainCategory || '').toLowerCase() === 'nylon'));
+                                }
                                 if (nylon) requiredItems.push(nylon);
                             }
                             if (lcDebt > 0) {
-                                const lingerie = activeItems.find(i => {
+                                let lingerie = activeItems.find(i => {
                                     const mCat = (i.mainCategory || '').toLowerCase();
                                     return mCat === 'dessous' || mCat === 'lingerie';
                                 });
+                                // Zwangszuweisung: Fallback auf Wäschekorb, falls keine aktiven Dessous vorhanden
+                                if (!lingerie) {
+                                    lingerie = items.find(i => i.status === 'washing' && ((i.mainCategory || '').toLowerCase() === 'dessous' || (i.mainCategory || '').toLowerCase() === 'lingerie'));
+                                }
                                 if (lingerie) requiredItems.push(lingerie);
                             }
                             
                             if (requiredItems.length === 0) {
-                                showToast("Fehler: Keine passenden Items im aktiven Inventar.", "error");
+                                showToast("Fehler: Keine Items verfügbar. Bitte System-Administrator kontaktieren.", "error");
                                 return;
                             }
 

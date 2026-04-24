@@ -445,28 +445,50 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
 
     if (feedback.emergencyBailout) {
         const tbBalance = await getTimeBankBalance(userId);
-        const penaltyNc = tbBalance.nc < 0 ? Math.floor(Math.abs(tbBalance.nc) * 0.5) : 0;
-        const penaltyLc = tbBalance.lc < 0 ? Math.floor(Math.abs(tbBalance.lc) * 0.5) : 0;
+        
+        let newNc = tbBalance.nc;
+        let newLc = tbBalance.lc;
+        let bailoutMessage = '';
+        let noteSuffix = '';
+
+        if (sessionData.type === 'voluntary') {
+            bailoutMessage = `Abbruch einer freiwilligen Session. Keine Zeit angerechnet.`;
+            noteSuffix = 'ABBRUCH (Freiwillig)';
+        } else {
+            if (tbBalance.nc < 0 || tbBalance.lc < 0) {
+                const penaltyNc = tbBalance.nc < 0 ? Math.floor(Math.abs(tbBalance.nc) * 0.5) : 0;
+                const penaltyLc = tbBalance.lc < 0 ? Math.floor(Math.abs(tbBalance.lc) * 0.5) : 0;
+                newNc -= penaltyNc;
+                newLc -= penaltyLc;
+                bailoutMessage = `Not-Abbruch! 50% Strafaufschlag auf bestehende Schulden.`;
+                noteSuffix = 'NOT-ABBRUCH (50% Strafe)';
+            } else {
+                newNc -= 240;
+                newLc -= 240;
+                bailoutMessage = `Pauschalstrafe angewendet. 240 Minuten Guthaben vernichtet.`;
+                noteSuffix = 'NOT-ABBRUCH (-240 Min)';
+            }
+        }
 
         const tbRef = doc(db, `users/${userId}/status/timeBank`);
         batch.set(tbRef, {
-            nc: tbBalance.nc - penaltyNc,
-            lc: tbBalance.lc - penaltyLc,
+            nc: newNc,
+            lc: newLc,
             lastTransaction: serverTimestamp()
         }, { merge: true });
 
         updateData.durationMinutes = 0; 
-        updateData.finalNote = 'NOT-ABBRUCH (50% Strafaufschlag)';
+        updateData.finalNote = noteSuffix;
 
         for (const id of allSessionItemIds) {
             await addItemHistoryEntry(userId, id, {
                 type: 'debt_bailout',
-                message: `Not-Abbruch der Tilgung! 50% Strafaufschlag auf bestehende Schulden.`
+                message: bailoutMessage
             });
         }
 
         // --- FORCED UNIFORMITY TRIGGER (50% CHANCE) ---
-        if (Math.random() < 0.50) {
+        if (sessionData.type !== 'voluntary' && Math.random() < 0.50) {
             const expiresAt = new Date(Date.now() + 96 * 60 * 60 * 1000); // Exakt 96 Stunden
             const uniformityRef = doc(db, `users/${userId}/status/uniformity`);
             const snapshotIds = currentItemIds.length > 0 ? currentItemIds : allSessionItemIds;
@@ -478,7 +500,7 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
                 expiresAt: expiresAt
             }, { merge: true });
 
-            updateData.finalNote = 'NOT-ABBRUCH (50% Strafe + ERZWUNGENE MONOTONIE 96h)';
+            updateData.finalNote = `${noteSuffix} + ERZWUNGENE MONOTONIE 96h`;
 
             for (const id of snapshotIds) {
                 await addItemHistoryEntry(userId, id, {
