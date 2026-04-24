@@ -92,7 +92,6 @@ export const startSession = async (userId, sessionData) => {
                 type: allRequiredPresent ? 'instruction' : existingSessionData.type 
             };
 
-            // NEU: Lag nachtragen, falls es beim Transit Protocol fehlte (mit Typsicherheit)
             if (existingSessionData.complianceLagMinutes == null && sessionData.acceptedAt) {
                 const acceptedData = sessionData.acceptedAt;
                 const acceptedTime = typeof acceptedData.toDate === 'function' ? acceptedData.toDate() : new Date(acceptedData);
@@ -181,8 +180,9 @@ export const startSession = async (userId, sessionData) => {
                                     bonusData = { type: 'debt_relief' };
                                 }
                                 
+                                // PENDING BONUS PROTOKOL: Bonus wird verzögert im Session-Payload gespeichert
                                 if (bonusData) {
-                                    await applyThermalBonus(userId, bonusData);
+                                    thermalYieldPayload.pendingThermalBonus = bonusData;
                                 }
                             }
                             // Unabhängig vom Sieg wird die Hitze bei Neuzündung verbraucht
@@ -259,7 +259,6 @@ export const startTransitProtocol = async (userId, itemId) => {
     if (!userId || !itemId) throw new Error("Parameter fehlen.");
     const batch = writeBatch(db);
     
-    // NEU: Lag-Berechnung im Transit-Protokoll (mit sicherer Optional Chaining Typprüfung)
     const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
     const instrSnap = await getDoc(instrRef);
     let complianceLagMinutes = null;
@@ -281,7 +280,7 @@ export const startTransitProtocol = async (userId, itemId) => {
         type: 'instruction',
         transitProtocolActive: true, 
         transitItemId: itemId,
-        complianceLagMinutes, // Der berechnete Lag wird direkt geschrieben
+        complianceLagMinutes, 
         startTime: serverTimestamp(),
         instructionReadyTime: serverTimestamp(),
         endTime: null,
@@ -337,7 +336,6 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
         if (sessionData.instructionReadyTime) {
             complianceStartTime = sessionData.instructionReadyTime?.toDate ? sessionData.instructionReadyTime.toDate() : new Date(sessionData.instructionReadyTime);
         } else {
-            // Wenn es unfertig beendet wird, gab es keinen Erfüllungsfortschritt
             complianceStartTime = endTime; 
         }
     }
@@ -487,15 +485,14 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
             });
         }
 
-        // --- FORCED UNIFORMITY TRIGGER (50% CHANCE) ---
         if (sessionData.type !== 'voluntary' && Math.random() < 0.50) {
-            const expiresAt = new Date(Date.now() + 96 * 60 * 60 * 1000); // Exakt 96 Stunden
+            const expiresAt = new Date(Date.now() + 96 * 60 * 60 * 1000); 
             const uniformityRef = doc(db, `users/${userId}/status/uniformity`);
             const snapshotIds = currentItemIds.length > 0 ? currentItemIds : allSessionItemIds;
             
             batch.set(uniformityRef, {
                 active: true,
-                itemIds: snapshotIds, // Snapshot der beim Abbruch getragenen Items
+                itemIds: snapshotIds, 
                 triggeredAt: serverTimestamp(),
                 expiresAt: expiresAt
             }, { merge: true });
@@ -509,9 +506,28 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
                 });
             }
         }
-        // ----------------------------------------------------
 
     } else {
+        // --- PENDING THERMAL BONUS AUSWERTUNG ---
+        if (sessionData.pendingThermalBonus) {
+            let bonusQualifies = false;
+            if (sessionData.type === 'voluntary') {
+                if (durationMinutes >= 180) bonusQualifies = true;
+            } else {
+                bonusQualifies = true; // Zwangssessions, die regulär beendet wurden
+            }
+
+            if (bonusQualifies) {
+                await applyThermalBonus(userId, sessionData.pendingThermalBonus);
+                const bonusMsg = `Wärmepolster-Bonus gesichert (${sessionData.pendingThermalBonus.type})`;
+                updateData.finalNote = updateData.finalNote ? `${updateData.finalNote} | ${bonusMsg}` : bonusMsg;
+            } else {
+                const failMsg = `Wärmepolster-Bonus verfallen (Tragezeit < 180m)`;
+                updateData.finalNote = updateData.finalNote ? `${updateData.finalNote} | ${failMsg}` : failMsg;
+            }
+        }
+        // ----------------------------------------
+
         const sessionForCredit = { ...sessionData, startTime, endTime };
         const earnedResult = await calculateEarnedCredits(userId, sessionForCredit);
 

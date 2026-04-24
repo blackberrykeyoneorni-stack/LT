@@ -1,3 +1,4 @@
+// src/services/TimeBankService.js
 import { db } from '../firebase';
 import { doc, getDoc, updateDoc, setDoc, increment, serverTimestamp, collection, query, where, getDocs, deleteField } from 'firebase/firestore';
 
@@ -137,6 +138,13 @@ export const calculateEarnedCredits = async (userId, session) => {
 
     if (durationMinutes < 10) return 0; // Zu kurz zählt nicht
 
+    // --- KONZEPT 1: PRIORITÄT DES INKASSOS (SYSTEM-BYPASS) ---
+    // Um Deadlocks während Operation Infiltration zu vermeiden, wird die Tragezeit 
+    // in Zwangssitzungen zur Schuldentilgung ohne Stealth-Abzüge gewertet.
+    if (session.isDebtSession) {
+        return Math.floor(durationMinutes);
+    }
+
     // --- STEALTH LOGIK ---
     const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
     const instrSnap = await getDoc(instrRef);
@@ -169,9 +177,7 @@ export const calculateEarnedCredits = async (userId, session) => {
 
     // --- REGULÄRE LOGIK (Restauriert aus SessionService) ---
     let eligibleMinutes = 0;
-    if (session.isDebtSession) {
-        eligibleMinutes = durationMinutes; // Komplette Zeit zur Schuldentilgung
-    } else if (session.type === 'voluntary') {
+    if (session.type === 'voluntary') {
         eligibleMinutes = durationMinutes; // Komplette Zeit als Bonus
     } else if (session.type === 'instruction') {
         // Nur Overtime (Übererfüllung) bringt Credits!
