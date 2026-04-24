@@ -506,8 +506,51 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
             for (let k = 0; k < slotsToFill; k++) {
                 if (availableGroupKeys.length === 0) break;
 
+                // --- ANATOMIE & ABHÄNGIGKEITS-PROTOKOLL ---
+                const checkNylon = (i) => i.mainCategory === 'Nylons' || (i.mainCategory || '').toLowerCase() === 'nylon';
+                
+                let currentNylonsCount = selectedItems.filter(checkNylon).length;
+                let hasHalterlose = selectedItems.some(i => (i.subCategory || '').includes('Halterlose'));
+                let hasStraps = selectedItems.some(i => (i.subCategory || '').includes('Strapsstrümpfe'));
+                let hasNylons = currentNylonsCount > 0;
+                let hasHighHeels = selectedItems.some(i => (i.subCategory || '').includes('High Heels'));
+                let slotsLeft = slotsToFill - k;
+
+                let validGroupKeys = availableGroupKeys.filter(key => {
+                    const sampleItem = groups[key][0];
+                    const isNylonGroup = checkNylon(sampleItem);
+                    const isHalterloseGroup = key.includes('Halterlose');
+                    const isStrapsGroup = key.includes('Strapsstrümpfe');
+                    const isHighHeelsGroup = key.includes('High Heels');
+
+                    // Regel 1: Beine-Exklusivität
+                    if (isHalterloseGroup && hasStraps) return false;
+                    if (isStrapsGroup && hasHalterlose) return false;
+
+                    // Regel 2: Maximal 2 Nylons
+                    if (isNylonGroup && currentNylonsCount >= 2) return false;
+
+                    // Regel 3: High Heels fordern Nylons
+                    if (isHighHeelsGroup) {
+                        if (!hasNylons) {
+                            const nylonAvailable = availableGroupKeys.some(k => checkNylon(groups[k][0]) && !k.includes('High Heels'));
+                            if (slotsLeft <= 1 || !nylonAvailable) return false;
+                        }
+                    }
+
+                    // Zwangskorrektur: Nylon erzwingen, wenn Heels gezogen wurden, aber Nylons fehlen
+                    if (hasHighHeels && !hasNylons && slotsLeft === 1) {
+                        if (!isNylonGroup) return false;
+                    }
+
+                    return true;
+                });
+
+                if (validGroupKeys.length === 0) break; 
+                // --- ENDE PROTOKOLL ---
+
                 let totalWeight = 0;
-                const weightedGroups = availableGroupKeys.map(key => {
+                const weightedGroups = validGroupKeys.map(key => {
                     const count = groups[key].length;
                     const rootScore = Math.sqrt(count);
                     const manualWeight = parseInt(userWeights[key] || 1);
@@ -576,6 +619,8 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                 }
 
                 selectedItems.push(selectedItem);
+                
+                // Der gezogene Key muss aus dem Original-Pool gelöscht werden, damit er nicht mehr validGroupKeys füllt
                 availableGroupKeys = availableGroupKeys.filter(key => key !== chosenCategoryKey);
             }
         }
