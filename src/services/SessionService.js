@@ -38,14 +38,41 @@ export const startSession = async (userId, sessionData) => {
 
         if (itemIds.length === 0) throw new Error("Keine Items ausgewählt.");
 
+        // --- SEQUENTIELLES GEHORSAMS-PROTOKOLL ---
         let requiredItemIds = [];
+        let instructionItems = [];
         if (sessionData.type === 'instruction' || sessionData.type === 'preparation') {
             const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
             const instrSnap = await getDoc(instrRef);
             if (instrSnap.exists() && instrSnap.data().items) {
-                requiredItemIds = instrSnap.data().items.map(i => i.id);
+                instructionItems = instrSnap.data().items;
+                requiredItemIds = instructionItems.map(i => i.id);
+
+                // Suche bestehende Session, um bereits getragene Items zu prüfen
+                const qActive = query(collection(db, `users/${userId}/sessions`), where('isActive', '==', true), where('type', '==', 'instruction'));
+                const activeSnap = await getDocs(qActive);
+                const alreadyWornIds = !activeSnap.empty ? (activeSnap.docs[0].data().itemIds || []) : [];
+
+                // Prüfe für jedes neue Item, ob die Reihenfolge eingehalten wird
+                for (const newItemId of itemIds) {
+                    const targetItem = instructionItems.find(i => i.id === newItemId);
+                    if (targetItem && targetItem.orderIndex > 1) {
+                        // Prüfe alle Items, die davor kommen müssten
+                        const missingPredecessors = instructionItems.filter(i => 
+                            i.orderIndex < targetItem.orderIndex && 
+                            !alreadyWornIds.includes(i.id) && 
+                            !itemIds.includes(i.id) // Falls mehrere gleichzeitig gestartet werden
+                        );
+
+                        if (missingPredecessors.length > 0) {
+                            const nextDue = missingPredecessors.sort((a, b) => a.orderIndex - b.orderIndex)[0];
+                            throw new Error(`REIHENFOLGE VERLETZT. Ziehe zuerst ${nextDue.name} (Schritt ${nextDue.orderIndex}) an.`);
+                        }
+                    }
+                }
             }
         }
+        // --- ENDE PROTOKOLL ---
 
         let existingSessionRef = null;
         let existingSessionData = null;
@@ -152,48 +179,27 @@ export const startSession = async (userId, sessionData) => {
                 }
             }
 
-            // THERMAL BLEED: Abkühlung & Trigger-Prüfung
+            // THERMAL BLEED LOGIK
             let thermalYieldPayload = {};
             if (finalType === 'instruction' || finalType === 'voluntary' || sessionData.type === 'debt') {
                 try {
                     const thermalRef = doc(db, `users/${userId}/status/thermal`);
                     const thermalSnap = await getDoc(thermalRef);
-                    
                     if (thermalSnap.exists()) {
                         const tData = thermalSnap.data();
                         if (tData.isHot && tData.lastSessionEndTime) {
                             const endTime = tData.lastSessionEndTime.toDate ? tData.lastSessionEndTime.toDate() : new Date(tData.lastSessionEndTime);
                             const gapMinutes = Math.floor((Date.now() - endTime.getTime()) / 60000);
-                            
-                            let triggerChance = 0;
-                            if (gapMinutes <= 15) triggerChance = 1.0;
-                            else if (gapMinutes <= 45) triggerChance = 0.40;
-                            
+                            let triggerChance = gapMinutes <= 15 ? 1.0 : (gapMinutes <= 45 ? 0.40 : 0);
                             if (Math.random() < triggerChance) {
                                 const roll = Math.random();
-                                let bonusData = null;
-                                
-                                if (roll < 0.40) {
-                                    thermalYieldPayload = { thermalYieldActive: true, thermalYieldMultiplier: 1.5 };
-                                } else if (roll < 0.70) {
-                                    const amount = Math.floor(Math.random() * (250 - 50 + 1)) + 50;
-                                    bonusData = { type: 'dividend', amount };
-                                } else if (roll < 0.90) {
-                                    bonusData = { type: 'amnesty' };
-                                } else {
-                                    bonusData = { type: 'debt_relief' };
-                                }
-                                
-                                if (bonusData) {
-                                    thermalYieldPayload.pendingThermalBonus = bonusData;
-                                }
+                                let bonusData = roll < 0.40 ? { type: 'dividend', multiplier: 1.5 } : (roll < 0.70 ? { type: 'dividend', amount: Math.floor(Math.random() * 200) + 50 } : (roll < 0.90 ? { type: 'amnesty' } : { type: 'debt_relief' }));
+                                if (bonusData) thermalYieldPayload.pendingThermalBonus = bonusData;
                             }
                             batch.set(thermalRef, { isHot: false }, { merge: true });
                         }
                     }
-                } catch (e) {
-                    console.error("Fehler bei Thermal Bleed Berechnung:", e);
-                }
+                } catch (e) { console.error(e); }
             }
 
             const payload = {
@@ -234,17 +240,12 @@ export const startSession = async (userId, sessionData) => {
 
             if (finalType === 'instruction' || sessionData.type === 'preparation') {
                  const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
-                 batch.set(instrRef, {
-                     isActive: true,
-                     activeSessionId: newSessionRef.id
-                 }, { merge: true });
+                 batch.set(instrRef, { isActive: true, activeSessionId: newSessionRef.id }, { merge: true });
             }
 
             if (finalType === 'punishment') {
                  const punRef = doc(db, `users/${userId}/status/punishment`);
-                 batch.set(punRef, {
-                     activeSessionId: newSessionRef.id
-                 }, { merge: true });
+                 batch.set(punRef, { activeSessionId: newSessionRef.id }, { merge: true });
             }
 
             await batch.commit();
@@ -319,7 +320,6 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
     const sessionData = sessionSnap.data();
     const batch = writeBatch(db);
     const endTime = new Date();
-
     const startTime = sessionData.startTime?.toDate ? sessionData.startTime.toDate() : new Date(); 
     
     let sessionDiscountMinutes = 0;
@@ -334,22 +334,16 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
     }
 
     let complianceStartTime = startTime;
-    if (sessionData.type === 'instruction') {
-        if (sessionData.instructionReadyTime) {
-            complianceStartTime = sessionData.instructionReadyTime?.toDate ? sessionData.instructionReadyTime.toDate() : new Date(sessionData.instructionReadyTime);
-        } else {
-            complianceStartTime = endTime; 
-        }
+    if (sessionData.type === 'instruction' && sessionData.instructionReadyTime) {
+        complianceStartTime = sessionData.instructionReadyTime?.toDate ? sessionData.instructionReadyTime.toDate() : new Date(sessionData.instructionReadyTime);
     }
+    
     const durationMinutes = Math.round((endTime - complianceStartTime) / 60000);
 
+    // THERMAL BLEED SETZEN
     if (durationMinutes >= 240 && (sessionData.type === 'instruction' || sessionData.type === 'voluntary' || sessionData.isDebtSession)) {
         const thermalRef = doc(db, `users/${userId}/status/thermal`);
-        batch.set(thermalRef, {
-            lastSessionEndTime: serverTimestamp(),
-            lastSessionDuration: durationMinutes,
-            isHot: true
-        }, { merge: true });
+        batch.set(thermalRef, { lastSessionEndTime: serverTimestamp(), lastSessionDuration: durationMinutes, isHot: true }, { merge: true });
     }
 
     let nightSuccess = null;
@@ -509,6 +503,7 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
         }
 
     } else {
+        // --- THERMAL BONUS LOGIK (Leistungsbasiert) ---
         if (sessionData.pendingThermalBonus) {
             let bonusQualifies = false;
             if (sessionData.type === 'voluntary') {
@@ -517,7 +512,6 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
                 const target = Number(sessionData.targetDurationMinutes) || 0;
                 const minDur = Number(sessionData.minDuration) || 0;
                 const requiredDuration = Math.max(target, minDur);
-                
                 if (durationMinutes >= 180 || (requiredDuration > 0 && durationMinutes >= requiredDuration)) {
                     bonusQualifies = true; 
                 }
@@ -599,18 +593,12 @@ export const updateSessionPornStatus = async (userId, sessionId, isPornActive) =
     try {
         const sessionRef = doc(db, `users/${userId}/sessions`, sessionId);
         await setDoc(sessionRef, { isPornActive }, { merge: true });
-    } catch (e) {
-        console.error("Fehler beim Update des Porn-Status", e);
-    }
+    } catch (e) { console.error(e); }
 };
 
 export const registerInstructionRelease = async (userId) => {
     try {
         const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
-        await setDoc(instrRef, {
-            forcedRelease: { executed: true }
-        }, { merge: true });
-    } catch (e) {
-        console.error("Fehler beim Registrieren des Instruction Release", e);
-    }
+        await setDoc(instrRef, { forcedRelease: { executed: true } }, { merge: true });
+    } catch (e) { console.error(e); }
 };

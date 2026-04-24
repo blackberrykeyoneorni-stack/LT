@@ -310,7 +310,7 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
 
         const recentSessionsMap = await getRecentSessionsMap(uid, restingHours + 5);
 
-        // --- FORCED UNIFORMITY (ERZWUNGENE MONOTONIE) CHECK ---
+        // --- FORCED UNIFORMITY CHECK ---
         const uniformityRef = doc(db, `users/${uid}/status/uniformity`);
         const uniformitySnap = await getDoc(uniformityRef);
         
@@ -336,12 +336,13 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                         uniformityLockActive: true,
                         forcedRelease: { required: false, executed: false, method: null },
                         transitProtocol: { active: false },
-                        items: uniformityItems.map(i => ({
+                        items: uniformityItems.map((i, index) => ({
                             id: i.id,
                             name: i.subCategory || i.name || 'Unbenanntes Item',
                             brand: i.brand || '',
                             img: i.imageUrl || (i.images && i.images[0]) || null,
-                            subCategory: i.subCategory || ''
+                            subCategory: i.subCategory || '',
+                            orderIndex: index + 1
                         }))
                     };
 
@@ -620,7 +621,6 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
 
                 selectedItems.push(selectedItem);
                 
-                // Der gezogene Key muss aus dem Original-Pool gelöscht werden, damit er nicht mehr validGroupKeys füllt
                 availableGroupKeys = availableGroupKeys.filter(key => key !== chosenCategoryKey);
             }
         }
@@ -688,6 +688,49 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
             }
         }
 
+        // --- LAYERING & SORTIERUNGS-PROTOKOLL ---
+        // Zuweisung einer Chaos-Variable für die Konfliktzone
+        let layerSortedItems = selectedItems.map(item => ({ ...item, _sortVal: Math.random() * 10 }));
+
+        const getItemSub = (i) => (i.subCategory || '').toLowerCase();
+        
+        const bodyItem = layerSortedItems.find(i => getItemSub(i).includes('body'));
+        const strumpfhoseItem = layerSortedItems.find(i => getItemSub(i).includes('strumpfhose'));
+        const bhItem = layerSortedItems.find(i => getItemSub(i).includes('bh') || (i.name || '').toLowerCase().includes('bh'));
+        
+        const strapsItem = layerSortedItems.find(i => getItemSub(i).includes('strapsstrümpfe'));
+        const satinItem = layerSortedItems.find(i => getItemSub(i).includes('satin-hemdchen') || getItemSub(i).includes('satin-nachthemd'));
+        const heelsItem = layerSortedItems.find(i => getItemSub(i).includes('high heels'));
+
+        // Regel 1: Strapsgürtel über Torso/Haut
+        if (strapsItem) {
+            let maxBase = -1;
+            if (bodyItem) maxBase = Math.max(maxBase, bodyItem._sortVal);
+            if (strumpfhoseItem) maxBase = Math.max(maxBase, strumpfhoseItem._sortVal);
+            if (strapsItem._sortVal <= maxBase) {
+                strapsItem._sortVal = maxBase + 1;
+            }
+        }
+
+        // Regel 2: Satin über Torso/Brust
+        if (satinItem) {
+            let maxTop = -1;
+            if (bodyItem) maxTop = Math.max(maxTop, bodyItem._sortVal);
+            if (bhItem) maxTop = Math.max(maxTop, bhItem._sortVal);
+            if (satinItem._sortVal <= maxTop) {
+                satinItem._sortVal = maxTop + 1;
+            }
+        }
+
+        // Regel 3: Heels ans Ende
+        if (heelsItem) {
+            heelsItem._sortVal = 999;
+        }
+
+        layerSortedItems.sort((a, b) => a._sortVal - b._sortVal);
+        // --- ENDE LAYERING ---
+
+
         let forcedRelease = { required: false, executed: false, method: null };
 
         if (isNightInstruction) {
@@ -712,7 +755,7 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
             }
         }
 
-        const titleNames = selectedItems.map(i => i.subCategory || i.name || 'Item').join(' & ');
+        const titleNames = layerSortedItems.map(i => i.subCategory || i.name || 'Item').join(' & ');
 
         const instructionData = {
             periodId,
@@ -724,12 +767,13 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
             stealthModeActive: isStealth, 
             forcedRelease,
             transitProtocol,
-            items: selectedItems.map(i => ({
+            items: layerSortedItems.map((i, index) => ({
                 id: i.id,
                 name: i.subCategory || i.name || 'Unbenanntes Item',
                 brand: i.brand || '',
                 img: i.imageUrl || (i.images && i.images[0]) || null,
-                subCategory: i.subCategory || ''
+                subCategory: i.subCategory || '',
+                orderIndex: index + 1 // Nummerierte Reihenfolge
             }))
         };
 
