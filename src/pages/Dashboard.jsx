@@ -297,7 +297,7 @@ export default function Dashboard() {
           
           if (result.success) {
               setPunishmentStatus({ active: true, durationMinutes: result.duration });
-              useUIStore.getState().showToast(`Vollzug autorisiert. Das System hat das Urteil gefällt.`, "error");
+              useUIStore.getState().showToast(`Vollzug autorisiert. Das System hat das Urteil fällen lassen.`, "error");
           } else {
               useUIStore.getState().showToast(result.error, "error");
           }
@@ -584,7 +584,7 @@ export default function Dashboard() {
             />
 
             {!isPunishmentRunning && (
-                <Box sx={{ mb: 4 }}>
+                <Box sx={{ mb: 4, opacity: isLockedDown ? 0.4 : 1, pointerEvents: isLockedDown ? 'none' : 'auto' }}>
                     <Button
                         fullWidth
                         onClick={handleOpenRelease}
@@ -684,7 +684,7 @@ export default function Dashboard() {
 
       {/* NEU: Release Dialog wird getriggert, wenn Strafe vorbei ist */}
       <UniformityReleaseDialog 
-          open={uniformity.active && new Date() >= uniformity.expiresAt} 
+          open={uniformity.active && uniformity.expiresAt && new Date() >= (typeof uniformity.expiresAt.toDate === 'function' ? uniformity.expiresAt.toDate() : new Date(uniformity.expiresAt))} 
           statusData={uniformity}
           onReleased={() => setUniformity({ active: false })}
       />

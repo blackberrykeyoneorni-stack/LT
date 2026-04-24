@@ -35,7 +35,7 @@ export default function ConditioningOverlay({ onAcknowledge }) {
                     sx={{ 
                         color: PALETTE.accents.gold,
                         fontWeight: 'bold',
-                        lineHeight: 1.6,
+                        lineHeight: 1.2,
                         letterSpacing: 0.5,
                         textShadow: '0 2px 10px rgba(0,0,0,0.6)'
                     }}

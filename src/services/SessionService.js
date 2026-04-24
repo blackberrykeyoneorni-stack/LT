@@ -1,3 +1,4 @@
+// src/services/SessionService.js
 import { db } from '../firebase';
 import { collection, doc, writeBatch, serverTimestamp, getDoc, setDoc, increment, query, where, getDocs } from 'firebase/firestore';
 import { updateWearStats, addItemHistoryEntry, setItemStatus } from './ItemService';
@@ -91,10 +92,13 @@ export const startSession = async (userId, sessionData) => {
                 type: allRequiredPresent ? 'instruction' : existingSessionData.type 
             };
 
-            // NEU: Lag nachtragen, falls es beim Transit Protocol fehlte
+            // NEU: Lag nachtragen, falls es beim Transit Protocol fehlte (mit Typsicherheit)
             if (existingSessionData.complianceLagMinutes == null && sessionData.acceptedAt) {
-                const acceptedTime = sessionData.acceptedAt.toDate ? sessionData.acceptedAt.toDate() : new Date(sessionData.acceptedAt);
-                updatePayload.complianceLagMinutes = Math.max(0, Math.ceil((Date.now() - acceptedTime.getTime()) / 60000));
+                const acceptedData = sessionData.acceptedAt;
+                const acceptedTime = typeof acceptedData.toDate === 'function' ? acceptedData.toDate() : new Date(acceptedData);
+                if (!isNaN(acceptedTime.getTime())) {
+                    updatePayload.complianceLagMinutes = Math.max(0, Math.ceil((Date.now() - acceptedTime.getTime()) / 60000));
+                }
             }
 
             batch.update(existingSessionRef, updatePayload);
@@ -134,8 +138,11 @@ export const startSession = async (userId, sessionData) => {
 
             let complianceLagMinutes = null;
             if ((finalType === 'instruction' || sessionData.type === 'preparation') && sessionData.acceptedAt) {
-                const acceptedTime = sessionData.acceptedAt.toDate ? sessionData.acceptedAt.toDate() : new Date(sessionData.acceptedAt);
-                complianceLagMinutes = Math.max(0, Math.ceil((Date.now() - acceptedTime.getTime()) / 60000));
+                const acceptedData = sessionData.acceptedAt;
+                const acceptedTime = typeof acceptedData.toDate === 'function' ? acceptedData.toDate() : new Date(acceptedData);
+                if (!isNaN(acceptedTime.getTime())) {
+                    complianceLagMinutes = Math.max(0, Math.ceil((Date.now() - acceptedTime.getTime()) / 60000));
+                }
             }
 
             // THERMAL BLEED: Abkühlung & Trigger-Prüfung
@@ -252,15 +259,18 @@ export const startTransitProtocol = async (userId, itemId) => {
     if (!userId || !itemId) throw new Error("Parameter fehlen.");
     const batch = writeBatch(db);
     
-    // NEU: Lag-Berechnung im Transit-Protokoll durch Abruf des acceptedAt
+    // NEU: Lag-Berechnung im Transit-Protokoll (mit sicherer Optional Chaining Typprüfung)
     const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
     const instrSnap = await getDoc(instrRef);
     let complianceLagMinutes = null;
     
-    if (instrSnap.exists() && instrSnap.data().acceptedAt) {
-        const acceptedData = instrSnap.data().acceptedAt;
-        const acceptedTime = acceptedData.toDate ? acceptedData.toDate() : new Date(acceptedData);
-        complianceLagMinutes = Math.max(0, Math.ceil((Date.now() - acceptedTime.getTime()) / 60000));
+    const acceptedData = instrSnap.exists() ? instrSnap.data()?.acceptedAt : null;
+    
+    if (acceptedData) {
+        const acceptedTime = typeof acceptedData.toDate === 'function' ? acceptedData.toDate() : new Date(acceptedData);
+        if (!isNaN(acceptedTime.getTime())) {
+            complianceLagMinutes = Math.max(0, Math.ceil((Date.now() - acceptedTime.getTime()) / 60000));
+        }
     }
 
     const newSessionRef = doc(collection(db, `users/${userId}/sessions`));
