@@ -514,7 +514,13 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
             if (sessionData.type === 'voluntary') {
                 if (durationMinutes >= 180) bonusQualifies = true;
             } else {
-                bonusQualifies = true; 
+                const target = Number(sessionData.targetDurationMinutes) || 0;
+                const minDur = Number(sessionData.minDuration) || 0;
+                const requiredDuration = Math.max(target, minDur);
+                
+                if (durationMinutes >= 180 || (requiredDuration > 0 && durationMinutes >= requiredDuration)) {
+                    bonusQualifies = true; 
+                }
             }
 
             if (bonusQualifies) {
@@ -522,7 +528,7 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
                 const bonusMsg = `Wärmepolster-Bonus gesichert (${sessionData.pendingThermalBonus.type})`;
                 updateData.finalNote = updateData.finalNote ? `${updateData.finalNote} | ${bonusMsg}` : bonusMsg;
             } else {
-                const failMsg = `Wärmepolster-Bonus verfallen (Tragezeit < 180m)`;
+                const failMsg = `Wärmepolster-Bonus verfallen (Tragezeit nicht erfüllt)`;
                 updateData.finalNote = updateData.finalNote ? `${updateData.finalNote} | ${failMsg}` : failMsg;
             }
         }
