@@ -220,7 +220,6 @@ export const verifyNightCompliance = async (userId, referenceDate = new Date()) 
         const month = referenceDate.getMonth();
         const day = referenceDate.getDate();
 
-        // 5 exakte Checkpoints: Der letzte erzwingt Tragedauer bis 07:29 Uhr
         const checkpoints = [
             new Date(year, month, day, 1, 30, 0), 
             new Date(year, month, day, 3, 0, 0),  
@@ -310,7 +309,7 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
 
         const recentSessionsMap = await getRecentSessionsMap(uid, restingHours + 5);
 
-        // --- FORCED UNIFORMITY CHECK ---
+        // --- FORCED UNIFORMITY (ERZWUNGENE MONOTONIE) CHECK ---
         const uniformityRef = doc(db, `users/${uid}/status/uniformity`);
         const uniformitySnap = await getDoc(uniformityRef);
         
@@ -342,7 +341,7 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                             brand: i.brand || '',
                             img: i.imageUrl || (i.images && i.images[0]) || null,
                             subCategory: i.subCategory || '',
-                            orderIndex: index + 1
+                            orderIndex: index + 1 // Auch die Straf-Uniform benötigt zwingend die Reihenfolge
                         }))
                     };
 
@@ -727,9 +726,16 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
             heelsItem._sortVal = 999;
         }
 
+        // Regel 4: Transit-Item an den Anfang (Muss als erstes angezogen bzw. bestätigt werden)
+        if (transitProtocol.active && transitProtocol.primaryItemId) {
+            const transitItem = layerSortedItems.find(i => i.id === transitProtocol.primaryItemId);
+            if (transitItem) {
+                transitItem._sortVal = -999; 
+            }
+        }
+
         layerSortedItems.sort((a, b) => a._sortVal - b._sortVal);
         // --- ENDE LAYERING ---
-
 
         let forcedRelease = { required: false, executed: false, method: null };
 
