@@ -763,12 +763,30 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
 
         const titleNames = layerSortedItems.map(i => i.subCategory || i.name || 'Item').join(' & ');
 
+        // --- PSYCHOLOGISCHE VISUALISIERUNG (STEALTH OVERRIDE TAG) ---
+        let finalItemName = titleNames;
+        if (isStealth && !isNightInstruction && periodId) {
+            const dateParts = periodId.split('-');
+            if (dateParts.length >= 3) {
+                const targetDate = new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
+                const day = targetDate.getDay();
+                const m = targetDate.getMonth() + 1;
+                const d = targetDate.getDate();
+                const isWeekend = (day === 0 || day === 6);
+                const isHoliday = (m === 12 && (d === 24 || d === 25 || d === 26 || d === 31)) || (m === 1 && d === 1);
+                if (isWeekend || isHoliday) {
+                    finalItemName = `[WOCHENEND-PRIVILEG ENTZOGEN] ${titleNames}`;
+                }
+            }
+        }
+        // ------------------------------------------------------------
+
         const instructionData = {
             periodId,
             generatedAt: serverTimestamp(),
             isAccepted: false,
             isPlanned: isPlannedInstruction,
-            itemName: titleNames,
+            itemName: finalItemName,
             durationMinutes, 
             stealthModeActive: isStealth, 
             forcedRelease,

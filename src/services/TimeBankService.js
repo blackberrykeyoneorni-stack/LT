@@ -111,13 +111,73 @@ export const spendCredits = async (userId, amountMinutes, requestedType) => {
 };
 
 /**
+ * ZWANGSLIQUIDATION (Debt Conversion Protocol)
+ * Bucht Strafen gnadenlos bis zur absoluten Insolvenzgrenze ab. 
+ * Gibt zurück, was nicht mehr bezahlt werden konnte (Restschuld).
+ */
+export const liquidateAssets = async (userId, targetNcDeduction, targetLcDeduction) => {
+    const docRef = doc(db, `users/${userId}/status/timeBank`);
+    const docSnap = await getDoc(docRef);
+    const data = docSnap.exists() ? docSnap.data() : { nc: 0, lc: 0 };
+
+    const interestPayload = await _applyPendingInterest(userId, data);
+    let currentNc = interestPayload.nc !== undefined ? interestPayload.nc : data.nc;
+    let currentLc = interestPayload.lc !== undefined ? interestPayload.lc : data.lc;
+
+    const floor = -DEBT_CONFIG.MAX_DEBT_MINUTES; // Die absolute Betonwand (-2880)
+
+    let remainingDebtNc = targetNcDeduction;
+    let remainingDebtLc = targetLcDeduction;
+    let liquidatedNc = 0;
+    let liquidatedLc = 0;
+
+    // NC Liquidation
+    if (targetNcDeduction > 0) {
+        const available = currentNc - floor; 
+        if (available > 0) {
+            const drain = Math.min(available, remainingDebtNc);
+            currentNc -= drain;
+            liquidatedNc = drain;
+            remainingDebtNc -= drain;
+        }
+    }
+
+    // LC Liquidation
+    if (targetLcDeduction > 0) {
+        const available = currentLc - floor;
+        if (available > 0) {
+            const drain = Math.min(available, remainingDebtLc);
+            currentLc -= drain;
+            liquidatedLc = drain;
+            remainingDebtLc -= drain;
+        }
+    }
+
+    const updates = { ...interestPayload };
+    updates.nc = currentNc;
+    updates.lc = currentLc;
+    updates.lastTransaction = serverTimestamp();
+    updates.lastInterestDate = serverTimestamp();
+
+    await updateDoc(docRef, updates);
+
+    return {
+        liquidatedNc,
+        liquidatedLc,
+        remainingDebtNc,
+        remainingDebtLc,
+        totalRemainingDebt: remainingDebtNc + remainingDebtLc
+    };
+};
+
+/**
  * Berechnet Credits basierend auf Dauer und Typ.
  * STRAFEN (Punishment, TZD Evasion) geben 0 Credits.
  * NEU: Bezieht Stealth-Reisen mit ein (massive Reduzierung & Nullrunden) 
  * UND regelt die reguläre Overtime-Vergütung (migriert aus SessionService).
  */
 export const calculateEarnedCredits = async (userId, session) => {
-    if (!session || !session.startTime || !session.endTime) return 0;
+    if (!session || !session.startTime || !session.endTime) return { rawMinutes: 0, isStealth: false, exactCredits: 0 };
 
     // 1. HARTE SPERRE: Prüfen auf Straf-Indikatoren
     if (
@@ -129,20 +189,20 @@ export const calculateEarnedCredits = async (userId, session) => {
         session.tzdExecuted === true // NEU: TZD darf ebenfalls keine Credits generieren
     ) {
         console.log("TimeBank: PUNITIVE/TZD SESSION DETECTED. 0 Credits awarded.");
-        return 0;
+        return { rawMinutes: 0, isStealth: false, exactCredits: 0 };
     }
 
     const start = session.startTime.toDate ? session.startTime.toDate() : new Date(session.startTime);
     const end = session.endTime.toDate ? session.endTime.toDate() : new Date(session.endTime);
     const durationMinutes = (end - start) / 60000;
 
-    if (durationMinutes < 10) return 0; // Zu kurz zählt nicht
+    if (durationMinutes < 10) return { rawMinutes: 0, isStealth: false, exactCredits: 0 }; // Zu kurz zählt nicht
 
     // --- KONZEPT 1: PRIORITÄT DES INKASSOS (SYSTEM-BYPASS) ---
     // Um Deadlocks während Operation Infiltration zu vermeiden, wird die Tragezeit 
     // in Zwangssitzungen zur Schuldentilgung ohne Stealth-Abzüge gewertet.
     if (session.isDebtSession) {
-        return Math.floor(durationMinutes);
+        return { rawMinutes: Math.floor(durationMinutes), isStealth: false, exactCredits: 0 };
     }
 
     // --- STEALTH LOGIK ---
@@ -193,15 +253,15 @@ export const calculateEarnedCredits = async (userId, session) => {
         }
     }
 
-    return Math.floor(eligibleMinutes);
+    return { rawMinutes: Math.floor(eligibleMinutes), isStealth: false, exactCredits: 0 };
 };
 
 /**
  * Fügt Credits hinzu (Earning / Tilgung).
- * Akzeptiert Integer oder das Stealth-Objekt aus calculateEarnedCredits.
- * NEU: Just-In-Time Interest Tracking (Transaktionsgebundene Vorab-Verzinsung)
+ * Akzeptiert das standardisierte Payload aus calculateEarnedCredits.
+ * NEU: Just-In-Time Interest Tracking (Transaktionsgebundene Vorab-Verzinsung) + Smart Booking
  */
-export const addCredits = async (userId, rawMinutesOrObject, type) => {
+export const addCredits = async (userId, payload, type) => {
     const field = type === 'nylon' ? 'nc' : 'lc';
     const docRef = doc(db, `users/${userId}/status/timeBank`);
     const docSnap = await getDoc(docRef);
@@ -216,20 +276,29 @@ export const addCredits = async (userId, rawMinutesOrObject, type) => {
 
     let earnedCredits = 0;
 
-    // Typ-Weiche für Stealth-Integration
-    if (typeof rawMinutesOrObject === 'object' && rawMinutesOrObject !== null) {
-        if (rawMinutesOrObject.exactCredits <= 0) return; // Nichts zu verbuchen
-        earnedCredits = rawMinutesOrObject.exactCredits; 
-        // WICHTIG: Keine weitere Division durch 3, da Stealth bereits versteuert hat.
+    // Typ-Weiche für Payload Standardisierung (Fallback für Legacy-Calls)
+    let p = payload;
+    if (typeof payload === 'number') {
+        p = { rawMinutes: payload, isStealth: false, exactCredits: 0 };
+    } else if (!payload) {
+        p = { rawMinutes: 0, isStealth: false, exactCredits: 0 };
+    }
+
+    if (p.rawMinutes <= 0 && p.exactCredits <= 0) return;
+
+    if (currentBalance < 0) {
+        // TILGUNG: 1:1 (Szenario A: Egal ob Stealth oder nicht, jede Minute zählt)
+        earnedCredits = p.rawMinutes;
     } else {
-        const rawMinutes = rawMinutesOrObject;
-        if (currentBalance < 0) {
-            // TILGUNG: 1:1 (Jede Minute zählt, um aus dem Loch zu kommen)
-            earnedCredits = rawMinutes;
+        // VERDIENST
+        if (p.isStealth) {
+            // Szenario B: Vorversteuerte Stealth-Credits direkt nehmen
+            earnedCredits = p.exactCredits;
         } else {
-            // VERDIENST: 1:3 (Luxus ist teuer)
-            if (rawMinutes < 3) return;
-            earnedCredits = Math.floor(rawMinutes / 3);
+            // Szenario C: Reguläre 1:3 Luxus-Steuer
+            if (p.rawMinutes >= 3) {
+                earnedCredits = Math.floor(p.rawMinutes / 3);
+            }
         }
     }
 

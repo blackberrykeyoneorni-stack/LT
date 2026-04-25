@@ -82,9 +82,16 @@ export default function useInstructionManager({
         const day = d.getDay();
         const isWeekend = (day === 0 || day === 6);
         const isHoliday = checkIsHoliday(d);
-        setIsFreeDay(isWeekend || isHoliday);
-        setFreeDayReason(isHoliday ? 'Holiday' : (isWeekend ? 'Weekend' : ''));
-    }, [now, currentPeriod]);
+        
+        // --- STEALTH-OVERRIDE ---
+        if (isStealthActive) {
+            setIsFreeDay(false);
+            setFreeDayReason('Stealth-Zwang (Wochenende annulliert)');
+        } else {
+            setIsFreeDay(isWeekend || isHoliday);
+            setFreeDayReason(isHoliday ? 'Holiday' : (isWeekend ? 'Weekend' : ''));
+        }
+    }, [now, currentPeriod, isStealthActive]);
 
     // --- EFFECT 2: INSTRUCTION LADEN ODER GENERIEREN ---
     useEffect(() => {

@@ -5,6 +5,7 @@ import { registerPunishment } from './PunishmentService';
 import { setImmunity, isImmunityActive } from './OfferService'; 
 import { addItemHistoryEntry } from './ItemService';
 import { stopSession, startSession } from './SessionService';
+import { liquidateAssets } from './TimeBankService';
 
 // --- KONFIGURATION (NEU) ---
 const TZD_CONFIG = {
@@ -473,8 +474,9 @@ export const terminateTZD = async (userId, success = true, customResult = null) 
 };
 
 /**
- * Dynamic Bailout Protocol
- * Abzug von 40% des positiven Bestandes (Minimum 400), währungsspezifisch.
+ * Dynamic Bailout Protocol (Inklusive Debt-Conversion-Protokoll)
+ * Zieht Guthaben gnadenlos bis zur Insolvenzgrenze ab. Überschuss
+ * wird in physische Strafe x2 umgewandelt und das Inventar verriegelt.
  */
 export const emergencyBailout = async (userId) => {
     // 1. TZD Status abrufen für Währungs-Symmetrie
@@ -520,35 +522,67 @@ export const emergencyBailout = async (userId) => {
         lcBalance = tbSnap.data().lc || 0;
     }
 
-    // 3. Die Leerung & 4. Der Boden
-    let deductionNc = 0;
-    let deductionLc = 0;
+    // 3. Forderungs-Berechnung (Basis)
+    let targetDeductionNc = 0;
+    let targetDeductionLc = 0;
     const MIN_PENALTY = 400;
     const RATE = 0.40;
 
     if (chargeNc) {
         const positiveNc = Math.max(0, ncBalance);
-        deductionNc = Math.max(MIN_PENALTY, Math.floor(positiveNc * RATE));
+        targetDeductionNc = Math.max(MIN_PENALTY, Math.floor(positiveNc * RATE));
     }
     if (chargeLc) {
         const positiveLc = Math.max(0, lcBalance);
-        deductionLc = Math.max(MIN_PENALTY, Math.floor(positiveLc * RATE));
+        targetDeductionLc = Math.max(MIN_PENALTY, Math.floor(positiveLc * RATE));
     }
 
-    // TimeBank Update (Atomar)
-    const tbUpdates = {};
-    if (deductionNc > 0) tbUpdates.nc = increment(-deductionNc);
-    if (deductionLc > 0) tbUpdates.lc = increment(-deductionLc);
-    if (Object.keys(tbUpdates).length > 0) {
-        tbUpdates.lastTransaction = serverTimestamp();
-        await updateDoc(tbRef, tbUpdates);
-    }
+    // --- DEBT-CONVERSION-PROTOKOLL: PHASE 1 (LIQUIDATION) ---
+    const liquidation = await liquidateAssets(userId, targetDeductionNc, targetDeductionLc);
 
-    // 5. Das Ledger aktualisieren
-    const punishmentMsg = `NOT-ABBRUCH TZD: Bailout erkauft. Währung dezimiert (NC: -${deductionNc}, LC: -${deductionLc}).`;
-    
-    await registerPunishment(userId, punishmentMsg, 90);
-    await terminateTZD(userId, false, 'aborted_emergency');
+    // --- DEBT-CONVERSION-PROTOKOLL: PHASE 2 & 3 (KONVERTIERUNG & ZWANG) ---
+    if (liquidation.totalRemainingDebt > 0) {
+        const convertedPunishment = liquidation.totalRemainingDebt * 2; // Multiplikator x2
+
+        // Erzwungene Monotonie verhängen
+        const uniformityRef = doc(db, `users/${userId}/status/uniformity`);
+        const expiresAt = new Date(Date.now() + 96 * 60 * 60 * 1000); // 96h Lockdown
+        const lockedItemIds = status && status.lockedItems ? status.lockedItems.map(i => i.id) : [];
+
+        await setDoc(uniformityRef, {
+            active: true,
+            itemIds: lockedItemIds,
+            triggeredAt: serverTimestamp(),
+            expiresAt: expiresAt,
+            reason: "Insolvenz bei TZD-Abbruch. System-Zwang.",
+            showTriggerOverlay: true
+        }, { merge: true });
+
+        // Punishment Ticket erstellen
+        const punishmentMsg = `Insolvenz-Vollstreckung (TZD Bailout). Konvertierte Restschuld: ${liquidation.totalRemainingDebt}m. Bankrott-Sperre aktiv.`;
+        await registerPunishment(userId, punishmentMsg, convertedPunishment);
+
+        // Historie der betroffenen Items markieren
+        if (lockedItemIds.length > 0) {
+            for (const itemId of lockedItemIds) {
+                await addItemHistoryEntry(userId, itemId, {
+                    type: 'uniformity_triggered',
+                    message: `TZD-Insolvenz! Item für 96 Stunden als Straf-Uniform verriegelt.`
+                });
+            }
+        }
+
+        await terminateTZD(userId, false, 'aborted_emergency');
+
+        // DAS FRONTEND-OVERLAY (EXCEPTION TRIGGER)
+        // Dieser Error unterbricht den Frontend-Flow und erzwingt einen roten Toast-Overlay direkt ins Gesicht.
+        throw new Error(`INSOLVENZ! Limit erreicht. Restschuld (${liquidation.totalRemainingDebt}m) in Strafzeit x2 konvertiert. Erzwungene Monotonie aktiv!`);
+    } else {
+        // Regulärer Bailout (Du konntest vollständig zahlen)
+        const punishmentMsg = `NOT-ABBRUCH TZD: Bailout erkauft. Währung dezimiert (NC: -${liquidation.liquidatedNc}, LC: -${liquidation.liquidatedLc}).`;
+        await registerPunishment(userId, punishmentMsg, 90);
+        await terminateTZD(userId, false, 'aborted_emergency');
+    }
 };
 
 export const convertTZDToPlugPunishment = async (userId, allItems) => {

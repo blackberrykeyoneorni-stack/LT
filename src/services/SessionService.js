@@ -528,15 +528,12 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
         }
 
         const sessionForCredit = { ...sessionData, startTime, endTime };
-        const earnedResult = await calculateEarnedCredits(userId, sessionForCredit);
+        const earnedPayload = await calculateEarnedCredits(userId, sessionForCredit);
 
-        const isEligible = (typeof earnedResult === 'object' && earnedResult !== null && earnedResult.exactCredits > 0) || 
-                           (typeof earnedResult === 'number' && earnedResult > 0);
+        const isEligible = earnedPayload && (earnedPayload.rawMinutes > 0 || earnedPayload.exactCredits > 0);
 
         if (isEligible) {
             try {
-                const resultValue = (typeof earnedResult === 'object') ? earnedResult.exactCredits : earnedResult;
-                
                 let earnNylon = false;
                 let earnLingerie = false;
 
@@ -547,10 +544,10 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
                 }
 
                 if (earnNylon) {
-                    await addCredits(userId, resultValue, 'nylon');
+                    await addCredits(userId, earnedPayload, 'nylon');
                 }
                 if (earnLingerie) {
-                    await addCredits(userId, resultValue, 'lingerie');
+                    await addCredits(userId, earnedPayload, 'lingerie');
                 }
                 creditCalculated = true;
             } catch (e) {
