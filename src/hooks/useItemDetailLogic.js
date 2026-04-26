@@ -178,6 +178,7 @@ function useItemFetcher(id, currentUser, navigate) {
 function useItemForm(item) {
     const [isEditing, setIsEditing] = useState(false);
     const [pendingFiles, setPendingFiles] = useState([]);
+    const [localExistingImages, setLocalExistingImages] = useState([]);
     const [formData, setFormData] = useState({});
     const [archiveDialog, setArchiveDialog] = useState({
         open: false, reason: '', runLocation: '', runCause: ''
@@ -200,14 +201,14 @@ function useItemForm(item) {
                 purchaseDate: item.purchaseDate ? new Date(item.purchaseDate).toISOString().split('T')[0] : '', 
                 notes: item.notes || ''
             });
+            setLocalExistingImages(item.images || (item.imageUrl ? [item.imageUrl] : []));
         }
     }, [item, isEditing]);
 
     const galleryImages = useMemo(() => {
-        const existing = item?.images || (item?.imageUrl ? [item.imageUrl] : []);
         const pending = pendingFiles.map(p => p.preview);
-        return [...existing, ...pending];
-    }, [item, pendingFiles]);
+        return [...localExistingImages, ...pending];
+    }, [localExistingImages, pendingFiles]);
 
     const handleAddImages = (e) => {
         if (e.target.files && e.target.files.length > 0) {
@@ -220,9 +221,20 @@ function useItemForm(item) {
         }
     };
 
+    const handleRemoveImage = (indexToRemove) => {
+        const existingLen = localExistingImages.length;
+        if (indexToRemove < existingLen) {
+            setLocalExistingImages(prev => prev.filter((_, i) => i !== indexToRemove));
+        } else {
+            const pendingIndex = indexToRemove - existingLen;
+            setPendingFiles(prev => prev.filter((_, i) => i !== pendingIndex));
+        }
+    };
+
     return {
         isEditing, setIsEditing, formData, setFormData, archiveDialog, setArchiveDialog,
-        pendingFiles, setPendingFiles, galleryImages, handleAddImages
+        pendingFiles, setPendingFiles, galleryImages, handleAddImages, 
+        localExistingImages, handleRemoveImage
     };
 }
 
@@ -232,7 +244,8 @@ function useItemForm(item) {
 function useItemActions(config) {
     const {
         id, currentUser, navigate, item, formData, pendingFiles, archiveDialog,
-        recoveryInfo, isBusy, writeTag, setItem, setIsEditing, setPendingFiles, setArchiveDialog
+        recoveryInfo, isBusy, writeTag, setItem, setIsEditing, setPendingFiles, setArchiveDialog,
+        localExistingImages
     } = config;
 
     const handleStartSession = async (force = false, viaNFC = false) => {
@@ -282,8 +295,7 @@ function useItemActions(config) {
                 uploadedUrls = await Promise.all(uploadPromises);
             }
 
-            const existingImages = item.images || (item.imageUrl ? [item.imageUrl] : []);
-            const finalImages = [...existingImages, ...uploadedUrls];
+            const finalImages = [...localExistingImages, ...uploadedUrls];
 
             const costNum = parseFloat(formData.cost);
             const updatedData = { 
@@ -371,7 +383,8 @@ export function useItemDetailLogic() {
         id, currentUser, navigate, item, 
         formData: form.formData, pendingFiles: form.pendingFiles, archiveDialog: form.archiveDialog,
         recoveryInfo, isBusy, writeTag, setItem, 
-        setIsEditing: form.setIsEditing, setPendingFiles: form.setPendingFiles, setArchiveDialog: form.setArchiveDialog
+        setIsEditing: form.setIsEditing, setPendingFiles: form.setPendingFiles, setArchiveDialog: form.setArchiveDialog,
+        localExistingImages: form.localExistingImages
     });
 
     useEffect(() => {
@@ -394,7 +407,8 @@ export function useItemDetailLogic() {
             wash: actions.handleWash,
             archive: actions.handleArchive,
             writeNFC: actions.handleWriteNFC,
-            addImages: form.handleAddImages
+            addImages: form.handleAddImages,
+            removeImage: form.handleRemoveImage
         }
     };
 }

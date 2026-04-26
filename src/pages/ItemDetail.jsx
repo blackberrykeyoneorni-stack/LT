@@ -64,6 +64,7 @@ export default function ItemDetail() {
                 onSave={actions.save}
                 onWriteNFC={actions.writeNFC}
                 onAddImages={actions.addImages}
+                onRemoveImage={actions.removeImage}
                 displayImages={galleryImages}
             />
 
