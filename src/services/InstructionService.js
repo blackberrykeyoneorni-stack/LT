@@ -6,6 +6,10 @@ import { DEFAULT_PROTOCOL_RULES } from '../config/defaultRules';
 // --- HELPER FUNKTIONEN ---
 
 const calculateTargetDuration = async (uid, prefs, periodId) => {
+    // SISSY-FEIERTAG OVERRIDE: Am 15. Mai gibt es keine Verhandlung. 1440 Minuten.
+    const isNSD = periodId && periodId.includes('-05-15');
+    if (isNSD) return 1440;
+
     if (periodId && periodId.includes('night')) {
         return parseInt(prefs.nightDurationMinutes || 480, 10);
     }
@@ -28,20 +32,17 @@ const calculateTargetDuration = async (uid, prefs, periodId) => {
     }
 };
 
-const isItemInRecovery = (item, restingHours = 24) => {
+const isItemInRecovery = (item, restingHours = 24, isNSD = false) => {
+    // SISSY-FEIERTAG: Die Maschine ignoriert Hygiene oder Erholung. Zieh das nasse Plastik an.
+    if (isNSD) return false;
+
     if (!item.mainCategory || item.mainCategory !== 'Nylons') {
         return false;
     }
-
-    if (!item.lastWorn) {
-        return false;
-    }
+    if (!item.lastWorn) return false;
 
     const lastWornDate = item.lastWorn.toDate ? item.lastWorn.toDate() : new Date(item.lastWorn);
-
-    if (isNaN(lastWornDate.getTime())) {
-        return false;
-    }
+    if (isNaN(lastWornDate.getTime())) return false;
 
     const hoursSince = (new Date() - lastWornDate) / (1000 * 60 * 60);
     return hoursSince < restingHours;
@@ -297,6 +298,7 @@ export const verifyNightCompliance = async (userId, referenceDate = new Date()) 
 
 export const generateAndSaveInstruction = async (uid, items, activeSessions, periodId) => {
     try {
+        const isNSD = periodId && periodId.includes('-05-15');
         const prefsSnap = await getDoc(doc(db, `users/${uid}/settings/preferences`));
         const prefs = prefsSnap.exists() ? prefsSnap.data() : {};
 
@@ -308,6 +310,52 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
         const userWeights = prefs.categoryWeights || {}; 
 
         const recentSessionsMap = await getRecentSessionsMap(uid, restingHours + 5);
+
+        // --- SISSY-FEIERTAG: TOTALER LOCKDOWN (NYLON STOCKING DAY) ---
+        if (isNSD) {
+            // Die Maschine wählt exakt drei Items aus: 1 Basis, 2 Pendel-Items
+            const allTights = items.filter(i => (i.subCategory || '').toLowerCase().includes('strumpfhose') && i.status === 'active');
+            const allStayups = items.filter(i => (i.subCategory || '').toLowerCase().includes('strapsstrümpfe') && i.status === 'active');
+            const allKneehighs = items.filter(i => (i.subCategory || '').toLowerCase().includes('kniestrümpfe') && i.status === 'active');
+
+            if (allTights.length === 0 || allStayups.length === 0 || allKneehighs.length === 0) {
+                throw new Error("SISSY-FEIERTAGS-DEFEKT: Inventar unzureichend für NSD-Protokoll.");
+            }
+
+            const baseTights = allTights[Math.floor(Math.random() * allTights.length)];
+            const alt1 = allStayups[Math.floor(Math.random() * allStayups.length)];
+            const alt2 = allKneehighs[Math.floor(Math.random() * allKneehighs.length)];
+
+            const instructionData = {
+                periodId,
+                generatedAt: serverTimestamp(),
+                isAccepted: false,
+                itemName: `[SISSY-FEIERTAG] Doppelte Plastik-Haut`,
+                durationMinutes: 1440,
+                isNSD: true,
+                nsdItems: [baseTights.id, alt1.id, alt2.id], // Festgeschriebenes Sissy-Set
+                nsdTransitCount: 0,
+                items: [
+                    {
+                        id: baseTights.id,
+                        name: baseTights.name || 'Sissy-Basis',
+                        img: baseTights.imageUrl || (baseTights.images && baseTights.images[0]) || null,
+                        orderIndex: 1,
+                        category: 'Strumpfhose'
+                    },
+                    {
+                        id: alt1.id,
+                        name: alt1.name || 'Sissy-Pendel 1',
+                        img: alt1.imageUrl || (alt1.images && alt1.images[0]) || null,
+                        orderIndex: 2,
+                        category: 'Strapsstrümpfe'
+                    }
+                ]
+            };
+
+            await setDoc(doc(db, `users/${uid}/status/dailyInstruction`), instructionData);
+            return instructionData;
+        }
 
         // --- FORCED UNIFORMITY (ERZWUNGENE MONOTONIE) CHECK ---
         const uniformityRef = doc(db, `users/${uid}/status/uniformity`);
@@ -341,7 +389,7 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                             brand: i.brand || '',
                             img: i.imageUrl || (i.images && i.images[0]) || null,
                             subCategory: i.subCategory || '',
-                            orderIndex: index + 1 // Auch die Straf-Uniform benötigt zwingend die Reihenfolge
+                            orderIndex: index + 1 
                         }))
                     };
 
@@ -350,7 +398,6 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                 }
             }
         }
-        // -----------------------------------------------------------
 
         // --- STEALTH MODUS: KOFFER PRÜFUNG & PRE-BLOCKING ---
         let isStealth = false;
@@ -412,7 +459,6 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
         const futureBlockedIds = await getFutureBlockedItemIds(uid, items, durationMinutes, restingHours);
         const isNightInstruction = periodId && periodId.includes('night');
 
-        // 3. Filterung der verfügbaren Items
         const availableItems = items.filter(i => {
             if (selectedItems.some(si => si.id === i.id)) return false;
             if (i.status !== 'active') return false;
@@ -459,7 +505,6 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
             return true;
         });
 
-        // 4. SMART HYBRID SELECTOR
         const groups = {};
         availableItems.forEach(item => {
             const key = item.subCategory || item.mainCategory || 'Sonstiges';
@@ -506,7 +551,6 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
             for (let k = 0; k < slotsToFill; k++) {
                 if (availableGroupKeys.length === 0) break;
 
-                // --- ANATOMIE & ABHÄNGIGKEITS-PROTOKOLL ---
                 const checkNylon = (i) => i.mainCategory === 'Nylons' || (i.mainCategory || '').toLowerCase() === 'nylon';
                 
                 let currentNylonsCount = selectedItems.filter(checkNylon).length;
@@ -523,14 +567,10 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                     const isStrapsGroup = key.includes('Strapsstrümpfe');
                     const isHighHeelsGroup = key.includes('High Heels');
 
-                    // Regel 1: Beine-Exklusivität
                     if (isHalterloseGroup && hasStraps) return false;
                     if (isStrapsGroup && hasHalterlose) return false;
-
-                    // Regel 2: Maximal 2 Nylons
                     if (isNylonGroup && currentNylonsCount >= 2) return false;
 
-                    // Regel 3: High Heels fordern Nylons
                     if (isHighHeelsGroup) {
                         if (!hasNylons) {
                             const nylonAvailable = availableGroupKeys.some(k => checkNylon(groups[k][0]) && !k.includes('High Heels'));
@@ -538,7 +578,6 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                         }
                     }
 
-                    // Zwangskorrektur: Nylon erzwingen, wenn Heels gezogen wurden, aber Nylons fehlen
                     if (hasHighHeels && !hasNylons && slotsLeft === 1) {
                         if (!isNylonGroup) return false;
                     }
@@ -547,7 +586,6 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                 });
 
                 if (validGroupKeys.length === 0) break; 
-                // --- ENDE PROTOKOLL ---
 
                 let totalWeight = 0;
                 const weightedGroups = validGroupKeys.map(key => {
@@ -626,7 +664,6 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
 
         if (selectedItems.length === 0) return null;
 
-        // --- SEAMLESS TRANSIT PROTOCOL (30 MIN GRACE) ---
         let transitProtocol = { active: false };
         if (!isNightInstruction && !isStealth) {
             const hasAnyLingerie = selectedItems.some(i =>
@@ -687,8 +724,6 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
             }
         }
 
-        // --- LAYERING & SORTIERUNGS-PROTOKOLL ---
-        // Zuweisung einer Chaos-Variable für die Konfliktzone
         let layerSortedItems = selectedItems.map(item => ({ ...item, _sortVal: Math.random() * 10 }));
 
         const getItemSub = (i) => (i.subCategory || '').toLowerCase();
@@ -701,7 +736,6 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
         const satinItem = layerSortedItems.find(i => getItemSub(i).includes('satin-hemdchen') || getItemSub(i).includes('satin-nachthemd'));
         const heelsItem = layerSortedItems.find(i => getItemSub(i).includes('high heels'));
 
-        // Regel 1: Strapsgürtel über Torso/Haut
         if (strapsItem) {
             let maxBase = -1;
             if (bodyItem) maxBase = Math.max(maxBase, bodyItem._sortVal);
@@ -711,7 +745,6 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
             }
         }
 
-        // Regel 2: Satin über Torso/Brust
         if (satinItem) {
             let maxTop = -1;
             if (bodyItem) maxTop = Math.max(maxTop, bodyItem._sortVal);
@@ -721,12 +754,10 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
             }
         }
 
-        // Regel 3: Heels ans Ende
         if (heelsItem) {
             heelsItem._sortVal = 999;
         }
 
-        // Regel 4: Transit-Item an den Anfang (Muss als erstes angezogen bzw. bestätigt werden)
         if (transitProtocol.active && transitProtocol.primaryItemId) {
             const transitItem = layerSortedItems.find(i => i.id === transitProtocol.primaryItemId);
             if (transitItem) {
@@ -735,7 +766,6 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
         }
 
         layerSortedItems.sort((a, b) => a._sortVal - b._sortVal);
-        // --- ENDE LAYERING ---
 
         let forcedRelease = { required: false, executed: false, method: null };
 
@@ -763,7 +793,6 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
 
         const titleNames = layerSortedItems.map(i => i.subCategory || i.name || 'Item').join(' & ');
 
-        // --- PSYCHOLOGISCHE VISUALISIERUNG (STEALTH OVERRIDE TAG) ---
         let finalItemName = titleNames;
         if (isStealth && !isNightInstruction && periodId) {
             const dateParts = periodId.split('-');
@@ -773,13 +802,12 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                 const m = targetDate.getMonth() + 1;
                 const d = targetDate.getDate();
                 const isWeekend = (day === 0 || day === 6);
-                const isHoliday = (m === 12 && (d === 24 || d === 25 || d === 26 || d === 31)) || (m === 1 && d === 1);
+                const isHoliday = (m === 12 && (d === 24 || d === 25 || d === 26 || d === 31)) || (m === 1 && d === 1) || (m === 5 && d === 1) || (m === 10 && d === 3) || (m === 10 && d === 28) || (m === 2 && d === 26) || (m === 5 && d === 14) || (m === 5 && d === 25);
                 if (isWeekend || isHoliday) {
                     finalItemName = `[WOCHENEND-PRIVILEG ENTZOGEN] ${titleNames}`;
                 }
             }
         }
-        // ------------------------------------------------------------
 
         const instructionData = {
             periodId,
@@ -797,7 +825,7 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                 brand: i.brand || '',
                 img: i.imageUrl || (i.images && i.images[0]) || null,
                 subCategory: i.subCategory || '',
-                orderIndex: index + 1 // Nummerierte Reihenfolge
+                orderIndex: index + 1 
             }))
         };
 

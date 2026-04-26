@@ -9,21 +9,19 @@ export const startSession = async (userId, sessionData) => {
     if (!userId || !sessionData) throw new Error("Parameter fehlen.");
 
     try {
-        // --- GATEKEEPER FÜR FREIWILLIGE SESSIONS BEI SCHULDEN ---
         const tbBalance = await getTimeBankBalance(userId);
         const isBankrupt = tbBalance.nc < 0 || tbBalance.lc < 0;
         if (isBankrupt && !sessionData.type.includes('debt') && !sessionData.type.includes('punishment') && !sessionData.type.includes('instruction')) {
-            throw new Error("TIME BANKRUPTCY. Freiwillige Sessions systemseitig gesperrt.");
+            throw new Error("TIME BANKRUPTCY. Sissy-Sessions systemseitig gesperrt.");
         }
 
-        // --- GATEKEEPER FÜR ERZWUNGENE MONOTONIE (Privilegien-Entzug) ---
         if (sessionData.type === 'voluntary') {
             const uniRef = doc(db, `users/${userId}/status/uniformity`);
             const uniSnap = await getDoc(uniRef);
             if (uniSnap.exists() && uniSnap.data().active) {
                 const expiresAt = uniSnap.data().expiresAt?.toDate ? uniSnap.data().expiresAt.toDate() : new Date(uniSnap.data().expiresAt);
                 if (expiresAt > new Date()) {
-                    throw new Error("ERZWUNGENE MONOTONIE. Freiwillige Sessions (Privilegien) sind gesperrt.");
+                    throw new Error("ERZWUNGENE MONOTONIE. Sissy-Sessions sind gesperrt.");
                 }
             }
         }
@@ -38,7 +36,6 @@ export const startSession = async (userId, sessionData) => {
 
         if (itemIds.length === 0) throw new Error("Keine Items ausgewählt.");
 
-        // --- SEQUENTIELLES GEHORSAMS-PROTOKOLL ---
         let requiredItemIds = [];
         let instructionItems = [];
         if (sessionData.type === 'instruction' || sessionData.type === 'preparation') {
@@ -48,20 +45,17 @@ export const startSession = async (userId, sessionData) => {
                 instructionItems = instrSnap.data().items;
                 requiredItemIds = instructionItems.map(i => i.id);
 
-                // Suche bestehende Session, um bereits getragene Items zu prüfen
                 const qActive = query(collection(db, `users/${userId}/sessions`), where('isActive', '==', true), where('type', '==', 'instruction'));
                 const activeSnap = await getDocs(qActive);
                 const alreadyWornIds = !activeSnap.empty ? (activeSnap.docs[0].data().itemIds || []) : [];
 
-                // Prüfe für jedes neue Item, ob die Reihenfolge eingehalten wird
                 for (const newItemId of itemIds) {
                     const targetItem = instructionItems.find(i => i.id === newItemId);
                     if (targetItem && targetItem.orderIndex > 1) {
-                        // Prüfe alle Items, die davor kommen müssten
                         const missingPredecessors = instructionItems.filter(i => 
                             i.orderIndex < targetItem.orderIndex && 
                             !alreadyWornIds.includes(i.id) && 
-                            !itemIds.includes(i.id) // Falls mehrere gleichzeitig gestartet werden
+                            !itemIds.includes(i.id) 
                         );
 
                         if (missingPredecessors.length > 0) {
@@ -72,7 +66,6 @@ export const startSession = async (userId, sessionData) => {
                 }
             }
         }
-        // --- ENDE PROTOKOLL ---
 
         let existingSessionRef = null;
         let existingSessionData = null;
@@ -179,7 +172,6 @@ export const startSession = async (userId, sessionData) => {
                 }
             }
 
-            // THERMAL BLEED LOGIK
             let thermalYieldPayload = {};
             if (finalType === 'instruction' || finalType === 'voluntary' || sessionData.type === 'debt') {
                 try {
@@ -227,7 +219,8 @@ export const startSession = async (userId, sessionData) => {
                 endTime: null,
                 durationMinutes: 0,
                 isActive: true,
-                isPornActive: false
+                isPornActive: false,
+                isNSD: sessionData.isNSD || false
             };
 
             const newSessionRef = doc(collection(db, `users/${userId}/sessions`));
@@ -321,6 +314,16 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
     const batch = writeBatch(db);
     const endTime = new Date();
     const startTime = sessionData.startTime?.toDate ? sessionData.startTime.toDate() : new Date(); 
+    const isNSD = sessionData.isNSD || false;
+
+    if (isNSD && feedback.isTransit) {
+        const transitStartTime = sessionData.transitStartedAt?.toDate ? sessionData.transitStartedAt.toDate() : new Date();
+        const transitDuration = (new Date() - transitStartTime) / 1000;
+        
+        if (transitDuration > 300) {
+            console.log("SISSY-FEIERTAG: Transit-Zeit überschritten.");
+        }
+    }
     
     let sessionDiscountMinutes = 0;
     if (sessionData.type === 'instruction') {
@@ -340,7 +343,6 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
     
     const durationMinutes = Math.round((endTime - complianceStartTime) / 60000);
 
-    // THERMAL BLEED SETZEN
     if (durationMinutes >= 240 && (sessionData.type === 'instruction' || sessionData.type === 'voluntary' || sessionData.isDebtSession)) {
         const thermalRef = doc(db, `users/${userId}/status/thermal`);
         batch.set(thermalRef, { lastSessionEndTime: serverTimestamp(), lastSessionDuration: durationMinutes, isHot: true }, { merge: true });
@@ -388,7 +390,7 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
 
         if (retentionMinutes < MIN_RETENTION_MINUTES) {
             pendingPunishment = {
-                msg: `Schwäche nach Entladung: Items nach ${retentionMinutes}m abgelegt (gefordert: ${MIN_RETENTION_MINUTES}m)`,
+                msg: `Schwäche: Plastik nach ${retentionMinutes}m abgelegt (gefordert: ${MIN_RETENTION_MINUTES}m)`,
                 dur: 120
             };
         }
@@ -453,7 +455,7 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
                 const penaltyLc = tbBalance.lc < 0 ? Math.floor(Math.abs(tbBalance.lc) * 0.5) : 0;
                 newNc -= penaltyNc;
                 newLc -= penaltyLc;
-                bailoutMessage = `Not-Abbruch! 50% Strafaufschlag auf bestehende Schulden.`;
+                bailoutMessage = `Not-Abbruch! 50% Strafaufschlag auf bestehende Sissy-Schulden.`;
                 noteSuffix = 'NOT-ABBRUCH (50% Strafe)';
             } else {
                 newNc -= 240;
@@ -497,13 +499,12 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
             for (const id of snapshotIds) {
                 await addItemHistoryEntry(userId, id, {
                     type: 'uniformity_triggered',
-                    message: `Erzwungene Monotonie durch Not-Abbruch getriggert! Item ist für 96 Stunden als Straf-Uniform verriegelt.`
+                    message: `Erzwungene Monotonie durch Not-Abbruch getriggert! Item ist für 96 Stunden als Sissy-Uniform verriegelt.`
                 });
             }
         }
 
     } else {
-        // --- THERMAL BONUS LOGIK (Leistungsbasiert) ---
         if (sessionData.pendingThermalBonus) {
             let bonusQualifies = false;
             if (sessionData.type === 'voluntary') {
@@ -583,6 +584,98 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
     }
 
     return { creditCalculated };
+};
+
+/**
+ * NSD-SISSY-TRANSIT: Das Pendel-Ritual mit Set-Validierung
+ */
+export const executeNSDTransit = async (userId, newBaseId, newLayer2Id) => {
+    const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
+    const instrSnap = await getDoc(instrRef);
+    const instrData = instrSnap.data();
+
+    if (!instrData.nsdItems.includes(newBaseId) || !instrData.nsdItems.includes(newLayer2Id)) {
+        throw new Error("SISSY-FEIERTAG: Unerlaubtes Item. Du darfst nur das zugewiesene Plastik tragen.");
+    }
+
+    if (instrData.nsdTransitCount >= 6) {
+        throw new Error("SISSY-FEIERTAG: Maximale Wechsel (6) erschöpft. Du bleibst jetzt so verpackt.");
+    }
+
+    const prevLayer2Id = instrData.items.find(i => i.orderIndex === 2)?.id;
+    const prevLayer2Snap = await getDoc(doc(db, `users/${userId}/items`, prevLayer2Id));
+    const prevCat = (prevLayer2Snap.data()?.subCategory || '').toLowerCase();
+
+    const newLayer2Snap = await getDoc(doc(db, `users/${userId}/items`, newLayer2Id));
+    const newCat = (newLayer2Snap.data()?.subCategory || '').toLowerCase();
+
+    if (prevCat.includes('straps') && !newCat.includes('knie')) {
+        throw new Error("SISSY-FEIERTAG: Pendel-Gesetz verletzt! Du musst Kniestrümpfe über das Plastik ziehen.");
+    }
+    if (prevCat.includes('knie') && !newCat.includes('straps')) {
+        throw new Error("SISSY-FEIERTAG: Pendel-Gesetz verletzt! Du musst Strapsstrümpfe über das Plastik ziehen.");
+    }
+
+    const batch = writeBatch(db);
+    batch.update(instrRef, {
+        nsdTransitCount: increment(1),
+        items: [
+            { id: newBaseId, orderIndex: 1, category: 'Strumpfhose' },
+            { id: newLayer2Id, orderIndex: 2, category: newCat.includes('straps') ? 'Strapsstrümpfe' : 'Kniestrümpfe' }
+        ]
+    });
+    
+    const q = query(collection(db, `users/${userId}/sessions`), where('isActive', '==', true), where('isNSD', '==', true));
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+        batch.update(snap.docs[0].ref, {
+            itemIds: [newBaseId, newLayer2Id],
+            transitStartedAt: serverTimestamp()
+        });
+    }
+
+    await batch.commit();
+};
+
+/**
+ * SISSY-FEIERTAG: MELDUNG EINES DEFEKTS
+ * Ersetzt ein Item im Set durch ein neues aus derselben Subkategorie.
+ */
+export const reportNSDBreakage = async (userId, brokenItemId) => {
+    const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
+    const instrSnap = await getDoc(instrRef);
+    if (!instrSnap.exists() || !instrSnap.data().isNSD) throw new Error("Kein Sissy-Feiertag aktiv.");
+    
+    const instrData = instrSnap.data();
+    const brokenItemSnap = await getDoc(doc(db, `users/${userId}/items`, brokenItemId));
+    const subCat = brokenItemSnap.data()?.subCategory;
+
+    const qItems = query(collection(db, `users/${userId}/items`), where('status', '==', 'active'), where('subCategory', '==', subCat));
+    const itemsSnap = await getDocs(qItems);
+    const pool = itemsSnap.docs.filter(d => !instrData.nsdItems.includes(d.id));
+
+    if (pool.length === 0) throw new Error("SISSY-FEIERTAG: Kein Ersatz verfügbar. Du musst das kaputte Plastik weitertragen.");
+
+    const replacement = pool[Math.floor(Math.random() * pool.length)];
+    const newNsdItems = instrData.nsdItems.map(id => id === brokenItemId ? replacement.id : id);
+
+    const batch = writeBatch(db);
+    batch.update(doc(db, `users/${userId}/items`, brokenItemId), { 
+        status: 'archived', 
+        archiveReason: 'Defekt am Sissy-Feiertag' 
+    });
+    batch.update(instrRef, { nsdItems: newNsdItems });
+    
+    const qSess = query(collection(db, `users/${userId}/sessions`), where('isActive', '==', true), where('isNSD', '==', true));
+    const sessSnap = await getDocs(qSess);
+    if (!sessSnap.empty) {
+        const sData = sessSnap.docs[0].data();
+        const newItemIds = sData.itemIds.map(id => id === brokenItemId ? replacement.id : id);
+        batch.update(sessSnap.docs[0].ref, { itemIds: newItemIds });
+    }
+
+    await batch.commit();
+    return replacement.data()?.name;
 };
 
 export const updateSessionPornStatus = async (userId, sessionId, isPornActive) => {

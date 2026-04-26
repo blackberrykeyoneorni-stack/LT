@@ -29,6 +29,12 @@ const checkIsHoliday = (date) => {
     if (m === 12 && (d === 24 || d === 25 || d === 26)) return true;
     if (m === 12 && d === 31) return true;
     if (m === 1 && d === 1) return true;
+    if (m === 5 && d === 1) return true;//NEU: Tag der Arbeit
+    if (m === 10 && d === 3) return true;//NEU: Lene Geburtstag
+    if (m === 10 && d === 28) return true;//NEU: Marco Geburtstag
+    if (m === 2 && d === 26) return true;//NEU: Suse Geburtstag
+    if (m === 5 && d === 14) return true;//NEU: Himmelfahrt
+    if (m === 5 && d === 25) return true;//NEU: Pfingsten
     return false;
 };
 

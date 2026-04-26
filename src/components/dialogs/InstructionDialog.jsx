@@ -620,9 +620,14 @@ export default function InstructionDialog({
   };
 
   const renderPreparationPhase = () => {
-      const displayItems = (instruction?.items || []).map(instrItem => 
-          items.find(i => i.id === instrItem.id) || instrItem
-      );
+      // Items mappen, fehlende Daten anreichern und strikt nach orderIndex sortieren
+      const displayItems = (instruction?.items || [])
+          .map(instrItem => {
+              const foundItem = items.find(i => i.id === instrItem.id);
+              return foundItem ? { ...foundItem, orderIndex: instrItem.orderIndex } : instrItem;
+          })
+          .sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
+          
       const primaryTransitItem = instruction?.transitProtocol?.active ? items.find(i => i.id === instruction.transitProtocol.primaryItemId) : null;
 
       const itemsSelectedCount = verifiedItemIds.length;
@@ -686,7 +691,9 @@ export default function InstructionDialog({
                                 <AccessibilityNewIcon sx={{ fontSize: 40, color: isTransitBackup ? PALETTE.accents.red : 'inherit' }} />
                             </Box>
                         )}
-                        <Typography variant="subtitle1" sx={{ fontWeight: 'bold', lineHeight: 1.2, color: isTransitBackup ? PALETTE.accents.red : 'inherit' }}>{displayItem.name || displayItem.brand}</Typography>
+                        <Typography variant="subtitle1" sx={{ fontWeight: 'bold', lineHeight: 1.2, color: isTransitBackup ? PALETTE.accents.red : 'inherit' }}>
+                            {displayItem.orderIndex ? `${displayItem.orderIndex}. ` : ''}{displayItem.name || displayItem.brand}
+                        </Typography>
                         <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>{displayItem.subCategory} {displayItem.color ? `• ${displayItem.color}` : ''}</Typography>
                         
                         <Chip 
