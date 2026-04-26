@@ -55,7 +55,7 @@ export default function ItemGallery({ item, isEditing, onToggleEdit, onSave, onW
                                     <IconButton
                                         onClick={(e) => { e.stopPropagation(); onRemoveImage(index); }}
                                         sx={{ 
-                                            position: 'absolute', top: 16, right: 16, zIndex: 20, 
+                                            position: 'absolute', bottom: 60, right: 16, zIndex: 20, 
                                             bgcolor: 'rgba(0,0,0,0.6)', color: PALETTE.accents.red, 
                                             '&:hover': { bgcolor: 'rgba(0,0,0,0.9)' } 
                                         }}
@@ -84,7 +84,21 @@ export default function ItemGallery({ item, isEditing, onToggleEdit, onSave, onW
                         </IconButton>
                     )}
                     <IconButton onClick={onWriteNFC} sx={{ bgcolor: 'rgba(17,13,16,0.6)', backdropFilter: 'blur(4px)', color: PALETTE.accents.blue, border: `1px solid ${PALETTE.accents.blue}40`, '&:hover':{bgcolor:'rgba(17,13,16,0.9)'} }}><NfcIcon /></IconButton>
-                    <IconButton onClick={isEditing ? onSave : onToggleEdit} sx={{ bgcolor: isEditing ? PALETTE.primary.main : 'rgba(17,13,16,0.6)', backdropFilter: 'blur(4px)', color: isEditing ? '#000' : PALETTE.primary.main, border: `1px solid ${PALETTE.primary.main}40`, '&:hover':{bgcolor: isEditing ? PALETTE.primary.dark : 'rgba(17,13,16,0.9)'} }}>{isEditing ? <SaveIcon /> : <EditIcon />}</IconButton>
+                    
+                    {!isEditing && (
+                        <IconButton 
+                            onClick={onToggleEdit} 
+                            sx={{ 
+                                bgcolor: 'rgba(17,13,16,0.6)', 
+                                backdropFilter: 'blur(4px)', 
+                                color: PALETTE.primary.main, 
+                                border: `1px solid ${PALETTE.primary.main}40`, 
+                                '&:hover': { bgcolor: 'rgba(17,13,16,0.9)' } 
+                            }}
+                        >
+                            <EditIcon />
+                        </IconButton>
+                    )}
                 </Stack>
             </Box>
             

@@ -3,6 +3,8 @@ import { useItems } from '../../contexts/ItemContext';
 import useUIStore from '../../store/uiStore';
 import { useAuth } from '../../contexts/AuthContext';
 import { clearInflationNotice } from '../../services/TimeBankService';
+import { updateDoc, doc } from 'firebase/firestore';
+import { db } from '../../firebase';
 
 /**
  * useDashboardActions
@@ -58,10 +60,25 @@ export const useDashboardActions = () => {
     }
   }, [currentUser, showToast]);
 
+  // Wochenbericht bestätigen
+  const handleAcknowledgeReport = useCallback(async () => {
+    if (!currentUser) return;
+    try {
+        await updateDoc(doc(db, `users/${currentUser.uid}/settings/protocol`), {
+            "weeklyReport.acknowledged": true
+        });
+        showToast("Wochen-Audit bestätigt.", "success");
+    } catch (e) {
+        console.error("Fehler beim Bestätigen des Berichts:", e);
+        showToast("Netzwerkfehler.", "error");
+    }
+  }, [currentUser, showToast]);
+
   return {
     washingItems,
     handleWashItem,
     handleWashAll,
-    handleAcknowledgeInflation
+    handleAcknowledgeInflation,
+    handleAcknowledgeReport
   };
 };

@@ -70,17 +70,18 @@ export const generateWeeklyReport = async (userId, lastTargetMinutes) => {
   
   // Der Divisor vermindert sich um die Anzahl der Ausfalltage (Mindestens 1 zur Sicherheit)
   const divisor = Math.max(1, 5 - sickDaysCount);
-  const avgMinutes = Math.round(totalMinutes / divisor);
+  const avgMinutes = Math.round(totalMinutes / divisor) || 0;
   
   // --- NEUE VERSCHÄRFTE LOGIK ---
-  let newTarget = lastTargetMinutes;
+  const validLastTarget = (typeof lastTargetMinutes === 'number' && !isNaN(lastTargetMinutes)) ? lastTargetMinutes : 240;
+  let newTarget = validLastTarget;
   
-  if (avgMinutes > lastTargetMinutes) {
+  if (avgMinutes > validLastTarget) {
     // Steigerung: Der Durchschnitt wird das neue Ziel
     newTarget = avgMinutes;
   } else {
     // Stagnation: Altes Ziel bleibt (keine Senkung erlaubt)
-    newTarget = lastTargetMinutes;
+    newTarget = validLastTarget;
   }
 
   // Hardcap bei 12 Stunden (720 Minuten)
@@ -93,10 +94,11 @@ export const generateWeeklyReport = async (userId, lastTargetMinutes) => {
     sickDaysCount,
     totalMinutes,
     avgMinutes,
-    oldTarget: lastTargetMinutes,
+    oldTarget: validLastTarget,
     newTarget,
-    success: avgMinutes >= lastTargetMinutes,
-    isEscalated: newTarget > lastTargetMinutes
+    success: avgMinutes >= validLastTarget,
+    isEscalated: newTarget > validLastTarget,
+    acknowledged: false
   };
 
   await setDoc(doc(db, `users/${userId}/reports`, report.weekId), report);

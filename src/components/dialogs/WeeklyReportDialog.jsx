@@ -14,8 +14,10 @@ export default function WeeklyReportDialog({ open, onClose, report }) {
   if (!report) return null;
 
   const formatMins = (m) => {
-    const h = Math.floor(m / 60);
-    const mins = m % 60;
+    const val = Number(m);
+    if (isNaN(val)) return "0m";
+    const h = Math.floor(val / 60);
+    const mins = val % 60;
     return h > 0 ? `${h}h ${mins}m` : `${mins}m`;
   };
 
@@ -55,7 +57,7 @@ export default function WeeklyReportDialog({ open, onClose, report }) {
               }}>
                 <Typography sx={{ color: '#fff', fontSize: '0.9rem' }}>{dayData.day}:</Typography>
                 <Typography sx={{ 
-                  color: dayData.isSick ? PALETTE.accents.red : (dayData.minutes >= report.oldTarget ? PALETTE.accents.gold : '#777'),
+                  color: dayData.isSick ? PALETTE.accents.red : (dayData.minutes >= Number(report.oldTarget) ? PALETTE.accents.gold : '#777'),
                   fontWeight: 'bold',
                   fontSize: '0.9rem'
                 }}>

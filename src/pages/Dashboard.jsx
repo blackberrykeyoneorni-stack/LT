@@ -57,7 +57,7 @@ export default function Dashboard() {
   const { startBindingScan, isScanning: isNfcScanning } = useNFCGlobal();
 
   // Logic Hooks
-  const { washingItems, handleWashItem, handleWashAll } = useDashboardActions();
+  const { washingItems, handleWashItem, handleWashAll, handleAcknowledgeReport } = useDashboardActions();
   const { activeSessions, progress, loading: sessionsLoading, dailyTargetHours, registerRelease: hookRegisterRelease } = useSessionProgress(currentUser, items);
   const kpis = useKPIs(items, activeSessions);
   const { femIndex, femIndexLoading, indexDetails, phase, subScores } = useFemIndex(kpis);
@@ -694,6 +694,7 @@ export default function Dashboard() {
           }} 
           handleGambleDecline={handleGambleDecline} hasVoluntarySession={hasVoluntarySession} isForcedGamble={isForcedGamble}
           weeklyReport={weeklyReport} currentUser={currentUser} 
+          handleAcknowledgeReport={handleAcknowledgeReport}
           currentInstruction={currentInstruction} startOathPress={startOathPress} cancelOathPress={cancelOathPress}
           handleDeclineOath={handleDeclineOath} handleStartRequest={handleStartRequest} navigate={navigate} isFreeDay={isFreeDay} freeDayReason={freeDayReason} 
           instructionStatus={instructionStatus} isNight={isNight} showToast={showToast} 
