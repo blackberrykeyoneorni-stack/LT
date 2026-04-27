@@ -9,6 +9,16 @@ export const startSession = async (userId, sessionData) => {
     if (!userId || !sessionData) throw new Error("Parameter fehlen.");
 
     try {
+        // --- THE HANDOVER PROTOCOL (Semantische Isolation) ---
+        if (sessionData.type === 'instruction' || sessionData.type === 'preparation') {
+            const qTransit = query(collection(db, `users/${userId}/sessions`), where('isActive', '==', true), where('type', '==', 'transit'));
+            const transitSnap = await getDocs(qTransit);
+            if (!transitSnap.empty) {
+                await stopSession(userId, transitSnap.docs[0].id, { note: 'Beendet durch Handover-Protokoll' });
+            }
+        }
+        // -----------------------------------------------------
+
         const tbBalance = await getTimeBankBalance(userId);
         const isBankrupt = tbBalance.nc < 0 || tbBalance.lc < 0;
         if (isBankrupt && !sessionData.type.includes('debt') && !sessionData.type.includes('punishment') && !sessionData.type.includes('instruction')) {
@@ -273,7 +283,7 @@ export const startTransitProtocol = async (userId, itemId) => {
         itemIds: [itemId],
         itemLedger: { [itemId]: { joinedAt: serverTimestamp(), leftAt: null } },
         itemsDetails: [{ id: itemId, name: 'Transit Protocol Item' }],
-        type: 'instruction',
+        type: 'transit', // ÄNDERUNG: Isolierter Session-Typ
         transitProtocolActive: true, 
         transitItemId: itemId,
         complianceLagMinutes, 
@@ -559,15 +569,16 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
 
     batch.set(sessionRef, updateData, { merge: true });
 
+    // --- ÄNDERUNG: Aufgespaltene Schutz-Logik für Transit ---
     if (sessionData.type === 'instruction') {
         const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
         batch.set(instrRef, { isActive: false, activeSessionId: null, discountMinutes: 0 }, { merge: true });
-        
-        if (sessionData.transitProtocolActive) {
-            batch.set(instrRef, {
-                 transitProtocol: { active: false, sessionId: null, startTime: null }
-            }, { merge: true });
-        }
+    } else if (sessionData.type === 'transit') {
+        const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
+        batch.set(instrRef, {
+             transitProtocol: { active: false, sessionId: null, startTime: null },
+             activeSessionId: null
+        }, { merge: true });
     } else if (sessionData.type === 'punishment') {
         const punRef = doc(db, `users/${userId}/status/punishment`);
         batch.set(punRef, { activeSessionId: null }, { merge: true });

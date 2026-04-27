@@ -211,6 +211,19 @@ export const DESIGN_TOKENS = {
     '& .MuiInputLabel-root.Mui-focused': { color: m3Tokens.primary },
   },
 
+  dropdownMenu: {
+    sx: {
+      background: m3Tokens.surfaceContainerHigh,
+      backdropFilter: 'blur(24px)',
+      WebkitBackdropFilter: 'blur(24px)',
+      border: `1px solid ${m3Tokens.outlineVariant}`,
+      borderTop: `2px dashed ${m3Tokens.primary}`,
+      boxShadow: '0 10px 40px rgba(0,0,0,0.9)',
+      color: '#FFFFFF',
+      backgroundImage: 'none'
+    }
+  },
+
   dialog: {
       paper: {
           sx: {

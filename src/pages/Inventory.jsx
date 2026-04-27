@@ -391,7 +391,7 @@ export default function Inventory() {
               <IconButton onClick={() => setFilterOpen(false)} sx={{ color: PALETTE.text.primary }}><CloseIcon /></IconButton>
           </Box>
           
-          <TextField select fullWidth size="small" margin="dense" label="Sortierung" value={sortBy} onChange={e => setSortBy(e.target.value)} sx={DESIGN_TOKENS.inputField}>
+          <TextField select fullWidth size="small" margin="dense" label="Sortierung" value={sortBy} onChange={e => setSortBy(e.target.value)} sx={DESIGN_TOKENS.inputField} SelectProps={{ MenuProps: { PaperProps: DESIGN_TOKENS.dropdownMenu } }}>
             <MenuItem value="dateDesc">Neueste zuerst</MenuItem>
             <MenuItem value="dateAsc">Älteste zuerst</MenuItem>
             <MenuItem value="priceDesc">Preis (Hoch {'>'} Niedrig)</MenuItem>
@@ -404,34 +404,34 @@ export default function Inventory() {
 
           <Typography variant="subtitle2" sx={{ mt: 3, mb: 1, color: PALETTE.text.secondary, textTransform: 'uppercase', letterSpacing: 1 }}>Filter</Typography>
           
-          <TextField select fullWidth label="Status" margin="dense" size="small" value={filterStatus} onChange={e => setFilterStatus(e.target.value)} sx={DESIGN_TOKENS.inputField}>
+          <TextField select fullWidth label="Status" margin="dense" size="small" value={filterStatus} onChange={e => setFilterStatus(e.target.value)} sx={DESIGN_TOKENS.inputField} SelectProps={{ MenuProps: { PaperProps: DESIGN_TOKENS.dropdownMenu } }}>
               <MenuItem value="active">Verfügbar</MenuItem>
               <MenuItem value="All">Alle</MenuItem>
               <MenuItem value="washing">In der Wäsche</MenuItem>
               <MenuItem value="archived">Archiviert</MenuItem>
           </TextField>
 
-          <TextField select fullWidth label="Lagerort" margin="dense" size="small" value={filterLocation} onChange={e => setFilterLocation(e.target.value)} sx={DESIGN_TOKENS.inputField}>
+          <TextField select fullWidth label="Lagerort" margin="dense" size="small" value={filterLocation} onChange={e => setFilterLocation(e.target.value)} sx={DESIGN_TOKENS.inputField} SelectProps={{ MenuProps: { PaperProps: DESIGN_TOKENS.dropdownMenu } }}>
               <MenuItem value="All">Alle Orte</MenuItem>
               {availableLocations.map(loc => (<MenuItem key={loc} value={loc}>{loc}</MenuItem>))}
           </TextField>
 
-          <TextField select fullWidth label="Kategorie" margin="dense" size="small" value={filterCategory} onChange={e => setFilterCategory(e.target.value)} sx={DESIGN_TOKENS.inputField}>
+          <TextField select fullWidth label="Kategorie" margin="dense" size="small" value={filterCategory} onChange={e => setFilterCategory(e.target.value)} sx={DESIGN_TOKENS.inputField} SelectProps={{ MenuProps: { PaperProps: DESIGN_TOKENS.dropdownMenu } }}>
               <MenuItem value="All">Alle</MenuItem>
               {categories.map(c => <MenuItem key={c} value={c}>{c}</MenuItem>)}
           </TextField>
 
-          <TextField select fullWidth label="Subkategorie" margin="dense" size="small" value={filterSubCategory} onChange={e => setFilterSubCategory(e.target.value)} sx={DESIGN_TOKENS.inputField}>
+          <TextField select fullWidth label="Subkategorie" margin="dense" size="small" value={filterSubCategory} onChange={e => setFilterSubCategory(e.target.value)} sx={DESIGN_TOKENS.inputField} SelectProps={{ MenuProps: { PaperProps: DESIGN_TOKENS.dropdownMenu } }}>
               <MenuItem value="All">Alle</MenuItem>
               {subCategories.map(sc => <MenuItem key={sc} value={sc}>{sc}</MenuItem>)}
           </TextField>
 
-          <TextField select fullWidth label="Marke" margin="dense" size="small" value={filterBrand} onChange={e => setFilterBrand(e.target.value)} sx={DESIGN_TOKENS.inputField}>
+          <TextField select fullWidth label="Marke" margin="dense" size="small" value={filterBrand} onChange={e => setFilterBrand(e.target.value)} sx={DESIGN_TOKENS.inputField} SelectProps={{ MenuProps: { PaperProps: DESIGN_TOKENS.dropdownMenu } }}>
               <MenuItem value="All">Alle Marken</MenuItem>
               {dropdowns.brands.map(b => <MenuItem key={b} value={b}>{b}</MenuItem>)}
           </TextField>
 
-          <TextField select fullWidth label="Material" margin="dense" size="small" value={filterMaterial} onChange={e => setFilterMaterial(e.target.value)} sx={DESIGN_TOKENS.inputField}>
+          <TextField select fullWidth label="Material" margin="dense" size="small" value={filterMaterial} onChange={e => setFilterMaterial(e.target.value)} sx={DESIGN_TOKENS.inputField} SelectProps={{ MenuProps: { PaperProps: DESIGN_TOKENS.dropdownMenu } }}>
               <MenuItem value="All">Alle Materialien</MenuItem>
               {dropdowns.materials.map(m => <MenuItem key={m} value={m}>{m}</MenuItem>)}
           </TextField>
