@@ -1,3 +1,4 @@
+// src/services/TZDService.js
 import { db } from '../firebase';
 import { doc, updateDoc, serverTimestamp, setDoc, getDoc, increment, query, collection, where, getDocs, addDoc, writeBatch } from 'firebase/firestore';
 import { safeDate } from '../utils/dateUtils';
@@ -46,7 +47,7 @@ const determineSecretDuration = (matrix) => {
 // --- CORE ---
 
 /**
- * Startet das Protokoll. 
+ * Startet das Protokoll (Concurrent Execution Mode).
  */
 export const startTZD = async (userId, targetItems, durationMatrix, overrideDurationMinutes = null, customType = null, escalationData = null) => {
     let targetDuration;
@@ -58,6 +59,28 @@ export const startTZD = async (userId, targetItems, durationMatrix, overrideDura
     }
 
     const itemsArray = Array.isArray(targetItems) ? targetItems : [targetItems];
+    let parentSessionId = null;
+    let periodIdToCarryOver = 'day';
+
+    // --- Session Setup: Parent Session Injection ---
+    try {
+        const activeSessionsQuery = query(collection(db, `users/${userId}/sessions`), where('isActive', '==', true), where('type', '==', 'instruction'));
+        const activeSessionsSnap = await getDocs(activeSessionsQuery);
+        
+        for (const sessionDoc of activeSessionsSnap.docs) {
+            parentSessionId = sessionDoc.id;
+            const sData = sessionDoc.data();
+            periodIdToCarryOver = sData.periodId || periodIdToCarryOver;
+            
+            // Concurrent Override: Session läuft weiter, erhält nur Flag
+            await updateDoc(sessionDoc.ref, { 
+                isTzdActive: true,
+                tzdStartTime: serverTimestamp()
+            });
+        }
+    } catch (e) {
+        console.error("Fehler beim Concurrent-Setup für TZD:", e);
+    }
 
     const tzdData = {
         isActive: true,
@@ -74,56 +97,20 @@ export const startTZD = async (userId, targetItems, durationMatrix, overrideDura
         })),
         itemId: itemsArray[0]?.id, 
         itemName: itemsArray[0]?.name,
-        
         accumulatedMinutes: 0,
         lastCheckIn: serverTimestamp(),
         stage: 'briefing',
         isFailed: false,
         isPenalty: !!overrideDurationMinutes || customType === 'spiel_tzd',
         protocolType: customType || (overrideDurationMinutes ? 'evasion_penalty' : 'regular'),
-        escalationData: escalationData || null
+        escalationData: escalationData || null,
+        parentSessionId: parentSessionId 
     };
 
     await setDoc(doc(db, `users/${userId}/status/tzd`), tzdData);
 
-    // --- Session-Schnitt zur Eliminierung des Double-Countings (inkl. Backup) ---
-    let interruptedInstruction = null;
+    // Parallel die TZD Session für reine Statistik und UI Tracking starten
     try {
-        const activeSessionsQuery = query(collection(db, `users/${userId}/sessions`), where('isActive', '==', true), where('type', '==', 'instruction'));
-        const activeSessionsSnap = await getDocs(activeSessionsQuery);
-        let periodIdToCarryOver = 'day';
-        
-        const dailySnap = await getDoc(doc(db, `users/${userId}/status/dailyInstruction`));
-        let baseDuration = 0;
-        if (dailySnap.exists()) {
-            baseDuration = dailySnap.data().durationMinutes || 0;
-        }
-        
-        for (const sessionDoc of activeSessionsSnap.docs) {
-            const sData = sessionDoc.data();
-            periodIdToCarryOver = sData.periodId || periodIdToCarryOver;
-            
-            let remainingMinutes = baseDuration;
-            if (sData.startTime) {
-                const start = sData.startTime.toDate ? sData.startTime.toDate() : new Date(sData.startTime);
-                const elapsed = Math.round((new Date() - start) / 60000);
-                remainingMinutes = Math.max(1, baseDuration - elapsed);
-            }
-
-            interruptedInstruction = {
-                items: sData.itemsDetails || [],
-                periodId: periodIdToCarryOver,
-                remainingDuration: remainingMinutes
-            };
-
-            await stopSession(userId, sessionDoc.id, { note: 'Beendet für TZD-Start (Schnitt)' });
-        }
-
-        if (interruptedInstruction) {
-            await updateDoc(doc(db, `users/${userId}/status/tzd`), { interruptedInstruction });
-        }
-
-        // TZD als völlig isolierten Typen 'tzd' starten
         await startSession(userId, {
             items: itemsArray,
             type: 'tzd',
@@ -131,9 +118,7 @@ export const startTZD = async (userId, targetItems, durationMatrix, overrideDura
             note: customType === 'spiel_tzd' ? 'TZD-Session (Gamble)' : 'TZD-Session',
             instructionDurationMinutes: targetDuration
         });
-    } catch (e) {
-        console.error("Fehler beim Session-Schnitt für TZD:", e);
-    }
+    } catch (e) { console.error("Fehler bei tzd session start", e); }
 
     // Historie für alle betroffenen Items vermerken
     for (const item of itemsArray) {
@@ -437,6 +422,7 @@ export const terminateTZD = async (userId, success = true, customResult = null) 
         result: finalResult 
     });
 
+    // TZD-Session abschließen (Sub-Tracking)
     try {
         const q = query(
             collection(db, `users/${userId}/sessions`),
@@ -452,6 +438,31 @@ export const terminateTZD = async (userId, success = true, customResult = null) 
             });
         }
     } catch (e) { console.error("Fehler beim Setzen von tzdExecuted:", e); }
+
+    // --- NEUES KONZEPT: DIE HARTE FEHLERKASKADE (PARENT SESSION) ---
+    if (status && status.parentSessionId) {
+        try {
+            const parentRef = doc(db, `users/${userId}/sessions`, status.parentSessionId);
+            const parentSnap = await getDoc(parentRef);
+            
+            if (parentSnap.exists() && parentSnap.data().isActive) {
+                if (!success) {
+                    // Abbruch/Versagen -> Parent Session hart beenden
+                    await stopSession(userId, status.parentSessionId, { 
+                        note: 'ABBRUCH (TZD-Kaskade / Versagen im Diktat)' 
+                    });
+                } else {
+                    // Erfolg -> Sub-Status entfernen, Parent läuft nahtlos weiter
+                    await updateDoc(parentRef, { 
+                        isTzdActive: false,
+                        tzdExecuted: true 
+                    });
+                }
+            }
+        } catch (e) {
+            console.error("Fehler bei der Parent-Session Kaskade:", e);
+        }
+    }
 
     // Parität: Exakt 24h TZD generiert 24h Immunität (Reward)
     if (success) {
@@ -714,13 +725,46 @@ export const swapItemInTZD = async (userId, oldItemId, archiveData, allItems) =>
                 itemsDetails: newItemsDetails
             };
             
-            // NEU: Item Ledger für punktgenaue Verschleißmessung aktualisieren
+            // Item Ledger für punktgenaue Verschleißmessung aktualisieren
             if (sessionData.itemLedger) {
                 sessionUpdates[`itemLedger.${oldItemId}.leftAt`] = serverTimestamp();
                 sessionUpdates[`itemLedger.${replacement.id}`] = { joinedAt: serverTimestamp(), leftAt: null };
             }
             
             batch.update(sessionDoc.ref, sessionUpdates);
+        }
+
+        // NEU: Parent Session (Instruction) ebenfalls tiefgehend synchronisieren
+        if (tzdData.parentSessionId) {
+            const parentRef = doc(db, `users/${userId}/sessions`, tzdData.parentSessionId);
+            const parentSnap = await getDoc(parentRef);
+            if (parentSnap.exists() && parentSnap.data().isActive) {
+                const pData = parentSnap.data();
+                const pNewItemIds = pData.itemIds ? pData.itemIds.map(id => id === oldItemId ? replacement.id : id) : [];
+                const pNewItemsDetails = pData.itemsDetails ? pData.itemsDetails.map(item => {
+                    if (item.id === oldItemId) {
+                        return {
+                            id: replacement.id,
+                            name: replacement.name || replacement.subCategory || 'Unknown',
+                            brand: replacement.brand || 'Unknown',
+                            category: replacement.category || replacement.mainCategory || 'Nylons',
+                            customId: replacement.customId || null,
+                            imageUrl: replacement.imageUrl || (replacement.images && replacement.images.length > 0 ? replacement.images[0] : null)
+                        };
+                    }
+                    return item;
+                }) : [];
+                
+                const pSessionUpdates = {
+                    itemIds: pNewItemIds,
+                    itemsDetails: pNewItemsDetails
+                };
+                if (pData.itemLedger) {
+                    pSessionUpdates[`itemLedger.${oldItemId}.leftAt`] = serverTimestamp();
+                    pSessionUpdates[`itemLedger.${replacement.id}`] = { joinedAt: serverTimestamp(), leftAt: null };
+                }
+                batch.update(parentRef, pSessionUpdates);
+            }
         }
 
         // 5. Generelle Historie schreiben
@@ -768,11 +812,11 @@ export const grantTZDAmnesty = async (userId) => {
                 tzdAmnestyUntil: amnestyEnd
             });
             
-            // 2. TZD-Status lesen für Forensik und Backup-Wiederaufnahme
+            // 2. TZD-Status lesen für Forensik und Parent-Info
             const tzdSnap = await getDoc(tzdRef);
-            let interruptedData = null;
+            let parentId = null;
             if (tzdSnap.exists()) {
-                interruptedData = tzdSnap.data().interruptedInstruction;
+                parentId = tzdSnap.data().parentSessionId;
                 if(tzdSnap.data().lockedItems) {
                     for(const item of tzdSnap.data().lockedItems) {
                         await addItemHistoryEntry(userId, item.id, {
@@ -783,7 +827,7 @@ export const grantTZDAmnesty = async (userId) => {
                 }
             }
 
-            // 3. ZOMBIE-KILL: Die im Hintergrund laufende TZD-Session stoppen
+            // 3. ZOMBIE-KILL: Die im Hintergrund laufende TZD-Tracking-Session stoppen
             const qTzd = query(collection(db, `users/${userId}/sessions`), where('isActive', '==', true), where('type', '==', 'tzd'));
             const activeTzdSnap = await getDocs(qTzd);
             for (const activeDoc of activeTzdSnap.docs) {
@@ -797,20 +841,13 @@ export const grantTZDAmnesty = async (userId) => {
                 endTime: serverTimestamp()
             });
 
-            // 5. NAHTLOSE WIEDERAUFNAHME (Seamless Resumption)
-            if (interruptedData && interruptedData.items && interruptedData.items.length > 0) {
-                await startSession(userId, {
-                    items: interruptedData.items,
-                    type: 'instruction',
-                    periodId: interruptedData.periodId,
-                    instructionDurationMinutes: interruptedData.remainingDuration,
-                    note: 'Nahtlose Wiederaufnahme nach Amnestie'
-                });
-
-                // Instruction-Dauer anpassen, damit UI den fortgesetzten Timer korrekt rendert
-                await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), {
-                    durationMinutes: interruptedData.remainingDuration
-                });
+            // 5. NAHTLOSE WIEDERAUFNAHME: Einfach den TZD-Sub-Status von der Parent Session entfernen
+            if (parentId) {
+                const parentRef = doc(db, `users/${userId}/sessions`, parentId);
+                const parentSnap = await getDoc(parentRef);
+                if (parentSnap.exists() && parentSnap.data().isActive) {
+                    await updateDoc(parentRef, { isTzdActive: false });
+                }
             }
 
             return true;
