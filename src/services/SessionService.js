@@ -346,14 +346,20 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
     }
     
     let sessionDiscountMinutes = 0;
+    let trueDailyTarget = 0;
     if (sessionData.type === 'instruction') {
         try {
             const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
             const instrSnap = await getDoc(instrRef);
-            if (instrSnap.exists() && instrSnap.data().discountMinutes) {
-                sessionDiscountMinutes = instrSnap.data().discountMinutes;
+            if (instrSnap.exists()) {
+                if (instrSnap.data().discountMinutes) {
+                    sessionDiscountMinutes = instrSnap.data().discountMinutes;
+                }
+                if (instrSnap.data().durationMinutes) {
+                    trueDailyTarget = instrSnap.data().durationMinutes;
+                }
             }
-        } catch (e) { console.error("Fehler beim Auslesen der discountMinutes:", e); }
+        } catch (e) { console.error("Fehler beim Auslesen der Instruction-Daten:", e); }
     }
 
     let complianceStartTime = startTime;
@@ -366,7 +372,7 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
     // --- COMPLETION LOCK PRÜFUNG ---
     let isInstructionCompleted = false;
     if (sessionData.type === 'instruction') {
-        const target = sessionData.targetDurationMinutes || 0;
+        const target = trueDailyTarget > 0 ? trueDailyTarget : (sessionData.targetDurationMinutes || 0);
         let totalAccumulatedMinutes = durationMinutes + sessionDiscountMinutes;
         
         if (sessionData.periodId) {
