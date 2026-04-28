@@ -19,6 +19,16 @@ export const startSession = async (userId, sessionData) => {
         }
         // -----------------------------------------------------
 
+        // --- POST-COMPLIANCE SHIFT (Semantische Umwandlung) ---
+        if (sessionData.type === 'instruction' || sessionData.type === 'preparation') {
+            const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
+            const instrSnap = await getDoc(instrRef);
+            if (instrSnap.exists() && instrSnap.data().isCompleted) {
+                sessionData.type = 'voluntary';
+            }
+        }
+        // -----------------------------------------------------
+
         const tbBalance = await getTimeBankBalance(userId);
         const isBankrupt = tbBalance.nc < 0 || tbBalance.lc < 0;
         if (isBankrupt && !sessionData.type.includes('debt') && !sessionData.type.includes('punishment') && !sessionData.type.includes('instruction')) {
@@ -283,7 +293,7 @@ export const startTransitProtocol = async (userId, itemId) => {
         itemIds: [itemId],
         itemLedger: { [itemId]: { joinedAt: serverTimestamp(), leftAt: null } },
         itemsDetails: [{ id: itemId, name: 'Transit Protocol Item' }],
-        type: 'transit', // ÄNDERUNG: Isolierter Session-Typ
+        type: 'instruction',
         transitProtocolActive: true, 
         transitItemId: itemId,
         complianceLagMinutes, 
@@ -352,6 +362,33 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
     }
     
     const durationMinutes = Math.round((endTime - complianceStartTime) / 60000);
+
+    // --- COMPLETION LOCK PRÜFUNG ---
+    let isInstructionCompleted = false;
+    if (sessionData.type === 'instruction') {
+        const target = sessionData.targetDurationMinutes || 0;
+        let totalAccumulatedMinutes = durationMinutes + sessionDiscountMinutes;
+        
+        if (sessionData.periodId) {
+            try {
+                const qPast = query(
+                    collection(db, `users/${userId}/sessions`), 
+                    where('periodId', '==', sessionData.periodId), 
+                    where('type', '==', 'instruction'), 
+                    where('isActive', '==', false)
+                );
+                const pastSnap = await getDocs(qPast);
+                pastSnap.forEach(docSnap => {
+                    totalAccumulatedMinutes += (docSnap.data().durationMinutes || 0);
+                });
+            } catch (e) { console.error("Fehler bei der Akkumulation:", e); }
+        }
+
+        if (target > 0 && totalAccumulatedMinutes >= target) {
+            isInstructionCompleted = true;
+        }
+    }
+    // --------------------------------
 
     if (durationMinutes >= 240 && (sessionData.type === 'instruction' || sessionData.type === 'voluntary' || sessionData.isDebtSession)) {
         const thermalRef = doc(db, `users/${userId}/status/thermal`);
@@ -569,10 +606,21 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
 
     batch.set(sessionRef, updateData, { merge: true });
 
-    // --- ÄNDERUNG: Aufgespaltene Schutz-Logik für Transit ---
     if (sessionData.type === 'instruction') {
         const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
-        batch.set(instrRef, { isActive: false, activeSessionId: null, discountMinutes: 0 }, { merge: true });
+        const instrUpdates = { isActive: false, activeSessionId: null, discountMinutes: 0 };
+        
+        if (isInstructionCompleted) {
+            instrUpdates.isCompleted = true;
+        }
+
+        batch.set(instrRef, instrUpdates, { merge: true });
+        
+        if (sessionData.transitProtocolActive) {
+            batch.set(instrRef, {
+                 transitProtocol: { active: false, sessionId: null, startTime: null }
+            }, { merge: true });
+        }
     } else if (sessionData.type === 'transit') {
         const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
         batch.set(instrRef, {
