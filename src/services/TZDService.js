@@ -1,4 +1,3 @@
-// src/services/TZDService.js
 import { db } from '../firebase';
 import { doc, updateDoc, serverTimestamp, setDoc, getDoc, increment, query, collection, where, getDocs, addDoc, writeBatch } from 'firebase/firestore';
 import { safeDate } from '../utils/dateUtils';
@@ -8,7 +7,7 @@ import { addItemHistoryEntry } from './ItemService';
 import { stopSession, startSession } from './SessionService';
 import { liquidateAssets } from './TimeBankService';
 
-// --- KONFIGURATION (NEU) ---
+// --- KONFIGURATION ---
 const TZD_CONFIG = {
     DEFAULT_MULTIPLIER: 1.5,
     PENALTY_MINUTES: 15,
@@ -47,40 +46,51 @@ const determineSecretDuration = (matrix) => {
 // --- CORE ---
 
 /**
- * Startet das Protokoll (Concurrent Execution Mode).
+ * Zieht die TZD Einstellungen zentral aus der Datenbank.
  */
-export const startTZD = async (userId, targetItems, durationMatrix, overrideDurationMinutes = null, customType = null, escalationData = null) => {
-    let targetDuration;
+export const getTZDSettings = async (userId) => {
+    let maxHours = 36;
+    let currentChance = FALLBACK_TRIGGER_CHANCE;
+    let weights = [0.20, 0.50, 0.30];
 
-    if (overrideDurationMinutes) {
-        targetDuration = overrideDurationMinutes;
-    } else {
-        targetDuration = determineSecretDuration(durationMatrix);
-    }
-
-    const itemsArray = Array.isArray(targetItems) ? targetItems : [targetItems];
-    let parentSessionId = null;
-    let periodIdToCarryOver = 'day';
-
-    // --- Session Setup: Parent Session Injection ---
     try {
-        const activeSessionsQuery = query(collection(db, `users/${userId}/sessions`), where('isActive', '==', true), where('type', '==', 'instruction'));
-        const activeSessionsSnap = await getDocs(activeSessionsQuery);
-        
-        for (const sessionDoc of activeSessionsSnap.docs) {
-            parentSessionId = sessionDoc.id;
-            const sData = sessionDoc.data();
-            periodIdToCarryOver = sData.periodId || periodIdToCarryOver;
-            
-            // Concurrent Override: Session läuft weiter, erhält nur Flag
-            await updateDoc(sessionDoc.ref, { 
-                isTzdActive: true,
-                tzdStartTime: serverTimestamp()
-            });
+        const settingsSnap = await getDoc(doc(db, `users/${userId}/settings/protocol`));
+        if (settingsSnap.exists()) {
+            const data = settingsSnap.data();
+            if (data.tzd) {
+                if (typeof data.tzd.tzdMaxHours === 'number') {
+                    maxHours = data.tzd.tzdMaxHours;
+                }
+                if (typeof data.tzd.triggerChance === 'number') {
+                    currentChance = data.tzd.triggerChance;
+                }
+                if (data.tzd.zoneWeights && Array.isArray(data.tzd.zoneWeights)) {
+                    weights = data.tzd.zoneWeights;
+                }
+            }
         }
     } catch (e) {
-        console.error("Fehler beim Concurrent-Setup für TZD:", e);
+        console.error("Fehler beim Laden der TZD Settings, nutze Fallback", e);
     }
+    
+    return { maxHours, currentChance, weights };
+};
+
+/**
+ * Startet das einheitliche Protokoll (Absolute Ungewissheit). 
+ */
+export const startTZD = async (userId, targetItems) => {
+    
+    const { maxHours, weights } = await getTZDSettings(userId);
+    
+    const dynamicMatrix = [
+        { label: 'The Bait', minHours: maxHours / 6, maxHours: maxHours / 3, weight: weights[0] || 0.20 },
+        { label: 'The Standard', minHours: maxHours / 3, maxHours: (maxHours * 2) / 3, weight: weights[1] || 0.50 },
+        { label: 'The Wall', minHours: (maxHours * 2) / 3, maxHours: maxHours, weight: weights[2] || 0.30 }
+    ];
+
+    const targetDuration = determineSecretDuration(dynamicMatrix);
+    const itemsArray = Array.isArray(targetItems) ? targetItems : [targetItems];
 
     const tzdData = {
         isActive: true,
@@ -97,44 +107,73 @@ export const startTZD = async (userId, targetItems, durationMatrix, overrideDura
         })),
         itemId: itemsArray[0]?.id, 
         itemName: itemsArray[0]?.name,
+        
         accumulatedMinutes: 0,
         lastCheckIn: serverTimestamp(),
         stage: 'briefing',
         isFailed: false,
-        isPenalty: !!overrideDurationMinutes || customType === 'spiel_tzd',
-        protocolType: customType || (overrideDurationMinutes ? 'evasion_penalty' : 'regular'),
-        escalationData: escalationData || null,
-        parentSessionId: parentSessionId 
+        isPenalty: false, // Keine Unterscheidung mehr. TZD ist TZD.
+        protocolType: 'regular',
+        escalationData: null
     };
 
     await setDoc(doc(db, `users/${userId}/status/tzd`), tzdData);
 
-    // Parallel die TZD Session für reine Statistik und UI Tracking starten
+    // --- Session-Schnitt zur Eliminierung des Double-Countings (inkl. Backup) ---
+    let interruptedInstruction = null;
     try {
+        const activeSessionsQuery = query(collection(db, `users/${userId}/sessions`), where('isActive', '==', true), where('type', '==', 'instruction'));
+        const activeSessionsSnap = await getDocs(activeSessionsQuery);
+        let periodIdToCarryOver = 'day';
+        
+        const dailySnap = await getDoc(doc(db, `users/${userId}/status/dailyInstruction`));
+        let baseDuration = 0;
+        if (dailySnap.exists()) {
+            baseDuration = dailySnap.data().durationMinutes || 0;
+        }
+        
+        for (const sessionDoc of activeSessionsSnap.docs) {
+            const sData = sessionDoc.data();
+            periodIdToCarryOver = sData.periodId || periodIdToCarryOver;
+            
+            let remainingMinutes = baseDuration;
+            if (sData.startTime) {
+                const start = sData.startTime.toDate ? sData.startTime.toDate() : new Date(sData.startTime);
+                const elapsed = Math.round((new Date() - start) / 60000);
+                remainingMinutes = Math.max(1, baseDuration - elapsed);
+            }
+
+            interruptedInstruction = {
+                items: sData.itemsDetails || [],
+                periodId: periodIdToCarryOver,
+                remainingDuration: remainingMinutes
+            };
+
+            await stopSession(userId, sessionDoc.id, { note: 'Beendet für TZD-Start (Schnitt)' });
+        }
+
+        if (interruptedInstruction) {
+            await updateDoc(doc(db, `users/${userId}/status/tzd`), { interruptedInstruction });
+        }
+
+        // TZD als völlig isolierten Typen 'tzd' starten
         await startSession(userId, {
             items: itemsArray,
             type: 'tzd',
             periodId: periodIdToCarryOver,
-            note: customType === 'spiel_tzd' ? 'TZD-Session (Gamble)' : 'TZD-Session',
+            note: 'TZD-Session',
             instructionDurationMinutes: targetDuration
         });
-    } catch (e) { console.error("Fehler bei tzd session start", e); }
+    } catch (e) {
+        console.error("Fehler beim Session-Schnitt für TZD:", e);
+    }
 
     // Historie für alle betroffenen Items vermerken
     for (const item of itemsArray) {
-        let messageText = '';
-        if (customType === 'spiel_tzd') {
-            messageText = `Spiel-TZD gestartet (Verlorenes Spiel, Dauer: ${Math.round(targetDuration)} Min).`;
-        } else if (overrideDurationMinutes) {
-            messageText = `Straf-TZD wegen Fluchtversuch gestartet (Dauer: ${Math.round(targetDuration)} Min).`;
-        } else {
-            messageText = `Zeitloses Diktat gestartet (Dauer: ${Math.round(targetDuration)} Min).`;
-        }
-            
         await addItemHistoryEntry(userId, item.id, {
             type: 'tzd_briefing',
-            message: messageText,
-            isPenalty: !!overrideDurationMinutes || customType === 'spiel_tzd'
+            message: `Zeitloses Diktat gestartet (Dauer: ${Math.round(targetDuration)} Min).`,
+            isPenalty: false
         });
     }
 
@@ -152,26 +191,14 @@ export const triggerEvasionPenalty = async (userId, instructionItems) => {
             return false;
         }
 
-        let baseDurationMinutes = 120; // Fallback
-        const dailySnap = await getDoc(doc(db, `users/${userId}/status/dailyInstruction`));
-        
-        if (dailySnap.exists()) {
-            const data = dailySnap.data();
-            if (data.originalDurationMinutes) {
-                baseDurationMinutes = data.originalDurationMinutes;
-            } else if (data.durationMinutes) {
-                baseDurationMinutes = data.durationMinutes;
-            }
-        }
+        console.log(`Evasion Detected. Triggering unified TZD.`);
 
-        const penaltyMinutes = Math.round(baseDurationMinutes * TZD_CONFIG.DEFAULT_MULTIPLIER);
-        console.log(`Evasion Detected. Triggering TZD Penalty: ${penaltyMinutes} minutes.`);
-
-        await startTZD(userId, instructionItems, null, penaltyMinutes);
+        // Löst das völlig unberechenbare TZD aus (Option A)
+        await startTZD(userId, instructionItems);
         
         await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), {
             evasionPenaltyTriggered: true,
-            tzdDurationMinutes: penaltyMinutes
+            tzdTriggered: true
         });
         
         await registerPunishment(userId, "Fluchtversuch vor Anweisung (Blockade umgangen)", 0); 
@@ -269,40 +296,11 @@ export const checkForTZDTrigger = async (userId, activeSessions, items) => {
     const hasEligibleItem = activeItems.some(i => isItemEligibleForTZD(i));
     if (!hasEligibleItem) return false;
 
-    let currentChance = FALLBACK_TRIGGER_CHANCE;
-    
-    let maxHours = 36;
-    let weights = [0.20, 0.50, 0.30];
-
-    try {
-        const settingsSnap = await getDoc(doc(db, `users/${userId}/settings/protocol`));
-        if (settingsSnap.exists()) {
-            const data = settingsSnap.data();
-            if (data.tzd) {
-                if (typeof data.tzd.triggerChance === 'number') {
-                    currentChance = data.tzd.triggerChance;
-                }
-                if (typeof data.tzd.tzdMaxHours === 'number') {
-                    maxHours = data.tzd.tzdMaxHours;
-                }
-                if (data.tzd.zoneWeights && Array.isArray(data.tzd.zoneWeights)) {
-                    weights = data.tzd.zoneWeights;
-                }
-            }
-        }
-    } catch (e) {
-        console.error("Fehler beim Laden der TZD Settings, nutze Fallback", e);
-    }
-
-    const dynamicMatrix = [
-        { label: 'The Bait', minHours: maxHours / 6, maxHours: maxHours / 3, weight: weights[0] || 0.20 },
-        { label: 'The Standard', minHours: maxHours / 3, maxHours: (maxHours * 2) / 3, weight: weights[1] || 0.50 },
-        { label: 'The Wall', minHours: (maxHours * 2) / 3, maxHours: maxHours, weight: weights[2] || 0.30 }
-    ];
+    const { currentChance } = await getTZDSettings(userId);
 
     const roll = Math.random();
     if (roll < currentChance) {
-        await startTZD(userId, activeItems, dynamicMatrix);
+        await startTZD(userId, activeItems);
         return true;
     }
     return false;
@@ -359,7 +357,6 @@ export const penalizeTZDAppOpen = async (userId) => {
         const status = await getTZDStatus(userId);
         if (status && status.isActive && status.stage === 'running') {
             
-            // --- NEU: Cooldown-Schranke (1 Stunde) ---
             if (status.lastPenaltyAt) {
                 const lastPenaltyTime = status.lastPenaltyAt.toDate ? status.lastPenaltyAt.toDate() : new Date(status.lastPenaltyAt);
                 const hoursSince = (new Date() - lastPenaltyTime) / (1000 * 60 * 60);
@@ -368,7 +365,6 @@ export const penalizeTZDAppOpen = async (userId) => {
                     return false;
                 }
             }
-            // -----------------------------------------
 
             const penaltyMinutes = TZD_CONFIG.PENALTY_MINUTES;
             await updateDoc(doc(db, `users/${userId}/status/tzd`), {
@@ -422,7 +418,6 @@ export const terminateTZD = async (userId, success = true, customResult = null) 
         result: finalResult 
     });
 
-    // TZD-Session abschließen (Sub-Tracking)
     try {
         const q = query(
             collection(db, `users/${userId}/sessions`),
@@ -439,32 +434,6 @@ export const terminateTZD = async (userId, success = true, customResult = null) 
         }
     } catch (e) { console.error("Fehler beim Setzen von tzdExecuted:", e); }
 
-    // --- NEUES KONZEPT: DIE HARTE FEHLERKASKADE (PARENT SESSION) ---
-    if (status && status.parentSessionId) {
-        try {
-            const parentRef = doc(db, `users/${userId}/sessions`, status.parentSessionId);
-            const parentSnap = await getDoc(parentRef);
-            
-            if (parentSnap.exists() && parentSnap.data().isActive) {
-                if (!success) {
-                    // Abbruch/Versagen -> Parent Session hart beenden
-                    await stopSession(userId, status.parentSessionId, { 
-                        note: 'ABBRUCH (TZD-Kaskade / Versagen im Diktat)' 
-                    });
-                } else {
-                    // Erfolg -> Sub-Status entfernen, Parent läuft nahtlos weiter
-                    await updateDoc(parentRef, { 
-                        isTzdActive: false,
-                        tzdExecuted: true 
-                    });
-                }
-            }
-        } catch (e) {
-            console.error("Fehler bei der Parent-Session Kaskade:", e);
-        }
-    }
-
-    // Parität: Exakt 24h TZD generiert 24h Immunität (Reward)
     if (success) {
         if (status && status.targetDurationMinutes >= 1440) {
             await setImmunity(userId, 24);
@@ -484,13 +453,7 @@ export const terminateTZD = async (userId, success = true, customResult = null) 
     }
 };
 
-/**
- * Dynamic Bailout Protocol (Inklusive Debt-Conversion-Protokoll)
- * Zieht Guthaben gnadenlos bis zur Insolvenzgrenze ab. Überschuss
- * wird in physische Strafe x2 umgewandelt und das Inventar verriegelt.
- */
 export const emergencyBailout = async (userId) => {
-    // 1. TZD Status abrufen für Währungs-Symmetrie
     const status = await getTZDStatus(userId);
     let chargeNc = false;
     let chargeLc = false;
@@ -517,13 +480,11 @@ export const emergencyBailout = async (userId) => {
         });
     }
     
-    // Fallback: Wenn Währung nicht exakt bestimmbar, beide belasten (System gewinnt immer)
     if (!chargeNc && !chargeLc) {
         chargeNc = true;
         chargeLc = true;
     }
 
-    // 2. Bestandsprüfung
     const tbRef = doc(db, `users/${userId}/status/timeBank`);
     const tbSnap = await getDoc(tbRef);
     let ncBalance = 0;
@@ -533,7 +494,6 @@ export const emergencyBailout = async (userId) => {
         lcBalance = tbSnap.data().lc || 0;
     }
 
-    // 3. Forderungs-Berechnung (Basis)
     let targetDeductionNc = 0;
     let targetDeductionLc = 0;
     const MIN_PENALTY = 400;
@@ -548,16 +508,13 @@ export const emergencyBailout = async (userId) => {
         targetDeductionLc = Math.max(MIN_PENALTY, Math.floor(positiveLc * RATE));
     }
 
-    // --- DEBT-CONVERSION-PROTOKOLL: PHASE 1 (LIQUIDATION) ---
     const liquidation = await liquidateAssets(userId, targetDeductionNc, targetDeductionLc);
 
-    // --- DEBT-CONVERSION-PROTOKOLL: PHASE 2 & 3 (KONVERTIERUNG & ZWANG) ---
     if (liquidation.totalRemainingDebt > 0) {
-        const convertedPunishment = liquidation.totalRemainingDebt * 2; // Multiplikator x2
+        const convertedPunishment = liquidation.totalRemainingDebt * 2; 
 
-        // Erzwungene Monotonie verhängen
         const uniformityRef = doc(db, `users/${userId}/status/uniformity`);
-        const expiresAt = new Date(Date.now() + 96 * 60 * 60 * 1000); // 96h Lockdown
+        const expiresAt = new Date(Date.now() + 96 * 60 * 60 * 1000); 
         const lockedItemIds = status && status.lockedItems ? status.lockedItems.map(i => i.id) : [];
 
         await setDoc(uniformityRef, {
@@ -569,11 +526,9 @@ export const emergencyBailout = async (userId) => {
             showTriggerOverlay: true
         }, { merge: true });
 
-        // Punishment Ticket erstellen
         const punishmentMsg = `Insolvenz-Vollstreckung (TZD Bailout). Konvertierte Restschuld: ${liquidation.totalRemainingDebt}m. Bankrott-Sperre aktiv.`;
         await registerPunishment(userId, punishmentMsg, convertedPunishment);
 
-        // Historie der betroffenen Items markieren
         if (lockedItemIds.length > 0) {
             for (const itemId of lockedItemIds) {
                 await addItemHistoryEntry(userId, itemId, {
@@ -584,12 +539,8 @@ export const emergencyBailout = async (userId) => {
         }
 
         await terminateTZD(userId, false, 'aborted_emergency');
-
-        // DAS FRONTEND-OVERLAY (EXCEPTION TRIGGER)
-        // Dieser Error unterbricht den Frontend-Flow und erzwingt einen roten Toast-Overlay direkt ins Gesicht.
         throw new Error(`INSOLVENZ! Limit erreicht. Restschuld (${liquidation.totalRemainingDebt}m) in Strafzeit x2 konvertiert. Erzwungene Monotonie aktiv!`);
     } else {
-        // Regulärer Bailout (Du konntest vollständig zahlen)
         const punishmentMsg = `NOT-ABBRUCH TZD: Bailout erkauft. Währung dezimiert (NC: -${liquidation.liquidatedNc}, LC: -${liquidation.liquidatedLc}).`;
         await registerPunishment(userId, punishmentMsg, 90);
         await terminateTZD(userId, false, 'aborted_emergency');
@@ -657,10 +608,8 @@ export const swapItemInTZD = async (userId, oldItemId, archiveData, allItems) =>
         if (candidates.length === 0) throw new Error("Kein Ersatz im Inventar verfügbar.");
         const replacement = candidates[Math.floor(Math.random() * candidates.length)];
 
-        // --- TRANSAKTION START (Deep Swap) ---
         const batch = writeBatch(db);
 
-        // 1. Altes Item archivieren
         const oldItemRef = doc(db, `users/${userId}/items`, oldItemId);
         batch.update(oldItemRef, {
             status: 'archived',
@@ -670,11 +619,9 @@ export const swapItemInTZD = async (userId, oldItemId, archiveData, allItems) =>
             archivedAt: serverTimestamp()
         });
 
-        // 2. Neues Item kompromisslos sperren (status: 'worn')
         const newItemRef = doc(db, `users/${userId}/items`, replacement.id);
         batch.update(newItemRef, { status: 'worn' });
 
-        // 3. TZD Status (lockedItems) aktualisieren
         const newLockedItems = tzdData.lockedItems.map(item => {
             if (item.id === oldItemId) {
                 return {
@@ -697,7 +644,6 @@ export const swapItemInTZD = async (userId, oldItemId, archiveData, allItems) =>
         }
         batch.update(statusDocRef, tzdUpdates);
 
-        // 4. Session synchronisieren (Deep Swap inkl. Item Ledger)
         const qTzd = query(collection(db, `users/${userId}/sessions`), where('isActive', '==', true), where('type', '==', 'tzd'));
         const activeTzdSnap = await getDocs(qTzd);
         
@@ -725,7 +671,6 @@ export const swapItemInTZD = async (userId, oldItemId, archiveData, allItems) =>
                 itemsDetails: newItemsDetails
             };
             
-            // Item Ledger für punktgenaue Verschleißmessung aktualisieren
             if (sessionData.itemLedger) {
                 sessionUpdates[`itemLedger.${oldItemId}.leftAt`] = serverTimestamp();
                 sessionUpdates[`itemLedger.${replacement.id}`] = { joinedAt: serverTimestamp(), leftAt: null };
@@ -734,40 +679,6 @@ export const swapItemInTZD = async (userId, oldItemId, archiveData, allItems) =>
             batch.update(sessionDoc.ref, sessionUpdates);
         }
 
-        // NEU: Parent Session (Instruction) ebenfalls tiefgehend synchronisieren
-        if (tzdData.parentSessionId) {
-            const parentRef = doc(db, `users/${userId}/sessions`, tzdData.parentSessionId);
-            const parentSnap = await getDoc(parentRef);
-            if (parentSnap.exists() && parentSnap.data().isActive) {
-                const pData = parentSnap.data();
-                const pNewItemIds = pData.itemIds ? pData.itemIds.map(id => id === oldItemId ? replacement.id : id) : [];
-                const pNewItemsDetails = pData.itemsDetails ? pData.itemsDetails.map(item => {
-                    if (item.id === oldItemId) {
-                        return {
-                            id: replacement.id,
-                            name: replacement.name || replacement.subCategory || 'Unknown',
-                            brand: replacement.brand || 'Unknown',
-                            category: replacement.category || replacement.mainCategory || 'Nylons',
-                            customId: replacement.customId || null,
-                            imageUrl: replacement.imageUrl || (replacement.images && replacement.images.length > 0 ? replacement.images[0] : null)
-                        };
-                    }
-                    return item;
-                }) : [];
-                
-                const pSessionUpdates = {
-                    itemIds: pNewItemIds,
-                    itemsDetails: pNewItemsDetails
-                };
-                if (pData.itemLedger) {
-                    pSessionUpdates[`itemLedger.${oldItemId}.leftAt`] = serverTimestamp();
-                    pSessionUpdates[`itemLedger.${replacement.id}`] = { joinedAt: serverTimestamp(), leftAt: null };
-                }
-                batch.update(parentRef, pSessionUpdates);
-            }
-        }
-
-        // 5. Generelle Historie schreiben
         const historyRef = doc(collection(db, `users/${userId}/history`));
         batch.set(historyRef, {
             type: 'tzd_swap',
@@ -777,10 +688,8 @@ export const swapItemInTZD = async (userId, oldItemId, archiveData, allItems) =>
             timestamp: serverTimestamp()
         });
 
-        // Transaktion feuern
         await batch.commit();
 
-        // 6. Item Historie schreiben (außerhalb des Batches, da addItemHistoryEntry Arrays manipuliert)
         await addItemHistoryEntry(userId, replacement.id, {
             type: 'tzd_entry',
             message: `Ersatz für archiviertes Item (${oldItemFull?.name || 'Unbekannt'}) im laufenden TZD.`
@@ -805,18 +714,16 @@ export const grantTZDAmnesty = async (userId) => {
         if (data.nc >= 500 && data.lc >= 500) {
             const amnestyEnd = new Date(Date.now() + 24 * 60 * 60 * 1000); 
             
-            // 1. Atomare Vernichtung der Coins
             await updateDoc(tbRef, {
                 nc: increment(-500),
                 lc: increment(-500),
                 tzdAmnestyUntil: amnestyEnd
             });
             
-            // 2. TZD-Status lesen für Forensik und Parent-Info
             const tzdSnap = await getDoc(tzdRef);
-            let parentId = null;
+            let interruptedData = null;
             if (tzdSnap.exists()) {
-                parentId = tzdSnap.data().parentSessionId;
+                interruptedData = tzdSnap.data().interruptedInstruction;
                 if(tzdSnap.data().lockedItems) {
                     for(const item of tzdSnap.data().lockedItems) {
                         await addItemHistoryEntry(userId, item.id, {
@@ -827,27 +734,30 @@ export const grantTZDAmnesty = async (userId) => {
                 }
             }
 
-            // 3. ZOMBIE-KILL: Die im Hintergrund laufende TZD-Tracking-Session stoppen
             const qTzd = query(collection(db, `users/${userId}/sessions`), where('isActive', '==', true), where('type', '==', 'tzd'));
             const activeTzdSnap = await getDocs(qTzd);
             for (const activeDoc of activeTzdSnap.docs) {
                 await stopSession(userId, activeDoc.id, { note: 'Beendet durch Amnestie-Kauf' });
             }
 
-            // 4. Abbrechen des angekündigten Diktats im TZD-Status
             await updateDoc(tzdRef, {
                 isActive: false,
                 result: 'amnestied',
                 endTime: serverTimestamp()
             });
 
-            // 5. NAHTLOSE WIEDERAUFNAHME: Einfach den TZD-Sub-Status von der Parent Session entfernen
-            if (parentId) {
-                const parentRef = doc(db, `users/${userId}/sessions`, parentId);
-                const parentSnap = await getDoc(parentRef);
-                if (parentSnap.exists() && parentSnap.data().isActive) {
-                    await updateDoc(parentRef, { isTzdActive: false });
-                }
+            if (interruptedData && interruptedData.items && interruptedData.items.length > 0) {
+                await startSession(userId, {
+                    items: interruptedData.items,
+                    type: 'instruction',
+                    periodId: interruptedData.periodId,
+                    instructionDurationMinutes: interruptedData.remainingDuration,
+                    note: 'Nahtlose Wiederaufnahme nach Amnestie'
+                });
+
+                await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), {
+                    durationMinutes: interruptedData.remainingDuration
+                });
             }
 
             return true;
