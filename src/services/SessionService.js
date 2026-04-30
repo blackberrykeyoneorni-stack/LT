@@ -23,8 +23,11 @@ export const startSession = async (userId, sessionData) => {
         if (sessionData.type === 'instruction' || sessionData.type === 'preparation') {
             const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
             const instrSnap = await getDoc(instrRef);
-            if (instrSnap.exists() && instrSnap.data().isCompleted) {
-                sessionData.type = 'voluntary';
+            if (instrSnap.exists()) {
+                const instrData = instrSnap.data();
+                if (instrData.isCompleted && instrData.periodId === sessionData.periodId) {
+                    sessionData.type = 'voluntary';
+                }
             }
         }
         // -----------------------------------------------------
@@ -371,7 +374,9 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
 
     // --- COMPLETION LOCK PRÜFUNG ---
     let isInstructionCompleted = false;
-    if (sessionData.type === 'instruction') {
+    const isNightSession = sessionData.periodId && sessionData.periodId.toLowerCase().includes('night');
+
+    if (sessionData.type === 'instruction' && !isNightSession) {
         const target = trueDailyTarget > 0 ? trueDailyTarget : (sessionData.targetDurationMinutes || 0);
         let totalAccumulatedMinutes = durationMinutes + sessionDiscountMinutes;
         
@@ -614,18 +619,22 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
 
     if (sessionData.type === 'instruction') {
         const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
-        const instrUpdates = { isActive: false, activeSessionId: null, discountMinutes: 0 };
+        const instrSnap = await getDoc(instrRef);
         
-        if (isInstructionCompleted) {
-            instrUpdates.isCompleted = true;
-        }
+        if (instrSnap.exists() && instrSnap.data().periodId === sessionData.periodId) {
+            const instrUpdates = { isActive: false, activeSessionId: null, discountMinutes: 0 };
+            
+            if (isInstructionCompleted) {
+                instrUpdates.isCompleted = true;
+            }
 
-        batch.set(instrRef, instrUpdates, { merge: true });
-        
-        if (sessionData.transitProtocolActive) {
-            batch.set(instrRef, {
-                 transitProtocol: { active: false, sessionId: null, startTime: null }
-            }, { merge: true });
+            batch.set(instrRef, instrUpdates, { merge: true });
+            
+            if (sessionData.transitProtocolActive) {
+                batch.set(instrRef, {
+                     transitProtocol: { active: false, sessionId: null, startTime: null }
+                }, { merge: true });
+            }
         }
     } else if (sessionData.type === 'transit') {
         const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
