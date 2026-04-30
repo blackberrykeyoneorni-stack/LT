@@ -9,8 +9,10 @@ export const startSession = async (userId, sessionData) => {
     if (!userId || !sessionData) throw new Error("Parameter fehlen.");
 
     try {
+        const isInstructionFlow = sessionData.type === 'instruction' || sessionData.type === 'preparation';
+
         // --- THE HANDOVER PROTOCOL (Semantische Isolation) ---
-        if (sessionData.type === 'instruction' || sessionData.type === 'preparation') {
+        if (isInstructionFlow) {
             const qTransit = query(collection(db, `users/${userId}/sessions`), where('isActive', '==', true), where('type', '==', 'transit'));
             const transitSnap = await getDocs(qTransit);
             if (!transitSnap.empty) {
@@ -19,14 +21,15 @@ export const startSession = async (userId, sessionData) => {
         }
         // -----------------------------------------------------
 
-        // --- POST-COMPLIANCE SHIFT (Semantische Umwandlung) ---
-        if (sessionData.type === 'instruction' || sessionData.type === 'preparation') {
+        // --- POST-COMPLIANCE SHIFT (Semantische Umwandlung evaluiert, aber verschoben) ---
+        let effectiveType = sessionData.type;
+        if (isInstructionFlow) {
             const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
             const instrSnap = await getDoc(instrRef);
             if (instrSnap.exists()) {
                 const instrData = instrSnap.data();
                 if (instrData.isCompleted && instrData.periodId === sessionData.periodId) {
-                    sessionData.type = 'voluntary';
+                    effectiveType = 'voluntary';
                 }
             }
         }
@@ -34,11 +37,11 @@ export const startSession = async (userId, sessionData) => {
 
         const tbBalance = await getTimeBankBalance(userId);
         const isBankrupt = tbBalance.nc < 0 || tbBalance.lc < 0;
-        if (isBankrupt && !sessionData.type.includes('debt') && !sessionData.type.includes('punishment') && !sessionData.type.includes('instruction')) {
+        if (isBankrupt && !effectiveType.includes('debt') && !effectiveType.includes('punishment') && !effectiveType.includes('instruction') && effectiveType !== 'preparation') {
             throw new Error("TIME BANKRUPTCY. Sissy-Sessions systemseitig gesperrt.");
         }
 
-        if (sessionData.type === 'voluntary') {
+        if (effectiveType === 'voluntary') {
             const uniRef = doc(db, `users/${userId}/status/uniformity`);
             const uniSnap = await getDoc(uniRef);
             if (uniSnap.exists() && uniSnap.data().active) {
@@ -61,16 +64,17 @@ export const startSession = async (userId, sessionData) => {
 
         let requiredItemIds = [];
         let instructionItems = [];
-        if (sessionData.type === 'instruction' || sessionData.type === 'preparation') {
+        if (isInstructionFlow) {
             const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
             const instrSnap = await getDoc(instrRef);
             if (instrSnap.exists() && instrSnap.data().items) {
                 instructionItems = instrSnap.data().items;
                 requiredItemIds = instructionItems.map(i => i.id);
 
-                const qActive = query(collection(db, `users/${userId}/sessions`), where('isActive', '==', true), where('type', '==', 'instruction'));
+                const qActive = query(collection(db, `users/${userId}/sessions`), where('isActive', '==', true));
                 const activeSnap = await getDocs(qActive);
-                const alreadyWornIds = !activeSnap.empty ? (activeSnap.docs[0].data().itemIds || []) : [];
+                const matchingDocs = activeSnap.docs.filter(d => d.data().periodId === sessionData.periodId);
+                const alreadyWornIds = matchingDocs.length > 0 ? (matchingDocs[0].data().itemIds || []) : [];
 
                 for (const newItemId of itemIds) {
                     const targetItem = instructionItems.find(i => i.id === newItemId);
@@ -93,12 +97,15 @@ export const startSession = async (userId, sessionData) => {
         let existingSessionRef = null;
         let existingSessionData = null;
 
-        if (sessionData.type === 'instruction' || sessionData.type === 'preparation') {
-            const q = query(collection(db, `users/${userId}/sessions`), where('isActive', '==', true), where('type', '==', 'instruction'));
-            const snap = await getDocs(q);
-            if (!snap.empty) {
-                existingSessionRef = snap.docs[0].ref;
-                existingSessionData = snap.docs[0].data();
+        if (isInstructionFlow) {
+            const qActive = query(collection(db, `users/${userId}/sessions`), where('isActive', '==', true));
+            const snapActive = await getDocs(qActive);
+            
+            const matchingDocs = snapActive.docs.filter(d => d.data().periodId === sessionData.periodId);
+            
+            if (matchingDocs.length > 0) {
+                existingSessionRef = matchingDocs[0].ref;
+                existingSessionData = matchingDocs[0].data();
             }
         }
 
@@ -136,12 +143,17 @@ export const startSession = async (userId, sessionData) => {
                 instructionReadyTime = serverTimestamp();
             }
 
+            let updateType = allRequiredPresent ? 'instruction' : existingSessionData.type;
+            if (effectiveType === 'voluntary') {
+                updateType = 'voluntary';
+            }
+
             const updatePayload = {
                 itemIds: mergedItemIds,
                 itemLedger: newItemLedger,
                 itemsDetails: newItemDetails,
                 instructionReadyTime: instructionReadyTime,
-                type: allRequiredPresent ? 'instruction' : existingSessionData.type 
+                type: updateType 
             };
 
             if (existingSessionData.complianceLagMinutes == null && sessionData.acceptedAt) {
@@ -179,11 +191,15 @@ export const startSession = async (userId, sessionData) => {
             let instructionReadyTime = null;
             let finalType = sessionData.type || 'voluntary';
 
-            if ((sessionData.type === 'instruction' || sessionData.type === 'preparation') && allRequiredPresent) {
+            if (isInstructionFlow && allRequiredPresent) {
                 instructionReadyTime = serverTimestamp();
                 finalType = 'instruction';
             } else if (sessionData.type === 'preparation') {
                 finalType = 'instruction'; 
+            }
+
+            if (effectiveType === 'voluntary') {
+                finalType = 'voluntary';
             }
 
             let complianceLagMinutes = null;

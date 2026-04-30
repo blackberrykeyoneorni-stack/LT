@@ -1,3 +1,4 @@
+// src/services/ItemService.js
 import { db } from '../firebase';
 import { 
     collection, 
@@ -5,6 +6,7 @@ import {
     updateDoc, 
     deleteDoc, 
     doc, 
+    getDoc, // Hinzugefügt für das Auslesen in updateItem und setItemStatus
     setDoc,
     query, 
     orderBy, 
@@ -164,15 +166,52 @@ export const addItem = async (userId, itemData, customId = null) => {
 };
 
 /**
- * Aktualisiert ein bestehendes Item (inklusive ULP METADATA_UPDATED Event).
+ * Aktualisiert ein bestehendes Item (inklusive granularem ULP METADATA_UPDATED Event).
  */
 export const updateItem = async (userId, itemId, data) => {
     const itemRef = doc(db, `users/${userId}/${COLLECTION_NAME}`, itemId);
-    await updateDoc(itemRef, {
+    const itemSnap = await getDoc(itemRef);
+    
+    if (!itemSnap.exists()) {
+        console.error("updateItem: Item nicht gefunden", itemId);
+        return;
+    }
+    
+    const oldData = itemSnap.data();
+    const changes = [];
+
+    // --- DATA-DIFFING ---
+    const fieldsToTrack = {
+        condition: 'Zustand',
+        location: 'Lagerort',
+        rating: 'Bewertung',
+        brand: 'Marke',
+        subCategory: 'Subkategorie',
+        color: 'Farbe'
+    };
+
+    for (const [key, label] of Object.entries(fieldsToTrack)) {
+        if (data[key] !== undefined && data[key] !== oldData[key]) {
+            const oldVal = oldData[key] || 'Nicht definiert';
+            const newVal = data[key] || 'Nicht definiert';
+            changes.push(`${label} geändert: von '${oldVal}' zu '${newVal}'`);
+        }
+    }
+
+    const updatePayload = {
         ...data,
-        updatedAt: serverTimestamp(),
-        historyLog: arrayUnion({ type: 'METADATA_UPDATED', date: new Date().toISOString(), data: { message: 'Eigenschaften modifiziert' } })
-    });
+        updatedAt: serverTimestamp()
+    };
+
+    if (changes.length > 0) {
+        updatePayload.historyLog = arrayUnion({ 
+            type: 'METADATA_UPDATED', 
+            date: new Date().toISOString(), 
+            data: { message: changes.join('. ') + '.' } 
+        });
+    }
+
+    await updateDoc(itemRef, updatePayload);
 };
 
 /**
@@ -200,11 +239,44 @@ export const updateWearStats = async (userId, itemId, durationMinutes) => {
 };
 
 /**
- * Setzt den Status eines Items (Legacy, für einfache Aufrufe).
+ * Setzt den Status eines Items und protokolliert Übergänge (Wäsche-Zyklus).
  */
-export const setItemStatus = async (userId, itemId, status) => {
+export const setItemStatus = async (userId, itemId, newStatus) => {
     const itemRef = doc(db, `users/${userId}/${COLLECTION_NAME}`, itemId);
-    await updateDoc(itemRef, { status });
+    const itemSnap = await getDoc(itemRef);
+    
+    if (!itemSnap.exists()) return;
+    
+    const oldData = itemSnap.data();
+    const oldStatus = oldData.status;
+
+    if (oldStatus === newStatus) return;
+
+    const updatePayload = { status: newStatus };
+
+    // --- STATE-TRANSITION HOOKING ---
+    let historyType = 'STATUS_CHANGED';
+    let historyMsg = `Status geändert von '${oldStatus || 'Unbekannt'}' zu '${newStatus}'.`;
+
+    if (oldStatus === 'washing' && newStatus === 'active') {
+        historyType = 'LAUNDRY_COMPLETED';
+        historyMsg = 'Wäsche abgeschlossen. Item ist wieder sauber und einsatzbereit.';
+        updatePayload.cleanDate = serverTimestamp();
+    } else if (newStatus === 'washing') {
+        historyType = 'WASH_PENDING';
+        historyMsg = 'Zur Reinigung hinzugefügt';
+    } else if (newStatus === 'worn') {
+        historyType = 'STATUS_WORN';
+        historyMsg = 'Item wird jetzt getragen.';
+    }
+
+    updatePayload.historyLog = arrayUnion({
+        type: historyType,
+        date: new Date().toISOString(),
+        data: { message: historyMsg }
+    });
+
+    await updateDoc(itemRef, updatePayload);
 };
 
 /**
