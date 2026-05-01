@@ -1,3 +1,4 @@
+// src/components/settings/ProtocolSettings.jsx
 import React from 'react';
 import { Box, Typography, Slider, Paper, Grid } from '@mui/material';
 import { PALETTE } from '../../theme/obsidianDesign';
@@ -172,6 +173,33 @@ export default function ProtocolSettings({ rules, onChange }) {
                     </Box>
                 ))}
 
+            </Paper>
+
+            {/* ERPRESSUNGS-PROTOKOLL */}
+            <Paper sx={{ p: 3, bgcolor: 'rgba(255,255,255,0.05)', borderLeft: `4px solid ${PALETTE.accents.orange || '#FF9800'}` }}>
+                <Typography variant="h6" sx={{ color: PALETTE.accents.orange || '#FF9800' }} gutterBottom>Erpressungs-Protokoll</Typography>
+                <Box sx={{ px: 2, mb: 2 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <Typography variant="body2">Trigger Wahrscheinlichkeit</Typography>
+                        <Typography sx={{ color: PALETTE.accents.orange || '#FF9800' }} fontWeight="bold">
+                            {rules.extortion?.triggerChance ? (rules.extortion.triggerChance * 100).toFixed(1) : '5.0'}%
+                        </Typography>
+                    </Box>
+                    <Slider
+                        value={rules.extortion?.triggerChance || 0.05}
+                        min={0.02} max={0.25} step={0.01}
+                        onChange={(_, v) => handleChange('extortion', 'triggerChance', v)}
+                        sx={{ color: PALETTE.accents.orange || '#FF9800' }}
+                        marks={[
+                            { value: 0.02, label: '2%' },
+                            { value: 0.10, label: '10%' },
+                            { value: 0.25, label: '25%' }
+                        ]}
+                    />
+                </Box>
+                <Typography variant="caption" color="text.secondary">
+                    Das System kann dich beim Öffnen der App zwingen, sofort 60 Minuten Zwang auf die aktuelle Zeit zu addieren. Strafe bei Ignorieren: -360 Credits. (Max 1x pro Tag)
+                </Typography>
             </Paper>
 
             {/* FORCED RELEASE */}

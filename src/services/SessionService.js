@@ -782,3 +782,137 @@ export const registerInstructionRelease = async (userId) => {
         await setDoc(instrRef, { forcedRelease: { executed: true } }, { merge: true });
     } catch (e) { console.error(e); }
 };
+
+// --- ERPRESSUNGS-PROTOKOLL ---
+
+export const checkAndTriggerExtortion = async (userId) => {
+    try {
+        const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
+        const instrSnap = await getDoc(instrRef);
+        if (!instrSnap.exists()) return;
+        
+        const instrData = instrSnap.data();
+        if (!instrData.isActive || !instrData.periodId || instrData.periodId.includes('night')) return;
+        if (instrData.extortionTriggered) return;
+
+        // Prüfen, ob aktuell eine Session läuft, die zu diesem Tag gehört
+        const qActive = query(collection(db, `users/${userId}/sessions`), where('isActive', '==', true));
+        const activeSnap = await getDocs(qActive);
+        const activeDoc = activeSnap.docs.find(d => d.data().periodId === instrData.periodId);
+        if (!activeDoc) return;
+
+        // Wahrscheinlichkeit aus den Einstellungen laden (Fallback: 5%)
+        let chance = 0.05;
+        const settingsSnap = await getDoc(doc(db, `users/${userId}/settings/protocol`));
+        if (settingsSnap.exists() && settingsSnap.data().extortion?.triggerChance) {
+            chance = settingsSnap.data().extortion.triggerChance;
+        }
+
+        // RNG Wurf
+        if (Math.random() <= chance) {
+            const batch = writeBatch(db);
+            
+            // "Once-per-Day" Lock setzen
+            batch.update(instrRef, { extortionTriggered: true });
+            
+            // Erpressung in der DB verankern (Anti-Escape)
+            const extRef = doc(db, `users/${userId}/status/extortion`);
+            batch.set(extRef, {
+                isActive: true,
+                sessionId: activeDoc.id,
+                periodId: instrData.periodId,
+                expiresAt: new Date(Date.now() + 60000) // 60 Sekunden Ultimatum
+            });
+            
+            await batch.commit();
+        }
+    } catch (e) {
+        console.error("Extortion Trigger Error:", e);
+    }
+};
+
+export const acceptExtortion = async (userId) => {
+    try {
+        const extRef = doc(db, `users/${userId}/status/extortion`);
+        const extSnap = await getDoc(extRef);
+        if (!extSnap.exists() || !extSnap.data().isActive) return;
+        const extData = extSnap.data();
+
+        const instrRef = doc(db, `users/${userId}/status/dailyInstruction`);
+        const instrSnap = await getDoc(instrRef);
+        
+        const sessionRef = doc(db, `users/${userId}/sessions`, extData.sessionId);
+        const sessionSnap = await getDoc(sessionRef);
+
+        if (!instrSnap.exists() || !sessionSnap.exists()) return;
+
+        const batch = writeBatch(db);
+
+        // Dynamische Ziel-Ankerung berechnen
+        let totalMinutes = 0;
+        
+        // Vergangene Sessions von heute summieren
+        const qPast = query(
+            collection(db, `users/${userId}/sessions`),
+            where('periodId', '==', extData.periodId),
+            where('isActive', '==', false)
+        );
+        const pastSnap = await getDocs(qPast);
+        pastSnap.forEach(d => { totalMinutes += (d.data().durationMinutes || 0); });
+
+        // Laufende Session berechnen
+        const sData = sessionSnap.data();
+        const startTime = sData.startTime?.toDate ? sData.startTime.toDate() : new Date();
+        const currentSessionMinutes = Math.round((Date.now() - startTime.getTime()) / 60000);
+        totalMinutes += currentSessionMinutes;
+
+        // Neues Ziel: Jetzt + 60 Minuten Zwang
+        const newTarget = totalMinutes + 60;
+
+        // Rollback & Zwang etablieren
+        batch.update(instrRef, {
+            durationMinutes: newTarget,
+            isCompleted: false
+        });
+
+        batch.update(sessionRef, {
+            type: 'instruction'
+        });
+
+        batch.update(extRef, {
+            isActive: false
+        });
+
+        await batch.commit();
+    } catch (e) {
+        console.error("Accept Extortion Error:", e);
+    }
+};
+
+export const processExtortionPenalty = async (userId) => {
+    try {
+        const extRef = doc(db, `users/${userId}/status/extortion`);
+        const extSnap = await getDoc(extRef);
+        if (!extSnap.exists() || !extSnap.data().isActive) return;
+
+        const batch = writeBatch(db);
+        
+        // Pop-up deaktivieren
+        batch.update(extRef, { isActive: false });
+
+        // TimeBank Strafe: -180 NC und -180 LC
+        const tbRef = doc(db, `users/${userId}/status/timeBank`);
+        batch.set(tbRef, {
+            nc: increment(-180),
+            lc: increment(-180),
+            lastTransaction: serverTimestamp()
+        }, { merge: true });
+
+        await batch.commit();
+
+        // Ins Schandregister eintragen
+        await registerPunishment(userId, "Ultimatum ignoriert. 360 Credits annulliert.", 180);
+    } catch (e) {
+        console.error("Penalty Extortion Error:", e);
+    }
+};

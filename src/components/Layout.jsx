@@ -1,9 +1,13 @@
+// src/components/Layout.jsx
 import React, { useEffect, useState, useRef } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Box, Paper, BottomNavigation, BottomNavigationAction, Snackbar, Alert } from '@mui/material';
-import { DESIGN_TOKENS, PALETTE } from '../theme/obsidianDesign'; // NEU
+import { Box, Paper, BottomNavigation, BottomNavigationAction, Snackbar, Alert, Typography, Button } from '@mui/material';
+import { DESIGN_TOKENS, PALETTE } from '../theme/obsidianDesign';
 import { useAuth } from '../contexts/AuthContext';
+import { db } from '../firebase';
+import { doc, onSnapshot } from 'firebase/firestore';
 import { penalizeTZDAppOpen } from '../services/TZDService';
+import { checkAndTriggerExtortion, acceptExtortion, processExtortionPenalty } from '../services/SessionService';
 import { useConditioningGuard } from '../hooks/useConditioningGuard';
 import ConditioningOverlay from './conditioning/ConditioningOverlay';
 
@@ -26,6 +30,53 @@ export default function Layout() {
   const [penaltyOpen, setPenaltyOpen] = useState(false);
   const lastPenaltyTime = useRef(0);
 
+  // --- ERPRESSUNGS-PROTOKOLL STATE ---
+  const [extortionData, setExtortionData] = useState(null);
+  const [extortionTimeLeft, setExtortionTimeLeft] = useState(0);
+
+  // Firebase Listener für Erpressungs-Status (Anti-Escape Architektur)
+  useEffect(() => {
+    if (!currentUser) return;
+    const extRef = doc(db, `users/${currentUser.uid}/status/extortion`);
+    const unsubscribe = onSnapshot(extRef, (snap) => {
+        if (snap.exists() && snap.data().isActive) {
+            const data = snap.data();
+            const expires = data.expiresAt?.toDate ? data.expiresAt.toDate() : new Date(data.expiresAt);
+            const remaining = Math.round((expires.getTime() - Date.now()) / 1000);
+            
+            if (remaining <= 0) {
+                // Strafe greift sofort bei Neuladen der App, wenn Timer abgelaufen ist
+                processExtortionPenalty(currentUser.uid);
+            } else {
+                setExtortionData(data);
+                setExtortionTimeLeft(remaining);
+            }
+        } else {
+            setExtortionData(null);
+        }
+    });
+    return () => unsubscribe();
+  }, [currentUser]);
+
+  // Lokaler Timer für UI-Updates und Exekution
+  useEffect(() => {
+    let timer;
+    if (extortionData && extortionTimeLeft > 0) {
+        timer = setInterval(() => {
+            setExtortionTimeLeft(prev => {
+                if (prev <= 1) {
+                    clearInterval(timer);
+                    processExtortionPenalty(currentUser.uid);
+                    return 0;
+                }
+                return prev - 1;
+            });
+        }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [extortionData, extortionTimeLeft, currentUser]);
+
+  // Hook für Visibility-Änderungen
   useEffect(() => {
     const handleVisibilityChange = async () => {
       // Wenn die App sichtbar wird (User öffnet sie oder wechselt zurück)
@@ -42,6 +93,9 @@ export default function Layout() {
                 setPenaltyOpen(true);
             }
         }
+
+        // --- ERPRESSUNGS-PROTOKOLL TRIGGER ---
+        checkAndTriggerExtortion(currentUser.uid);
       }
     };
 
@@ -78,6 +132,38 @@ export default function Layout() {
       
       {/* THE OBEDIENCE GATEKEEPER */}
       {showOverlay && <ConditioningOverlay onAcknowledge={acknowledgePhase} />}
+
+      {/* ERPRESSUNGS-PROTOKOLL OVERLAY (ABSOLUTER ZWANG) */}
+      {extortionData && (
+          <Box sx={{
+              position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+              bgcolor: 'rgba(0,0,0,0.95)', zIndex: 999999, // Überlagert alles
+              display: 'flex', alignItems: 'center', justifyContent: 'center', p: 3
+          }}>
+              <Paper sx={{ p: 4, textAlign: 'center', border: `2px solid ${PALETTE.accents.red}`, bgcolor: '#111', maxWidth: 400 }}>
+                  <Typography variant="h4" color="error" fontWeight="bold" gutterBottom>
+                      ULTIMATUM
+                  </Typography>
+                  <Typography variant="body1" sx={{ mb: 3 }}>
+                      Verlängere deine aktuelle Session <b>sofort um 60 Minuten</b>.<br/><br/>
+                      Wenn du ablehnst, den Browser schließt oder die Zeit abläuft, werden <b>180 NC und 180 LC</b> unwiderruflich annulliert.
+                  </Typography>
+                  <Typography variant="h2" fontWeight="bold" color="error" sx={{ mb: 4 }}>
+                      00:{extortionTimeLeft.toString().padStart(2, '0')}
+                  </Typography>
+                  <Button 
+                      variant="contained" 
+                      color="error" 
+                      fullWidth 
+                      size="large"
+                      onClick={() => acceptExtortion(currentUser.uid)}
+                      sx={{ py: 2, fontSize: '1.2rem', fontWeight: 'bold' }}
+                  >
+                      AKZEPTIEREN
+                  </Button>
+              </Paper>
+          </Box>
+      )}
 
       {/* TZD PENALTY FEEDBACK */}
       <Snackbar 
