@@ -1,4 +1,3 @@
-// src/pages/ItemDetail.jsx
 import React, { useState, useEffect } from 'react';
 import { Box, Container, CircularProgress, Paper, Button } from '@mui/material';
 import { DESIGN_TOKENS } from '../theme/obsidianDesign';
