@@ -1,4 +1,3 @@
-// src/pages/Settings.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import { 
     doc, getDoc, setDoc, writeBatch, serverTimestamp, collection, getDocs, query, where 
@@ -58,6 +57,7 @@ export default function Settings() {
   const [weightValue, setWeightValue] = useState(2);
 
   const [maxInstructionItems, setMaxInstructionItems] = useState(1); 
+  const [extortionTriggerChance, setExtortionTriggerChance] = useState(0.05); // NEU: Erpressungs-Protokoll State
   
   const [protocolRules, setProtocolRules] = useState(null);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
@@ -130,6 +130,12 @@ export default function Settings() {
           if (protSnap.exists()) {
               const data = protSnap.data();
               if (data.currentDailyGoal !== undefined) mergedRules.currentDailyGoal = data.currentDailyGoal;
+              
+              // NEU: Lade Erpressungs-Wahrscheinlichkeit
+              if (data.extortion && data.extortion.triggerChance !== undefined) {
+                  setExtortionTriggerChance(data.extortion.triggerChance);
+              }
+
               mergedRules.tzd = { 
                   ...mergedRules.tzd, ...(data.tzd || {}),
                   durationMatrix: (data.tzd && data.tzd.durationMatrix) ? data.tzd.durationMatrix : mergedRules.tzd.durationMatrix
@@ -181,7 +187,13 @@ export default function Settings() {
 
           if (protocolRules) {
               const protRef = doc(db, `users/${uid}/settings/protocol`);
-              batch.set(protRef, { ...protocolRules, lastGoalUpdate: serverTimestamp() }, { merge: true });
+              // NEU: Füge Erpressungs-Wahrscheinlichkeit zum Speichern hinzu
+              const updatedRules = { 
+                  ...protocolRules, 
+                  extortion: { triggerChance: extortionTriggerChance },
+                  lastGoalUpdate: serverTimestamp() 
+              };
+              batch.set(protRef, updatedRules, { merge: true });
           }
 
           batch.set(doc(db, `users/${uid}/settings/brands`), { list: brands }, { merge: true });
@@ -542,6 +554,34 @@ export default function Settings() {
                     onChange={(e, v) => setMaxInstructionItems(v)} 
                     sx={{ color: PALETTE.primary.main }} 
                 />
+            </Box>
+
+            <Divider sx={{ my: 2, borderColor: 'rgba(255,255,255,0.1)' }} />
+
+            {/* NEU: ERPRESSUNGS-PROTOKOLL SLIDER */}
+            <Box sx={{ mb: 3 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                    <Typography variant="body2" color="text.secondary">Erpressungs-Chance (Beim Tab-Wechsel)</Typography>
+                    <Typography fontWeight="bold" sx={{ color: PALETTE.accents.orange || '#FF9800' }}>
+                        {(extortionTriggerChance * 100).toFixed(0)}%
+                    </Typography>
+                </Box>
+                <Slider 
+                    value={extortionTriggerChance} 
+                    min={0.02} 
+                    max={0.25} 
+                    step={0.01} 
+                    marks={[
+                        { value: 0.02, label: '2%' },
+                        { value: 0.10, label: '10%' },
+                        { value: 0.25, label: '25%' }
+                    ]}
+                    onChange={(e, v) => setExtortionTriggerChance(v)} 
+                    sx={{ color: PALETTE.accents.orange || '#FF9800' }} 
+                />
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+                    Legt fest, wie hoch die Chance ist, dass das System beim Überprüfen des Dashboards ein 60-Minuten-Ultimatum triggert. 
+                </Typography>
             </Box>
             
         </AccordionDetails>
