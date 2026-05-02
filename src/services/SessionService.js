@@ -224,7 +224,7 @@ export const startSession = async (userId, sessionData) => {
                             let triggerChance = gapMinutes <= 15 ? 1.0 : (gapMinutes <= 45 ? 0.40 : 0);
                             if (Math.random() < triggerChance) {
                                 const roll = Math.random();
-                                let bonusData = roll < 0.40 ? { type: 'dividend', multiplier: 1.5 } : (roll < 0.70 ? { type: 'dividend', amount: Math.floor(Math.random() * 200) + 50 } : (roll < 0.90 ? { type: 'amnesty' } : { type: 'debt_relief' }));
+                                let bonusData = roll < 0.40 ? { type: 'yield_multiplier', multiplier: 1.5 } : (roll < 0.70 ? { type: 'dividend', amount: Math.floor(Math.random() * 200) + 50 } : (roll < 0.90 ? { type: 'amnesty' } : { type: 'debt_relief' }));
                                 if (bonusData) thermalYieldPayload.pendingThermalBonus = bonusData;
                             }
                             batch.set(thermalRef, { isHot: false }, { merge: true });
@@ -515,8 +515,8 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
     if (feedback.emergencyBailout) {
         const tbBalance = await getTimeBankBalance(userId);
         
-        let newNc = tbBalance.nc;
-        let newLc = tbBalance.lc;
+        let newNc = tbBalance.nc ?? 0;
+        let newLc = tbBalance.lc ?? 0;
         let bailoutMessage = '';
         let noteSuffix = '';
 
@@ -524,9 +524,9 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
             bailoutMessage = `Abbruch einer freiwilligen Session. Keine Zeit angerechnet.`;
             noteSuffix = 'ABBRUCH (Freiwillig)';
         } else {
-            if (tbBalance.nc < 0 || tbBalance.lc < 0) {
-                const penaltyNc = tbBalance.nc < 0 ? Math.floor(Math.abs(tbBalance.nc) * 0.5) : 0;
-                const penaltyLc = tbBalance.lc < 0 ? Math.floor(Math.abs(tbBalance.lc) * 0.5) : 0;
+            if (newNc < 0 || newLc < 0) {
+                const penaltyNc = newNc < 0 ? Math.floor(Math.abs(newNc) * 0.5) : 0;
+                const penaltyLc = newLc < 0 ? Math.floor(Math.abs(newLc) * 0.5) : 0;
                 newNc -= penaltyNc;
                 newLc -= penaltyLc;
                 bailoutMessage = `Not-Abbruch! 50% Strafaufschlag auf bestehende Sissy-Schulden.`;
@@ -692,9 +692,8 @@ export const executeNSDTransit = async (userId, newBaseId, newLayer2Id) => {
         throw new Error("SISSY-FEIERTAG: Maximale Wechsel (6) erschöpft. Du bleibst jetzt so verpackt.");
     }
 
-    const prevLayer2Id = instrData.items.find(i => i.orderIndex === 2)?.id;
-    const prevLayer2Snap = await getDoc(doc(db, `users/${userId}/items`, prevLayer2Id));
-    const prevCat = (prevLayer2Snap.data()?.subCategory || '').toLowerCase();
+    const prevTransitItem = instrData.items.find(i => i.category.includes('strümpfe'));
+    const prevCat = (prevTransitItem?.category || '').toLowerCase();
 
     const newLayer2Snap = await getDoc(doc(db, `users/${userId}/items`, newLayer2Id));
     const newCat = (newLayer2Snap.data()?.subCategory || '').toLowerCase();
@@ -706,20 +705,40 @@ export const executeNSDTransit = async (userId, newBaseId, newLayer2Id) => {
         throw new Error("SISSY-FEIERTAG: Pendel-Gesetz verletzt! Du musst Strapsstrümpfe über das Plastik ziehen.");
     }
 
+    // Gürtel aus dem aktuellen Set extrahieren, um ihn nicht zu überschreiben
+    const guertelItem = instrData.items.find(i => i.category === 'Strapsgürtel');
+
+    const newItemsArr = [
+        { id: newBaseId, orderIndex: 1, category: 'Strumpfhose' }
+    ];
+
+    let nextOrderIndex = 2;
+    if (guertelItem) {
+        newItemsArr.push({ ...guertelItem, orderIndex: nextOrderIndex });
+        nextOrderIndex++;
+    }
+
+    newItemsArr.push({ 
+        id: newLayer2Id, 
+        orderIndex: nextOrderIndex, 
+        category: newCat.includes('straps') ? 'Strapsstrümpfe' : 'Kniestrümpfe' 
+    });
+
     const batch = writeBatch(db);
     batch.update(instrRef, {
         nsdTransitCount: increment(1),
-        items: [
-            { id: newBaseId, orderIndex: 1, category: 'Strumpfhose' },
-            { id: newLayer2Id, orderIndex: 2, category: newCat.includes('straps') ? 'Strapsstrümpfe' : 'Kniestrümpfe' }
-        ]
+        items: newItemsArr
     });
     
     const q = query(collection(db, `users/${userId}/sessions`), where('isActive', '==', true), where('isNSD', '==', true));
     const snap = await getDocs(q);
     if (!snap.empty) {
+        const newSessionItemIds = [newBaseId];
+        if (guertelItem) newSessionItemIds.push(guertelItem.id);
+        newSessionItemIds.push(newLayer2Id);
+
         batch.update(snap.docs[0].ref, {
-            itemIds: [newBaseId, newLayer2Id],
+            itemIds: newSessionItemIds,
             transitStartedAt: serverTimestamp()
         });
     }

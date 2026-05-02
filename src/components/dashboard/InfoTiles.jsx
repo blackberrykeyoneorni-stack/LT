@@ -7,17 +7,23 @@ import EuroIcon from '@mui/icons-material/Euro';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
+import { parseSafeNumber } from '../../utils/formatters'; // Sanitizer importieren
 
 export default function InfoTiles({ kpis, timeBank }) {
-  const orphanCount = kpis?.health?.orphanCount || 0;
+  const orphanCount = parseSafeNumber(kpis?.health?.orphanCount, 0);
+  
+  // Sicheres Auslesen
   const avgCPW = kpis?.financials?.avgCPW || '0.00';
   const nylonIndex = kpis?.usage?.nylonIndex || '0.0';
   const nylonChartData = kpis?.usage?.nylonChartData || [];
   
-  const nc = timeBank?.nc || 0;
-  const lc = timeBank?.lc || 0;
+  // Zwingender Cast über den Sanitizer
+  const nc = parseSafeNumber(timeBank?.nc, 0);
+  const lc = parseSafeNumber(timeBank?.lc, 0);
   
   const spermaScore = kpis?.spermaScore || { rate: '0.0', total: 0, count: 0 };
+  let spermaRate = spermaScore.rate;
+  if (spermaRate === 'NaN' || Number.isNaN(Number(spermaRate))) spermaRate = '0.0';
 
   const [chartOpen, setChartOpen] = useState(false);
 
@@ -109,7 +115,7 @@ export default function InfoTiles({ kpis, timeBank }) {
         <SmallCard 
             icon={<WaterDropIcon sx={{ fontSize: 16, color: PALETTE.accents.blue }} />}
             title="SpermaScore"
-            value={spermaScore.rate}
+            value={spermaRate}
             unit="%"
             color={PALETTE.accents.blue}
         />

@@ -313,18 +313,19 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
 
         // --- SISSY-FEIERTAG: TOTALER LOCKDOWN (NYLON STOCKING DAY) ---
         if (isNSD) {
-            // Die Maschine wählt exakt drei Items aus: 1 Basis, 2 Pendel-Items
             const allTights = items.filter(i => (i.subCategory || '').toLowerCase().includes('strumpfhose') && i.status === 'active');
             const allStayups = items.filter(i => (i.subCategory || '').toLowerCase().includes('strapsstrümpfe') && i.status === 'active');
             const allKneehighs = items.filter(i => (i.subCategory || '').toLowerCase().includes('kniestrümpfe') && i.status === 'active');
+            const allGuertel = items.filter(i => (i.subCategory || '').toLowerCase().includes('strapsgürtel') && i.status === 'active');
 
-            if (allTights.length === 0 || allStayups.length === 0 || allKneehighs.length === 0) {
-                throw new Error("SISSY-FEIERTAGS-DEFEKT: Inventar unzureichend für NSD-Protokoll.");
+            if (allTights.length === 0 || allStayups.length === 0 || allKneehighs.length === 0 || allGuertel.length === 0) {
+                throw new Error("SISSY-FEIERTAGS-DEFEKT: Inventar unzureichend für NSD-Protokoll (Basis, Gürtel oder Strümpfe fehlen).");
             }
 
             const baseTights = allTights[Math.floor(Math.random() * allTights.length)];
             const alt1 = allStayups[Math.floor(Math.random() * allStayups.length)];
             const alt2 = allKneehighs[Math.floor(Math.random() * allKneehighs.length)];
+            const guertel = allGuertel[Math.floor(Math.random() * allGuertel.length)];
 
             const instructionData = {
                 periodId,
@@ -333,7 +334,7 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                 itemName: `[SISSY-FEIERTAG] Doppelte Plastik-Haut`,
                 durationMinutes: 1440,
                 isNSD: true,
-                nsdItems: [baseTights.id, alt1.id, alt2.id], // Festgeschriebenes Sissy-Set
+                nsdItems: [baseTights.id, guertel.id, alt1.id, alt2.id], 
                 nsdTransitCount: 0,
                 items: [
                     {
@@ -344,10 +345,17 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                         category: 'Strumpfhose'
                     },
                     {
+                        id: guertel.id,
+                        name: guertel.name || 'Sissy-Gürtel',
+                        img: guertel.imageUrl || (guertel.images && guertel.images[0]) || null,
+                        orderIndex: 2,
+                        category: 'Strapsgürtel'
+                    },
+                    {
                         id: alt1.id,
                         name: alt1.name || 'Sissy-Pendel 1',
                         img: alt1.imageUrl || (alt1.images && alt1.images[0]) || null,
-                        orderIndex: 2,
+                        orderIndex: 3,
                         category: 'Strapsstrümpfe'
                     }
                 ]
@@ -555,6 +563,7 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                 
                 let currentNylonsCount = selectedItems.filter(checkNylon).length;
                 let hasHalterlose = selectedItems.some(i => (i.subCategory || '').includes('Halterlose'));
+                // Mutual Exclusivity Protection greift nun auch auf den automatischen Partner!
                 let hasStraps = selectedItems.some(i => (i.subCategory || '').includes('Strapsstrümpfe'));
                 let hasNylons = currentNylonsCount > 0;
                 let hasHighHeels = selectedItems.some(i => (i.subCategory || '').includes('High Heels'));
@@ -656,8 +665,76 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                     selectedItem = weightedItemsInGroup[weightedItemsInGroup.length - 1].item;
                 }
 
+                // --- DAS SYMBIOSE-PROTOKOLL (INTERCEPTOR) ---
+                const selectedSubCat = (selectedItem.subCategory || '').toLowerCase();
+                const isStrumpf = selectedSubCat.includes('strapsstrümpfe');
+                const isGuertel = selectedSubCat.includes('strapsgürtel');
+
+                if (isStrumpf || isGuertel) {
+                    const partnerSubCatTarget = isStrumpf ? 'strapsgürtel' : 'strapsstrümpfe';
+                    
+                    const possiblePartners = availableItems.filter(i => {
+                        const sub = (i.subCategory || '').toLowerCase();
+                        return sub.includes(partnerSubCatTarget);
+                    });
+
+                    if (possiblePartners.length === 0) {
+                        // FAIL-SAFE: Verwerfen und isolieren
+                        availableGroupKeys = availableGroupKeys.filter(key => key !== chosenCategoryKey);
+                        k--; // Slot-Wiederholung erzwingen
+                        continue;
+                    }
+
+                    // PARTNER-GEWICHTUNG (Sadistische Logik adaptiert)
+                    let partnerTotalWeight = 0;
+                    const weightedPartners = possiblePartners.map(pItem => {
+                        let pWeight = 1;
+                        const isPNylon = pItem.mainCategory === 'Nylons' || 
+                                        (pItem.subCategory || '').toLowerCase().includes('strumpfhose') || 
+                                        (pItem.subCategory || '').toLowerCase().includes('stockings') ||
+                                        (pItem.subCategory || '').toLowerCase().includes('tights');
+                        
+                        if (isPNylon) {
+                            let lastWornDate = pItem.lastWorn && pItem.lastWorn.toDate ? pItem.lastWorn.toDate() : (pItem.lastWorn ? new Date(pItem.lastWorn) : null);
+                            if (recentSessionsMap[pItem.id] && (!lastWornDate || recentSessionsMap[pItem.id] > lastWornDate)) {
+                                lastWornDate = recentSessionsMap[pItem.id];
+                            }
+                            if (!pItem.wearCount || pItem.wearCount === 0 || !lastWornDate) {
+                                pWeight = 10;
+                            } else {
+                                const daysSince = Math.max(0, Math.floor((Date.now() - lastWornDate.getTime()) / (1000 * 60 * 60 * 24)));
+                                pWeight = 1 + (daysSince * 0.05); 
+                            }
+                        }
+                        partnerTotalWeight += pWeight;
+                        return { item: pItem, weight: pWeight };
+                    });
+
+                    let rndPartnerValue = Math.random() * partnerTotalWeight;
+                    let finalPartner = null;
+                    for (const wp of weightedPartners) {
+                        rndPartnerValue -= wp.weight;
+                        if (rndPartnerValue <= 0) {
+                            finalPartner = wp.item;
+                            break;
+                        }
+                    }
+                    if (!finalPartner && weightedPartners.length > 0) {
+                        finalPartner = weightedPartners[weightedPartners.length - 1].item;
+                    }
+
+                    // ERFOLGSFALL: Symbiose hinzufügen (Slot-Ziel automatisch um 1 übertroffen)
+                    selectedItems.push(selectedItem);
+                    selectedItems.push(finalPartner);
+
+                    const partnerGroupKey = finalPartner.subCategory || finalPartner.mainCategory || 'Sonstiges';
+                    availableGroupKeys = availableGroupKeys.filter(key => key !== chosenCategoryKey && key !== partnerGroupKey);
+                    
+                    continue; 
+                }
+                // --- ENDE SYMBIOSE-PROTOKOLL ---
+
                 selectedItems.push(selectedItem);
-                
                 availableGroupKeys = availableGroupKeys.filter(key => key !== chosenCategoryKey);
             }
         }
@@ -733,15 +810,27 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
         const bhItem = layerSortedItems.find(i => getItemSub(i).includes('bh') || (i.name || '').toLowerCase().includes('bh'));
         
         const strapsItem = layerSortedItems.find(i => getItemSub(i).includes('strapsstrümpfe'));
+        const guertelItem = layerSortedItems.find(i => getItemSub(i).includes('strapsgürtel'));
         const satinItem = layerSortedItems.find(i => getItemSub(i).includes('satin-hemdchen') || getItemSub(i).includes('satin-nachthemd'));
         const heelsItem = layerSortedItems.find(i => getItemSub(i).includes('high heels'));
 
+        // --- HIERARCHISCHES LAYERING (SYMBIOSE UPDATE) ---
+        let maxBase = -1;
+        if (bodyItem) maxBase = Math.max(maxBase, bodyItem._sortVal);
+        if (strumpfhoseItem) maxBase = Math.max(maxBase, strumpfhoseItem._sortVal);
+
+        if (guertelItem) {
+            if (guertelItem._sortVal <= maxBase) {
+                guertelItem._sortVal = maxBase + 1;
+            }
+        }
+
         if (strapsItem) {
-            let maxBase = -1;
-            if (bodyItem) maxBase = Math.max(maxBase, bodyItem._sortVal);
-            if (strumpfhoseItem) maxBase = Math.max(maxBase, strumpfhoseItem._sortVal);
-            if (strapsItem._sortVal <= maxBase) {
-                strapsItem._sortVal = maxBase + 1;
+            let maxUnder = maxBase;
+            if (guertelItem) maxUnder = Math.max(maxUnder, guertelItem._sortVal);
+            
+            if (strapsItem._sortVal <= maxUnder) {
+                strapsItem._sortVal = maxUnder + 1;
             }
         }
 

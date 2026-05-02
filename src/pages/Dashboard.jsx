@@ -271,8 +271,18 @@ export default function Dashboard() {
         }
     });
 
+    // HIER IST DIE KORREKTUR FÜR DIE DASHBOARD.JSX
     const unsubscribeTB = onSnapshot(doc(db, `users/${currentUser.uid}/status/timeBank`), (docSnap) => {
-        setTimeBankData(docSnap.exists() ? docSnap.data() : { nc: 0, lc: 0 });
+        if (docSnap.exists()) {
+            const d = docSnap.data();
+            setTimeBankData({ 
+                ...d, 
+                nc: (d.nc === 'NaN' || Number.isNaN(Number(d.nc))) ? 0 : Number(d.nc), 
+                lc: (d.lc === 'NaN' || Number.isNaN(Number(d.lc))) ? 0 : Number(d.lc) 
+            });
+        } else {
+            setTimeBankData({ nc: 0, lc: 0 });
+        }
     });
 
     const unsubLedger = onSnapshot(
