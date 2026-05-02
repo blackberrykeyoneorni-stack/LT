@@ -1,4 +1,3 @@
-// src/services/SessionService.js
 import { db } from '../firebase';
 import { collection, doc, writeBatch, serverTimestamp, getDoc, setDoc, increment, query, where, getDocs } from 'firebase/firestore';
 import { updateWearStats, addItemHistoryEntry, setItemStatus } from './ItemService';
@@ -224,7 +223,8 @@ export const startSession = async (userId, sessionData) => {
                             let triggerChance = gapMinutes <= 15 ? 1.0 : (gapMinutes <= 45 ? 0.40 : 0);
                             if (Math.random() < triggerChance) {
                                 const roll = Math.random();
-                                let bonusData = roll < 0.40 ? { type: 'dividend', multiplier: 1.5 } : (roll < 0.70 ? { type: 'dividend', amount: Math.floor(Math.random() * 200) + 50 } : (roll < 0.90 ? { type: 'amnesty' } : { type: 'debt_relief' }));
+                                // KORREKTUR: Typ yield_multiplier für Multiplikatoren, dividend zwingend mit amount.
+                                let bonusData = roll < 0.40 ? { type: 'yield_multiplier', multiplier: 1.5 } : (roll < 0.70 ? { type: 'dividend', amount: Math.floor(Math.random() * 200) + 50 } : (roll < 0.90 ? { type: 'amnesty' } : { type: 'debt_relief' }));
                                 if (bonusData) thermalYieldPayload.pendingThermalBonus = bonusData;
                             }
                             batch.set(thermalRef, { isHot: false }, { merge: true });
@@ -515,8 +515,9 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
     if (feedback.emergencyBailout) {
         const tbBalance = await getTimeBankBalance(userId);
         
-        let newNc = tbBalance.nc;
-        let newLc = tbBalance.lc;
+        // Zwingendes Default auf 0, um NaN durch verwaiste DB-Einträge zu verhindern
+        let newNc = tbBalance.nc ?? 0;
+        let newLc = tbBalance.lc ?? 0;
         let bailoutMessage = '';
         let noteSuffix = '';
 
@@ -524,9 +525,9 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
             bailoutMessage = `Abbruch einer freiwilligen Session. Keine Zeit angerechnet.`;
             noteSuffix = 'ABBRUCH (Freiwillig)';
         } else {
-            if (tbBalance.nc < 0 || tbBalance.lc < 0) {
-                const penaltyNc = tbBalance.nc < 0 ? Math.floor(Math.abs(tbBalance.nc) * 0.5) : 0;
-                const penaltyLc = tbBalance.lc < 0 ? Math.floor(Math.abs(tbBalance.lc) * 0.5) : 0;
+            if (newNc < 0 || newLc < 0) {
+                const penaltyNc = newNc < 0 ? Math.floor(Math.abs(newNc) * 0.5) : 0;
+                const penaltyLc = newLc < 0 ? Math.floor(Math.abs(newLc) * 0.5) : 0;
                 newNc -= penaltyNc;
                 newLc -= penaltyLc;
                 bailoutMessage = `Not-Abbruch! 50% Strafaufschlag auf bestehende Sissy-Schulden.`;

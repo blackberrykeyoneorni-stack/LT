@@ -519,7 +519,8 @@ export const applyThermalBonus = async (userId, bonusDetails) => {
 
         // 2. Bonus anwenden
         if (bonusDetails.type === 'dividend') {
-            const amount = bonusDetails.amount;
+            // KORREKTUR: Zwingender Cast, um weitere NaN-Injektionen völlig auszuschließen
+            const amount = Number(bonusDetails.amount) || 0;
             updates.nc = Math.min(currentNc + amount, DEBT_CONFIG.MAX_CREDIT_MINUTES);
             updates.lc = Math.min(currentLc + amount, DEBT_CONFIG.MAX_CREDIT_MINUTES);
         } 
