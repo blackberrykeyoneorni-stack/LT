@@ -14,8 +14,9 @@ export default function InfoTiles({ kpis, timeBank }) {
   const nylonIndex = kpis?.usage?.nylonIndex || '0.0';
   const nylonChartData = kpis?.usage?.nylonChartData || [];
   
-  const nc = timeBank?.nc || 0;
-  const lc = timeBank?.lc || 0;
+  // KORREKTUR: Erzwinge valide numerische Werte, um Anzeigefehler endgültig auszuschließen
+  const nc = timeBank?.nc != null ? Number(timeBank.nc) : 0;
+  const lc = timeBank?.lc != null ? Number(timeBank.lc) : 0;
   
   const spermaScore = kpis?.spermaScore || { rate: '0.0', total: 0, count: 0 };
 

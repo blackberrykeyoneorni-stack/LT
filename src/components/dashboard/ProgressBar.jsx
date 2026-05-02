@@ -1,4 +1,3 @@
-// src/components/dashboard/ProgressBar.jsx
 import React from 'react';
 import { Box, Typography, LinearProgress, Paper, Stack } from '@mui/material';
 import NightlightRoundIcon from '@mui/icons-material/NightlightRound';

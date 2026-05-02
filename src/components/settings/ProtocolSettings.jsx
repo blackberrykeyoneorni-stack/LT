@@ -1,4 +1,3 @@
-// src/components/settings/ProtocolSettings.jsx
 import React from 'react';
 import { Box, Typography, Slider, Paper, Grid } from '@mui/material';
 import { PALETTE } from '../../theme/obsidianDesign';

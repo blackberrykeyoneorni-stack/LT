@@ -272,7 +272,12 @@ export default function Dashboard() {
     });
 
     const unsubscribeTB = onSnapshot(doc(db, `users/${currentUser.uid}/status/timeBank`), (docSnap) => {
-        setTimeBankData(docSnap.exists() ? docSnap.data() : { nc: 0, lc: 0 });
+        if (docSnap.exists()) {
+            const d = docSnap.data();
+            setTimeBankData({ nc: d.nc ?? 0, lc: d.lc ?? 0, ...d });
+        } else {
+            setTimeBankData({ nc: 0, lc: 0 });
+        }
     });
 
     const unsubLedger = onSnapshot(
