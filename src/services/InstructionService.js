@@ -1,4 +1,3 @@
-// src/services/InstructionService.js
 import { db } from '../firebase';
 import { collection, serverTimestamp, query, where, getDocs, doc, setDoc, getDoc, orderBy, limit } from 'firebase/firestore';
 import { DEFAULT_PROTOCOL_RULES } from '../config/defaultRules';
@@ -7,7 +6,7 @@ import { DEFAULT_PROTOCOL_RULES } from '../config/defaultRules';
 
 const calculateTargetDuration = async (uid, prefs, periodId) => {
     // SISSY-FEIERTAG OVERRIDE: Am 15. Mai gibt es keine Verhandlung. 1440 Minuten.
-    const isNSD = periodId && periodId.includes('-05-15');
+    const isNSD = periodId && periodId.includes('-05-19');
     if (isNSD) return 1440;
 
     if (periodId && periodId.includes('night')) {
@@ -33,7 +32,7 @@ const calculateTargetDuration = async (uid, prefs, periodId) => {
 };
 
 const isItemInRecovery = (item, restingHours = 24, isNSD = false) => {
-    // SISSY-FEIERTAG: Die Maschine ignoriert Hygiene oder Erholung. Zieh das nasse Plastik an.
+    // SISSY-FEIERTAG: Die Maschine ignoriert Hygiene oder Erholung. Zieh die getragenen Nylons an.
     if (isNSD) return false;
 
     if (!item.mainCategory || item.mainCategory !== 'Nylons') {
@@ -298,7 +297,7 @@ export const verifyNightCompliance = async (userId, referenceDate = new Date()) 
 
 export const generateAndSaveInstruction = async (uid, items, activeSessions, periodId) => {
     try {
-        const isNSD = periodId && periodId.includes('-05-15');
+        const isNSD = periodId && periodId.includes('-05-19');
         const prefsSnap = await getDoc(doc(db, `users/${uid}/settings/preferences`));
         const prefs = prefsSnap.exists() ? prefsSnap.data() : {};
 
@@ -331,7 +330,7 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                 periodId,
                 generatedAt: serverTimestamp(),
                 isAccepted: false,
-                itemName: `[SISSY-FEIERTAG] Doppelte Plastik-Haut`,
+                itemName: `[SISSY-FEIERTAG] Doppelte Nylons um den Nylon Stocking Day zu ehren`,
                 durationMinutes: 1440,
                 isNSD: true,
                 nsdItems: [baseTights.id, guertel.id, alt1.id, alt2.id], 

@@ -1,4 +1,3 @@
-// src/services/SessionService.js
 import { db } from '../firebase';
 import { collection, doc, writeBatch, serverTimestamp, getDoc, setDoc, increment, query, where, getDocs } from 'firebase/firestore';
 import { updateWearStats, addItemHistoryEntry, setItemStatus } from './ItemService';
@@ -392,27 +391,33 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
     let isInstructionCompleted = false;
     const isNightSession = sessionData.periodId && sessionData.periodId.toLowerCase().includes('night');
 
-    if (sessionData.type === 'instruction' && !isNightSession) {
-        const target = trueDailyTarget > 0 ? trueDailyTarget : (sessionData.targetDurationMinutes || 0);
-        let totalAccumulatedMinutes = durationMinutes + sessionDiscountMinutes;
-        
-        if (sessionData.periodId) {
-            try {
-                const qPast = query(
-                    collection(db, `users/${userId}/sessions`), 
-                    where('periodId', '==', sessionData.periodId), 
-                    where('type', '==', 'instruction'), 
-                    where('isActive', '==', false)
-                );
-                const pastSnap = await getDocs(qPast);
-                pastSnap.forEach(docSnap => {
-                    totalAccumulatedMinutes += (docSnap.data().durationMinutes || 0);
-                });
-            } catch (e) { console.error("Fehler bei der Akkumulation:", e); }
-        }
-
-        if (target > 0 && totalAccumulatedMinutes >= target) {
+    if (sessionData.type === 'instruction') {
+        if (isNightSession) {
+            // KORREKTUR: Nacht-Anweisungen werden beim Stoppen als abgeschlossen markiert,
+            // um die "Zombie-Anweisung" am folgenden Ruhetag zu verhindern.
             isInstructionCompleted = true;
+        } else {
+            const target = trueDailyTarget > 0 ? trueDailyTarget : (sessionData.targetDurationMinutes || 0);
+            let totalAccumulatedMinutes = durationMinutes + sessionDiscountMinutes;
+            
+            if (sessionData.periodId) {
+                try {
+                    const qPast = query(
+                        collection(db, `users/${userId}/sessions`), 
+                        where('periodId', '==', sessionData.periodId), 
+                        where('type', '==', 'instruction'), 
+                        where('isActive', '==', false)
+                    );
+                    const pastSnap = await getDocs(qPast);
+                    pastSnap.forEach(docSnap => {
+                        totalAccumulatedMinutes += (docSnap.data().durationMinutes || 0);
+                    });
+                } catch (e) { console.error("Fehler bei der Akkumulation:", e); }
+            }
+
+            if (target > 0 && totalAccumulatedMinutes >= target) {
+                isInstructionCompleted = true;
+            }
         }
     }
     // --------------------------------
@@ -464,7 +469,7 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
 
         if (retentionMinutes < MIN_RETENTION_MINUTES) {
             pendingPunishment = {
-                msg: `Schwäche: Plastik nach ${retentionMinutes}m abgelegt (gefordert: ${MIN_RETENTION_MINUTES}m)`,
+                msg: `Schwäche: Nylons nach ${retentionMinutes}m abgelegt (gefordert: ${MIN_RETENTION_MINUTES}m)`,
                 dur: 120
             };
         }
@@ -685,7 +690,7 @@ export const executeNSDTransit = async (userId, newBaseId, newLayer2Id) => {
     const instrData = instrSnap.data();
 
     if (!instrData.nsdItems.includes(newBaseId) || !instrData.nsdItems.includes(newLayer2Id)) {
-        throw new Error("SISSY-FEIERTAG: Unerlaubtes Item. Du darfst nur das zugewiesene Plastik tragen.");
+        throw new Error("SISSY-FEIERTAG: Unerlaubtes Item. Du darfst nur die zugewiesenen Nylons tragen.");
     }
 
     if (instrData.nsdTransitCount >= 6) {
@@ -699,10 +704,10 @@ export const executeNSDTransit = async (userId, newBaseId, newLayer2Id) => {
     const newCat = (newLayer2Snap.data()?.subCategory || '').toLowerCase();
 
     if (prevCat.includes('straps') && !newCat.includes('knie')) {
-        throw new Error("SISSY-FEIERTAG: Pendel-Gesetz verletzt! Du musst Kniestrümpfe über das Plastik ziehen.");
+        throw new Error("SISSY-FEIERTAG: Pendel-Gesetz verletzt! Du musst Kniestrümpfe über die Strumpfhose ziehen.");
     }
     if (prevCat.includes('knie') && !newCat.includes('straps')) {
-        throw new Error("SISSY-FEIERTAG: Pendel-Gesetz verletzt! Du musst Strapsstrümpfe über das Plastik ziehen.");
+        throw new Error("SISSY-FEIERTAG: Pendel-Gesetz verletzt! Du musst Strapsstrümpfe über die Strumpfhose ziehen.");
     }
 
     // Gürtel aus dem aktuellen Set extrahieren, um ihn nicht zu überschreiben
@@ -763,7 +768,7 @@ export const reportNSDBreakage = async (userId, brokenItemId) => {
     const itemsSnap = await getDocs(qItems);
     const pool = itemsSnap.docs.filter(d => !instrData.nsdItems.includes(d.id));
 
-    if (pool.length === 0) throw new Error("SISSY-FEIERTAG: Kein Ersatz verfügbar. Du musst das kaputte Plastik weitertragen.");
+    if (pool.length === 0) throw new Error("SISSY-FEIERTAG: Kein Ersatz verfügbar. Du musst die kaputten Nylons weitertragen.");
 
     const replacement = pool[Math.floor(Math.random() * pool.length)];
     const newNsdItems = instrData.nsdItems.map(id => id === brokenItemId ? replacement.id : id);
