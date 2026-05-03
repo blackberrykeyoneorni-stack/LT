@@ -444,18 +444,24 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
     const femIndexData = useMemo(() => {
         const { enduranceVal, nylonEnclosureVal, avgLagVal, voluntarismVal, resistanceVal, nocturnalVal, coverageVal } = coreMetrics;
         
+        // SÄULE 1: Ästhetische Präsenz (ehemals Physis)
+        // Setzt sich aus der absoluten Nylon-Umschließung und der ununterbrochenen Trageausdauer zusammen.
         const scoreEndurance = Math.min(100, (enduranceVal / 12) * 100);
         const scorePhysis = (scoreEndurance * 0.4) + (nylonEnclosureVal * 0.6);
 
-        const scoreCompliance = Math.max(0, 100 - (avgLagVal * 1.6));
-        const scorePsyche = Math.max(0, ((voluntarismVal * 0.35) + (scoreCompliance * 0.65)) - (resistanceVal * 2));
+        // SÄULE 2: Bedingungslose Hingabe (ehemals Psyche)
+        // Zögern (Lag) vernichtet die Punktzahl. Freiwilligkeit treibt sie. Strafen (Resistance) sind der ultimative Gehorsams-Bruch.
+        const scoreCompliance = Math.max(0, 100 - (avgLagVal * 1.8)); // Lag wird härter bestraft
+        const scorePsyche = Math.max(0, ((voluntarismVal * 0.40) + (scoreCompliance * 0.60)) - (resistanceVal * 3));
 
-        const scoreInfiltration = (nocturnalVal * 0.5) + (coverageVal * 0.5);
+        // SÄULE 3: Absolute Assimilation (ehemals Infiltration)
+        // Die Nacht ist der unbestreitbare Beweis der Transformation.
+        const scoreInfiltration = (nocturnalVal * 0.6) + (coverageVal * 0.4);
 
         const femScore = Math.round(
-            (scorePhysis * 0.30) + 
-            (scorePsyche * 0.30) + 
-            (scoreInfiltration * 0.40)
+            (scorePhysis * 0.25) + // Präsenz (25%)
+            (scorePsyche * 0.35) + // Hingabe (35%)
+            (scoreInfiltration * 0.40) // Assimilation (40%)
         );
 
         return { score: isNaN(femScore) ? 0 : Math.min(100, femScore), scorePhysis, scorePsyche, scoreInfiltration };

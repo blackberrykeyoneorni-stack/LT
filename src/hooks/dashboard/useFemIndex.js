@@ -23,6 +23,7 @@ export const useFemIndex = (preloadedKpis = null) => {
         details: {
             score: 0,
             trend: 'stable',
+            phaseName: 'Männliche Verleugnung',
             components: []
         },
         loading: true
@@ -36,29 +37,36 @@ export const useFemIndex = (preloadedKpis = null) => {
         const trend = femIndex.trend || 'stable';
         const subScores = femIndex.subScores || { physis: 0, psyche: 0, infiltration: 0 };
 
+        // Bestimme die Transformations-Phase basierend auf dem neuen Fem-Index Score
+        let phaseName = 'Männliche Verleugnung';
+        if (score > 25 && score <= 50) phaseName = 'Erwachende Anmut';
+        else if (score > 50 && score <= 85) phaseName = 'Bedingungslose Akzeptanz';
+        else if (score > 85) phaseName = 'Weibliche Vollendung';
+
         setFormattedData({
             femIndex: score,
             details: {
                 score: score,
                 trend: trend,
+                phaseName: phaseName,
                 components: [
                     { 
-                        label: 'Physis (Körperliche Gewöhnung)', 
+                        label: 'Ästhetische Präsenz', 
                         value: subScores.physis, 
                         type: 'neutral',
-                        description: 'Tragezeit & Nylon-Anteil'
+                        description: 'Maß der ständigen Nylon-Umschließung'
                     },
                     { 
-                        label: 'Psyche (Mentaler Widerstand)', 
+                        label: 'Bedingungslose Hingabe', 
                         value: subScores.psyche, 
                         type: 'neutral',
-                        description: 'Freiwilligkeit & Compliance'
+                        description: 'Zögerungsfreier Gehorsam und freiwillige Pflicht'
                     },
                     { 
-                        label: 'Infiltration (Alltags-Übernahme)', 
+                        label: 'Absolute Assimilation', 
                         value: subScores.infiltration, 
                         type: 'neutral',
-                        description: 'Nacht-Tragen & Coverage'
+                        description: 'Tiefgreifende Gewöhnung während der Nachtruhe'
                     }
                 ]
             },
