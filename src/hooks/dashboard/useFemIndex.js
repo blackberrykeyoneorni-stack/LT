@@ -7,6 +7,7 @@ import { useAuth } from '../../contexts/AuthContext';
  * useFemIndex Hook
  * Verbindet UI mit der zentralen KPI Logik.
  * Transformiert die Rohdaten in ein Format für die FemIndexBar.
+ * SYNC: Alle Werte basieren nun auf dem 60-Tage-Rolling-Window der useKPIs.
  */
 export const useFemIndex = (preloadedKpis = null) => {
     const { items } = useItems();
@@ -54,19 +55,19 @@ export const useFemIndex = (preloadedKpis = null) => {
                         label: 'Ästhetische Präsenz', 
                         value: subScores.physis, 
                         type: 'neutral',
-                        description: 'Maß der ständigen Nylon-Umschließung'
+                        description: 'Konstanz der Nylon-Umschließung (60-Tage-Schnitt)'
                     },
                     { 
                         label: 'Bedingungslose Hingabe', 
                         value: subScores.psyche, 
                         type: 'neutral',
-                        description: 'Zögerungsfreier Gehorsam und freiwillige Pflicht'
+                        description: 'Gehorsam und freiwilliger Dienst der letzten 60 Tage'
                     },
                     { 
                         label: 'Absolute Assimilation', 
                         value: subScores.infiltration, 
                         type: 'neutral',
-                        description: 'Tiefgreifende Gewöhnung während der Nachtruhe'
+                        description: 'Tiefgreifende nächtliche Anpassung im 60-Tage-Fenster'
                     }
                 ]
             },

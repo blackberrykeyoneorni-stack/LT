@@ -24,14 +24,14 @@ import TrendingDownIcon from '@mui/icons-material/TrendingDown';
 import { useFemIndex } from '../../hooks/dashboard/useFemIndex';
 
 export default function FemIndexBar() {
+    // SYNC: Der Fem-Index Hook nutzt nun die synchronisierten 60-Tage Metriken
     const { femIndex, details, loading } = useFemIndex();
     const [open, setOpen] = useState(false);
 
-    // Farblogik: Rot (kritisch) -> Gold (ok) -> Grün (gut)
     const getColor = (value) => {
         if (value < 30) return PALETTE.accents.red;
         if (value < 70) return PALETTE.accents.gold;
-        return PALETTE.accents.green; // oder '#00E676' passend zum ProgressBar Success
+        return PALETTE.accents.green; 
     };
 
     const currentColor = getColor(femIndex);
@@ -42,7 +42,6 @@ export default function FemIndexBar() {
         return <TrendingFlatIcon fontSize="small" />;
     };
 
-    // Sub-Komponenten Icons
     const getIconForLabel = (label) => {
         if (label.includes('Physis')) return <CheckCircleIcon sx={{ color: '#00e5ff', fontSize: 20 }} />;
         if (label.includes('Psyche')) return <PsychologyIcon sx={{ color: '#ffeb3b', fontSize: 20 }} />;
@@ -61,7 +60,6 @@ export default function FemIndexBar() {
 
     return (
         <>
-            {/* HAUPT-KOMPONENTE im ProgressBar Look */}
             <Paper 
                 elevation={0}
                 onClick={() => setOpen(true)}
@@ -82,10 +80,9 @@ export default function FemIndexBar() {
                     }
                 }}
             >
-                {/* Header Zeile: Titel und Wert */}
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
                     <Typography variant="body2" sx={{ color: 'text.secondary', letterSpacing: 1, fontWeight: 'bold' }}>
-                        FEM-INDEX
+                        FEM-INDEX (60 TAGE)
                     </Typography>
                     
                     <Box sx={{ textAlign: 'right' }}>
@@ -95,7 +92,6 @@ export default function FemIndexBar() {
                     </Box>
                 </Box>
 
-                {/* Der Balken */}
                 <LinearProgress 
                     variant="determinate" 
                     value={femIndex} 
@@ -112,7 +108,6 @@ export default function FemIndexBar() {
                     }}
                 />
 
-                {/* Footer Zeile: Status Text und Indikatoren */}
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: currentColor }}>
                         {getTrendIcon(details.trend || 'stable')}
@@ -121,7 +116,6 @@ export default function FemIndexBar() {
                         </Typography>
                     </Box>
 
-                    {/* Kleine Icons rechts, um Physis/Psyche/Infiltration anzudeuten */}
                     <Stack direction="row" spacing={1} alignItems="center" sx={{ opacity: 0.7 }}>
                         <CheckCircleIcon sx={{ fontSize: 16, color: '#00e5ff' }} />
                         <PsychologyIcon sx={{ fontSize: 16, color: '#ffeb3b' }} />
@@ -130,8 +124,6 @@ export default function FemIndexBar() {
                 </Box>
             </Paper>
 
-
-            {/* OVERLAY: Detaillierte Berechnung */}
             <Dialog 
                 open={open} 
                 onClose={() => setOpen(false)}
@@ -157,7 +149,7 @@ export default function FemIndexBar() {
                             {femIndex}
                         </Typography>
                         <Typography variant="caption" color="text.secondary" sx={{ letterSpacing: 2 }}>
-                            COMPOSITE SCORE
+                            60-TAGE COMPOSITE SCORE
                         </Typography>
                     </Box>
                     

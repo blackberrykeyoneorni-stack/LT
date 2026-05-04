@@ -4,7 +4,8 @@ import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 
 // --- KONFIGURATION ---
-const HISTORY_START_DATE = new Date('2025-12-15T00:00:00');
+const ROLLING_WINDOW_DAYS = 60;
+const CHART_MONTHS = 6;
 
 // --- HELPER FUNKTIONEN ---
 const fmtPct = (val) => (typeof val === 'number' && !isNaN(val) ? val.toFixed(1) : '0.0');
@@ -25,7 +26,8 @@ const fmtHoursToDuration = (hours) => {
 const calculateCoverage = (sessions) => {
     const now = new Date();
     const startOfPeriod = new Date(now);
-    startOfPeriod.setDate(now.getDate() - 7); 
+    // SYNC: Abdeckung wird nun über das gesamte 60-Tage-Fenster berechnet
+    startOfPeriod.setDate(now.getDate() - ROLLING_WINDOW_DAYS); 
 
     const relevantSessions = sessions.filter(s => {
         const start = s.startTime?.toDate ? s.startTime.toDate() : new Date(s.startTime);
@@ -59,7 +61,7 @@ const calculateCoverage = (sessions) => {
     merged.push(curr);
 
     const activeMs = merged.reduce((acc, i) => acc + (i.end - i.start), 0);
-    const totalMs = 7 * 24 * 60 * 60 * 1000; 
+    const totalMs = ROLLING_WINDOW_DAYS * 24 * 60 * 60 * 1000; 
 
     return Math.min(100, (activeMs / totalMs) * 100);
 };
@@ -142,7 +144,6 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
     useEffect(() => {
         if (!currentUser) return;
         
-        // 1. Prioritäts-Listener für Trageziele (Wichtig für Sonntags-Report)
         const targetDoc = doc(db, `users/${currentUser.uid}/status/targets`);
         const unsubTargets = onSnapshot(targetDoc, (snap) => {
             if (snap.exists()) {
@@ -154,9 +155,9 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
             setLoading(true);
             try {
                 if (!historySessionsInput) {
+                    // Wir laden alle Sessions, filtern aber im useMemo auf das Fenster
                     const q = query(
                         collection(db, `users/${currentUser.uid}/sessions`),
-                        where('startTime', '>=', HISTORY_START_DATE),
                         orderBy('startTime', 'desc')
                     );
                     const snapshot = await getDocs(q);
@@ -198,9 +199,11 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
     }, [historySessionsInput, rawSessions, activeSessionsInput]);
 
     const historySessions = useMemo(() => {
+        const now = new Date();
+        const lookbackDate = new Date(now.getTime() - ROLLING_WINDOW_DAYS * 24 * 60 * 60 * 1000);
         return allSessions.filter(s => {
             const d = s.startTime?.toDate ? s.startTime.toDate() : new Date(s.startTime);
-            return d >= HISTORY_START_DATE;
+            return d >= lookbackDate;
         });
     }, [allSessions]);
 
@@ -269,11 +272,12 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
 
     const coreMetrics = useMemo(() => {
         const now = new Date();
+        const lookbackDate = new Date(now.getTime() - ROLLING_WINDOW_DAYS * 24 * 60 * 60 * 1000);
         const coverageVal = calculateCoverage(allSessions);
 
         let daysCount = 0;
         let nocturnalSuccessCount = 0;
-        const loopDate = new Date(HISTORY_START_DATE);
+        const loopDate = new Date(lookbackDate);
         while (loopDate <= now) {
             daysCount++;
             const checkTime = new Date(loopDate);
@@ -289,7 +293,7 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
         let gapDaysCount = 0;
         let totalNylonMinutesHistory = 0; 
         
-        const gapLoopDate = new Date(HISTORY_START_DATE);
+        const gapLoopDate = new Date(lookbackDate);
         while (gapLoopDate <= now) {
             gapDaysCount++;
             const wornMinutes = calculateDailyNylonMinutes(gapLoopDate, allSessions, items);
@@ -306,22 +310,22 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
         let totalLagMinutes = 0;
         let lagCount = 0;
 
-        const fortyDaysAgo = new Date();
-        fortyDaysAgo.setDate(now.getDate() - 40);
+        // SYNC: Widerstand und Zögern ebenfalls auf 60 Tage
+        const sixtyDaysAgo = new Date();
+        sixtyDaysAgo.setDate(now.getDate() - ROLLING_WINDOW_DAYS);
 
-        const recent40DaysSessions = historySessions.filter(s => {
+        const recent60DaysSessions = historySessions.filter(s => {
             const d = s.startTime?.toDate ? s.startTime.toDate() : new Date(s.startTime);
-            return d >= fortyDaysAgo;
+            return d >= sixtyDaysAgo;
         });
 
-        recent40DaysSessions.forEach(s => {
+        recent60DaysSessions.forEach(s => {
             const start = s.startTime?.toDate ? s.startTime.toDate() : new Date(s.startTime);
             const end = s.endTime ? (s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime)) : new Date();
             const duration = Math.max(0, end.getTime() - start.getTime());
             totalDurationMs += duration;
             if (s.type === 'voluntary') voluntaryDurationMs += duration;
 
-            // STRIKTE FILTERUNG NACH INSTRUCTION UND GÜLTIGEM LAG
             if (s.type === 'instruction' && s.complianceLagMinutes != null && s.complianceLagMinutes !== '') {
                 const lagNum = Number(s.complianceLagMinutes);
                 if (!isNaN(lagNum) && lagNum >= 0) {
@@ -332,7 +336,7 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
         });
         
         const voluntarismVal = totalDurationMs > 0 ? (voluntaryDurationMs / totalDurationMs) * 100 : 0;
-        const resistanceVal = recent40DaysSessions.length > 0 ? (recent40DaysSessions.filter(s => s.type === 'punishment').length / recent40DaysSessions.length) * 100 : 0;
+        const resistanceVal = recent60DaysSessions.length > 0 ? (recent60DaysSessions.filter(s => s.type === 'punishment').length / recent60DaysSessions.length) * 100 : 0;
         const avgLagVal = lagCount > 0 ? (totalLagMinutes / lagCount) : 0;
 
         const relevantEnduranceSessions = historySessions.filter(s => s.startTime);
@@ -412,7 +416,8 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
         const currentMonth = today.getMonth();
         const currentYear = today.getFullYear();
 
-        for (let i = 5; i >= 0; i--) {
+        // ERHALT: Iteration über exakt 6 Monate für die Diagramme
+        for (let i = CHART_MONTHS - 1; i >= 0; i--) {
             let m = currentMonth - i;
             let y = currentYear;
             if (m < 0) { m += 12; y -= 1; }
@@ -455,15 +460,12 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
     const femIndexData = useMemo(() => {
         const { enduranceVal, nylonEnclosureVal, avgLagVal, voluntarismVal, resistanceVal, nocturnalVal, coverageVal } = coreMetrics;
         
-        // SÄULE 1: Ästhetische Präsenz (ehemals Physis)
         const scoreEndurance = Math.min(100, (enduranceVal / 12) * 100);
         const scorePhysis = (scoreEndurance * 0.4) + (nylonEnclosureVal * 0.6);
 
-        // SÄULE 2: Bedingungslose Hingabe (ehemals Psyche)
         const scoreCompliance = Math.max(0, 100 - (avgLagVal * 1.8)); 
         const scorePsyche = Math.max(0, ((voluntarismVal * 0.40) + (scoreCompliance * 0.60)) - (resistanceVal * 3));
 
-        // SÄULE 3: Absolute Assimilation (ehemals Infiltration)
         const scoreInfiltration = (nocturnalVal * 0.6) + (coverageVal * 0.4);
 
         const femScore = Math.round(

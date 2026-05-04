@@ -30,7 +30,7 @@ export default function Statistics() {
         const loadData = async () => {
             setLoading(true);
             try {
-                // BUGFIX: Firebase ist hier weg, sauberer Aufruf des Data-Layers
+                // Datenabruf über den Service Layer
                 const data = await fetchStatsData(currentUser.uid);
                 setItems(data.items);
                 setSessions(data.sessions);
@@ -43,6 +43,7 @@ export default function Statistics() {
         loadData();
     }, [currentUser]);
 
+    // SYNC: Der Hook liefert nun die auf 60 Tage synchronisierten Metriken
     const { coreMetrics, basics, deepAnalytics } = useKPIs(items, [], sessions);
 
     const handleCardClick = (metricId, title) => { 
