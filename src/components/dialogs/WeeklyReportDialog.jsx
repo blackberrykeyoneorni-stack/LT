@@ -15,9 +15,10 @@ export default function WeeklyReportDialog({ open, onClose, report }) {
 
   const formatMins = (m) => {
     const val = Number(m);
-    if (isNaN(val)) return "0m";
+    // SYSTEM-SICHERUNG: Fallback auf 0m bei ungültigen Werten
+    if (isNaN(val) || val <= 0) return "0m";
     const h = Math.floor(val / 60);
-    const mins = val % 60;
+    const mins = Math.round(val % 60);
     return h > 0 ? `${h}h ${mins}m` : `${mins}m`;
   };
 

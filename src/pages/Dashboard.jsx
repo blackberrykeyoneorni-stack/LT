@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   collection, doc, updateDoc, serverTimestamp, 
-  addDoc, getDoc, onSnapshot, query, where 
+  addDoc, getDoc, onSnapshot, query, where, getDocs, limit 
 } from 'firebase/firestore'; 
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
@@ -19,6 +19,7 @@ import { stopSession as stopSessionService, startSession as startSessionService 
 import { isImmunityActive } from '../services/OfferService';
 import { runTimeBankAuditor, spendCredits } from '../services/TimeBankService'; 
 import { getUniformityStatus } from '../services/UniformityService';
+import { generateWeeklyReport } from '../services/ReportService';
 
 // Hooks
 import useSessionProgress from '../hooks/dashboard/useSessionProgress';
@@ -97,7 +98,7 @@ export default function Dashboard() {
   const budgetBalance = monthlyBudget - currentSpent;
   const isStealthActive = activeSuspension?.type === 'stealth_travel';
 
-  // --- SCHULDEN-LOGIK (Irreversible Debt Protocol) ---
+  // --- SCHULDEN-LOGIK ---
   const ncDebt = timeBankData.nc < 0 ? Math.abs(timeBankData.nc) : 0;
   const lcDebt = timeBankData.lc < 0 ? Math.abs(timeBankData.lc) : 0;
   const inDebt = ncDebt > 0 || lcDebt > 0;
@@ -166,6 +167,40 @@ export default function Dashboard() {
       setIsHoldingOath(false); 
       setOathProgress(0); 
   }, [setIsHoldingOath, setOathProgress]);
+
+  // --- WEEKLY REPORT ESCALATION PROTOCOL ---
+  useEffect(() => {
+    if (!currentUser || kpis.loading) return;
+
+    const checkWeeklyReport = async () => {
+      const now = new Date();
+      const isSunday = now.getDay() === 0;
+      const isEvening = now.getHours() >= 20;
+
+      if (isSunday && isEvening) {
+        const monday = new Date(now);
+        monday.setDate(now.getDate() - 6);
+        const weekId = monday.toISOString().split('T')[0];
+
+        const reportRef = doc(db, `users/${currentUser.uid}/reports`, weekId);
+        const q = query(collection(db, `users/${currentUser.uid}/reports`), where('weekId', '==', weekId), limit(1));
+        const snap = await getDocs(q);
+
+        if (snap.empty) {
+          // SYSTEM-ANKER: Wir ziehen das aktuelle Ziel aus den Echtzeit-KPIs
+          const currentTarget = kpis.targets?.dailyTargetMinutes || 240;
+          await generateWeeklyReport(currentUser.uid, currentTarget);
+        } else {
+          const reportData = snap.docs[0].data();
+          if (!reportData.acknowledged) {
+            setWeeklyReport(reportData);
+          }
+        }
+      }
+    };
+
+    checkWeeklyReport();
+  }, [currentUser, kpis]);
 
   const handleAcknowledgeInflation = async () => {
       try {
@@ -271,7 +306,6 @@ export default function Dashboard() {
         }
     });
 
-    // HIER IST DIE KORREKTUR FÜR DIE DASHBOARD.JSX
     const unsubscribeTB = onSnapshot(doc(db, `users/${currentUser.uid}/status/timeBank`), (docSnap) => {
         if (docSnap.exists()) {
             const d = docSnap.data();
@@ -386,7 +420,6 @@ export default function Dashboard() {
       useUIStore.getState().setReleaseStep('timer'); 
       if(releaseTimerInterval.current) clearInterval(releaseTimerInterval.current);
       
-      // Zustand Race-Condition Fix: Synchrones Lesen des States statt asynchroner Callback-Verschachtelung
       releaseTimerInterval.current = setInterval(() => { 
           const currentTimer = useUIStore.getState().releaseTimer;
           if (currentTimer <= 1) {
@@ -419,7 +452,6 @@ export default function Dashboard() {
 
   if (loadingSuspension) return <Box sx={{ p: 4, textAlign: 'center' }}>System Check...</Box>;
 
-  // --- GATEKEEPER BLOCK ---
   if (isCheckingProtocol) {
       return (
           <Box sx={{ 
@@ -470,7 +502,6 @@ export default function Dashboard() {
                 )}
             </Box>
 
-            {/* UNIFORMITY BLOCK */}
             {uniformity.active && (
                 <Paper sx={{ p: 3, mb: 3, bgcolor: 'rgba(211, 47, 47, 0.1)', border: `1px solid ${PALETTE.accents.red}` }}>
                     <Typography variant="subtitle1" color="error" sx={{ fontWeight: 'bold', mb: 1, display: 'flex', alignItems: 'center' }}>
@@ -482,7 +513,6 @@ export default function Dashboard() {
                 </Paper>
             )}
 
-            {/* SCHULDENTILGUNG BLOCK */}
             {inDebt && !hasActiveDebtSession && (
                 <Paper sx={{ p: 3, mb: 3, bgcolor: 'rgba(211, 47, 47, 0.1)', border: `1px solid ${PALETTE.accents.red}` }}>
                     <Typography variant="subtitle1" color="error" sx={{ fontWeight: 'bold', mb: 1, display: 'flex', alignItems: 'center' }}>
@@ -499,7 +529,6 @@ export default function Dashboard() {
                         onClick={async () => {
                             let requiredItems = [];
                             
-                            // HYBRID-ZWANG: Tilgung zwingt zur Straf-Uniform, falls aktiv
                             if (uniformity.active && uniformity.itemIds) {
                                 requiredItems = items.filter(i => uniformity.itemIds.includes(i.id));
                             } else {

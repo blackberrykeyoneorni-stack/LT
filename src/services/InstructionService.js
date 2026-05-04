@@ -14,6 +14,15 @@ const calculateTargetDuration = async (uid, prefs, periodId) => {
     }
 
     try {
+        // 1. PRIORITÄT: Eskaliertes Ziel aus dem Status-Dokument (vom Weekly Report)
+        const targetRef = doc(db, `users/${uid}/status/targets`);
+        const targetSnap = await getDoc(targetRef);
+        
+        if (targetSnap.exists() && targetSnap.data().dailyTargetMinutes !== undefined) {
+            return Math.round(targetSnap.data().dailyTargetMinutes);
+        }
+
+        // 2. FALLBACK: Protokoll-Einstellungen (Stunden -> Minuten)
         const protocolRef = doc(db, `users/${uid}/settings/protocol`);
         const protocolSnap = await getDoc(protocolRef);
         
@@ -690,7 +699,7 @@ export const generateAndSaveInstruction = async (uid, items, activeSessions, per
                         let pWeight = 1;
                         const isPNylon = pItem.mainCategory === 'Nylons' || 
                                         (pItem.subCategory || '').toLowerCase().includes('strumpfhose') || 
-                                        (pItem.subCategory || '').toLowerCase().includes('stockings') ||
+                                        (pItem.subCategory || '').toLowerCase().includes('stockings') || 
                                         (pItem.subCategory || '').toLowerCase().includes('tights');
                         
                         if (isPNylon) {

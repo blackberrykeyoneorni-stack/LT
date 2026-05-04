@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { doc, getDocs, getDoc, collection, query, where, orderBy } from 'firebase/firestore';
+import { doc, getDocs, getDoc, collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -137,10 +137,19 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
     const [loading, setLoading] = useState(true);
     const [rawSessions, setRawSessions] = useState([]);
     const [releaseStats, setReleaseStats] = useState({ totalReleases: 0, cleanReleases: 0, keptOn: 0 });
+    const [targets, setTargets] = useState({ dailyTargetMinutes: 240 });
 
     useEffect(() => {
         if (!currentUser) return;
         
+        // 1. Prioritäts-Listener für Trageziele (Wichtig für Sonntags-Report)
+        const targetDoc = doc(db, `users/${currentUser.uid}/status/targets`);
+        const unsubTargets = onSnapshot(targetDoc, (snap) => {
+            if (snap.exists()) {
+                setTargets(snap.data());
+            }
+        });
+
         const fetchData = async () => {
             setLoading(true);
             try {
@@ -177,6 +186,8 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
         };
 
         fetchData();
+
+        return () => unsubTargets();
     }, [currentUser, refreshTrigger, historySessionsInput]);
 
     const allSessions = useMemo(() => {
@@ -445,31 +456,26 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
         const { enduranceVal, nylonEnclosureVal, avgLagVal, voluntarismVal, resistanceVal, nocturnalVal, coverageVal } = coreMetrics;
         
         // SÄULE 1: Ästhetische Präsenz (ehemals Physis)
-        // Setzt sich aus der absoluten Nylon-Umschließung und der ununterbrochenen Trageausdauer zusammen.
         const scoreEndurance = Math.min(100, (enduranceVal / 12) * 100);
         const scorePhysis = (scoreEndurance * 0.4) + (nylonEnclosureVal * 0.6);
 
         // SÄULE 2: Bedingungslose Hingabe (ehemals Psyche)
-        // Zögern (Lag) vernichtet die Punktzahl. Freiwilligkeit treibt sie. Strafen (Resistance) sind der ultimative Gehorsams-Bruch.
-        const scoreCompliance = Math.max(0, 100 - (avgLagVal * 1.8)); // Lag wird härter bestraft
+        const scoreCompliance = Math.max(0, 100 - (avgLagVal * 1.8)); 
         const scorePsyche = Math.max(0, ((voluntarismVal * 0.40) + (scoreCompliance * 0.60)) - (resistanceVal * 3));
 
         // SÄULE 3: Absolute Assimilation (ehemals Infiltration)
-        // Die Nacht ist der unbestreitbare Beweis der Transformation.
         const scoreInfiltration = (nocturnalVal * 0.6) + (coverageVal * 0.4);
 
         const femScore = Math.round(
-            (scorePhysis * 0.25) + // Präsenz (25%)
-            (scorePsyche * 0.35) + // Hingabe (35%)
-            (scoreInfiltration * 0.40) // Assimilation (40%)
+            (scorePhysis * 0.25) + 
+            (scorePsyche * 0.35) + 
+            (scoreInfiltration * 0.40) 
         );
 
         return { score: isNaN(femScore) ? 0 : Math.min(100, femScore), scorePhysis, scorePsyche, scoreInfiltration };
     }, [coreMetrics]);
 
-    // NEU: DEEP ANALYTICS MEMO (PSYCHO-PROFIL)
     const deepAnalytics = useMemo(() => {
-        // 1. Krisen-Prädiktion
         const failureDays = {0:0, 1:0, 2:0, 3:0, 4:0, 5:0, 6:0};
         let totalFailures = 0;
         historySessions.forEach(s => {
@@ -484,18 +490,16 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
         const riskDay = maxDay >= 0 && maxVal > 0 ? daysArr[maxDay] : 'Unbestimmt';
         const riskLevel = totalFailures > 10 ? 'Hoch' : (totalFailures > 5 ? 'Moderat' : 'Gering');
 
-        // 2. Unterbewusste Adaption
         const nightSessions = historySessions.filter(s => s.periodId && s.periodId.includes('night'));
         let undisturbedCount = 0;
         nightSessions.forEach(s => {
             const start = s.startTime?.toDate ? s.startTime.toDate() : new Date(s.startTime);
             const end = s.endTime ? (s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime)) : new Date();
             const diffMins = (end - start) / 60000;
-            if (diffMins >= 360) undisturbedCount++; // Mindestens 6 Stunden ununterbrochener Schlaf in Nylons
+            if (diffMins >= 360) undisturbedCount++; 
         });
         const adaptionScore = nightSessions.length > 0 ? (undisturbedCount / nightSessions.length) * 100 : 0;
 
-        // 3. Willenskraft-Erschöpfung (Ego-Depletion)
         let totalMinsBeforeFailure = 0;
         let failureEvents = 0;
         historySessions.forEach((s, idx) => {
@@ -512,7 +516,6 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
         });
         const egoDepletionMins = failureEvents > 0 ? (totalMinsBeforeFailure / failureEvents) : 0; 
 
-        // 4. Infiltrations-Eskalation
         const daySessions = historySessions.filter(s => s.periodId && s.periodId.includes('day'));
         let complexDayCount = 0;
         daySessions.forEach(s => {
@@ -561,6 +564,7 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
                 total: releaseStats.totalReleases, 
                 count: releaseStats.cleanReleases 
             },
+            targets,
             coreMetrics: {
                 nylonEnclosure: fmtPct(coreMetrics.nylonEnclosureVal),
                 nocturnal: fmtPct(coreMetrics.nocturnalVal),
@@ -593,10 +597,9 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
                 archived: itemStats.archivedItems.length
             }
         };
-    }, [itemStats, nylonStats, coreMetrics, chartData, femIndexData, releaseStats, allSessions]);
+    }, [itemStats, nylonStats, coreMetrics, chartData, femIndexData, releaseStats, allSessions, targets]);
 
     const refreshKPIs = () => setRefreshTrigger(prev => prev + 1);
 
-    // NEU: deepAnalytics im Hook Return hinzugefügt
     return { ...finalKpis, deepAnalytics, loading, refreshKPIs };
 }
