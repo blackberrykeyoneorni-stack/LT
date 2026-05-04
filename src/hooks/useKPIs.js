@@ -232,34 +232,16 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
             )
         );
 
-        let totalLifetimeMinutes = 0;
-        const uniqueNylonItemsWorn = new Set(); 
-
-        historySessions.forEach(s => {
-            const sItemIds = s.itemIds || (s.itemId ? [s.itemId] : []);
-            let sessionHasNylon = false;
-            sItemIds.forEach(id => {
-                const item = items.find(i => i.id === id);
-                if (!item) return;
-                const main = item.mainCategory || '';
-                const sub = (item.subCategory || '').toLowerCase();
-                if (main === 'Nylons' || sub.includes('strumpfhose') || sub.includes('stockings')) {
-                    sessionHasNylon = true;
-                    uniqueNylonItemsWorn.add(id); 
-                }
-            });
-
-            if (sessionHasNylon) {
-                const start = s.startTime?.toDate ? s.startTime.toDate() : new Date(s.startTime);
-                const end = s.endTime ? (s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime)) : new Date();
-                if (end > start) {
-                    totalLifetimeMinutes += (end - start) / 60000;
-                }
-            }
+        const allNylonItems = items.filter(i => {
+            const main = i.mainCategory || '';
+            const sub = (i.subCategory || '').toLowerCase();
+            return main === 'Nylons' || sub.includes('strumpfhose') || sub.includes('stockings');
         });
 
-        const nylonIndexVal = uniqueNylonItemsWorn.size > 0 
-            ? (totalLifetimeMinutes / uniqueNylonItemsWorn.size) / 60 
+        const totalNylonMinutes = allNylonItems.reduce((acc, curr) => acc + (Number(curr.totalMinutes) || 0), 0);
+        
+        const nylonIndexVal = allNylonItems.length > 0 
+            ? (totalNylonMinutes / allNylonItems.length) / 60 
             : 0;
         
         const lifetimeTightsMinutes = tightsItems.reduce((acc, curr) => acc + (Number(curr.totalMinutes) || 0), 0);
@@ -268,7 +250,7 @@ export default function useKPIs(items = [], activeSessionsInput, historySessions
         const cpnhVal = totalNylonHoursLifetime > 0 ? (totalNylonCost / totalNylonHoursLifetime) : 0;
 
         return { nylonIndexVal, cpnhVal };
-    }, [items, historySessions]);
+    }, [items]);
 
     const coreMetrics = useMemo(() => {
         const now = new Date();
