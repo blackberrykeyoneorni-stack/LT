@@ -1,6 +1,7 @@
 // src/services/TimeBankService.js
 import { db } from '../firebase';
 import { doc, getDoc, updateDoc, setDoc, increment, serverTimestamp, collection, query, where, getDocs, deleteField } from 'firebase/firestore';
+import { parseSafeNumber } from '../utils/formatters';
 
 // KONFIGURATION DER SCHULDENFALLE
 const DEBT_CONFIG = {
@@ -20,7 +21,12 @@ export const getTimeBankBalance = async (userId) => {
         const docSnap = await getDoc(docRef);
         
         if (docSnap.exists()) {
-            return docSnap.data();
+            const data = docSnap.data();
+            return {
+                ...data,
+                nc: parseSafeNumber(data.nc, 0),
+                lc: parseSafeNumber(data.lc, 0)
+            };
         } else {
             const initialData = { nc: 0, lc: 0, updatedAt: serverTimestamp() };
             await setDoc(docRef, initialData);
@@ -67,8 +73,8 @@ export const spendCredits = async (userId, amountMinutes, requestedType) => {
     // SCHRITT 1: Einfrieren & Vorab-Verzinsung der Vergangenheit
     const interestPayload = await _applyPendingInterest(userId, data);
     
-    let currentNc = interestPayload.nc !== undefined ? interestPayload.nc : data.nc;
-    let currentLc = interestPayload.lc !== undefined ? interestPayload.lc : data.lc;
+    let currentNc = parseSafeNumber(interestPayload.nc !== undefined ? interestPayload.nc : data.nc, 0);
+    let currentLc = parseSafeNumber(interestPayload.lc !== undefined ? interestPayload.lc : data.lc, 0);
 
     let chargeNc = requestedType === 'nylon' || requestedType === 'both';
     let chargeLc = requestedType === 'lingerie' || requestedType === 'both';
@@ -121,8 +127,8 @@ export const liquidateAssets = async (userId, targetNcDeduction, targetLcDeducti
     const data = docSnap.exists() ? docSnap.data() : { nc: 0, lc: 0 };
 
     const interestPayload = await _applyPendingInterest(userId, data);
-    let currentNc = interestPayload.nc !== undefined ? interestPayload.nc : data.nc;
-    let currentLc = interestPayload.lc !== undefined ? interestPayload.lc : data.lc;
+    let currentNc = parseSafeNumber(interestPayload.nc !== undefined ? interestPayload.nc : data.nc, 0);
+    let currentLc = parseSafeNumber(interestPayload.lc !== undefined ? interestPayload.lc : data.lc, 0);
 
     const floor = -DEBT_CONFIG.MAX_DEBT_MINUTES; // Die absolute Betonwand (-2880)
 
@@ -272,7 +278,7 @@ export const addCredits = async (userId, payload, type) => {
 
     // SCHRITT 1: Einfrieren & Vorab-Verzinsung der Vergangenheit
     const interestPayload = await _applyPendingInterest(userId, data);
-    const currentBalance = interestPayload[field] !== undefined ? interestPayload[field] : data[field];
+    const currentBalance = parseSafeNumber(interestPayload[field] !== undefined ? interestPayload[field] : data[field], 0);
 
     let earnedCredits = 0;
 
@@ -338,16 +344,22 @@ const _applyPendingInterest = async (userId, currentData) => {
     if (diffDays < 1) return payload; // Noch kein Tag vergangen, keine Alt-Zinsen fällig
 
     // RÜCKWIRKENDE ZINSESZINS BERECHNUNG (Compound) auf den ALTEN Kontostand
-    let oldNc = currentData.nc;
+    let oldNc = parseSafeNumber(currentData.nc, 0);
     if (oldNc < 0) {
-        payload.nc = Math.floor(oldNc * Math.pow(1 + DEBT_CONFIG.DAILY_INTEREST_RATE, diffDays));
-        console.log(`TimeBank: Calculated ${diffDays} days of retroactive interest on old NC debt (${oldNc} -> ${payload.nc}).`);
+        const result = Math.floor(oldNc * Math.pow(1 + DEBT_CONFIG.DAILY_INTEREST_RATE, diffDays));
+        if (isFinite(result)) {
+            payload.nc = result;
+            console.log(`TimeBank: Calculated ${diffDays} days of retroactive interest on old NC debt (${oldNc} -> ${payload.nc}).`);
+        }
     }
 
-    let oldLc = currentData.lc;
+    let oldLc = parseSafeNumber(currentData.lc, 0);
     if (oldLc < 0) {
-        payload.lc = Math.floor(oldLc * Math.pow(1 + DEBT_CONFIG.DAILY_INTEREST_RATE, diffDays));
-        console.log(`TimeBank: Calculated ${diffDays} days of retroactive interest on old LC debt (${oldLc} -> ${payload.lc}).`);
+        const result = Math.floor(oldLc * Math.pow(1 + DEBT_CONFIG.DAILY_INTEREST_RATE, diffDays));
+        if (isFinite(result)) {
+            payload.lc = result;
+            console.log(`TimeBank: Calculated ${diffDays} days of retroactive interest on old LC debt (${oldLc} -> ${payload.lc}).`);
+        }
     }
 
     return payload;
@@ -358,10 +370,11 @@ const _applyPendingInterest = async (userId, currentData) => {
  * Die Bank gewinnt immer.
  */
 const _calculateProgressiveTax = (balance) => {
-    if (balance <= 0) return 0;
+    const val = parseSafeNumber(balance, 0);
+    if (val <= 0) return 0;
     
     let tax = 0;
-    let remainder = balance;
+    let remainder = val;
     
     if (remainder > 2000) {
         tax += (remainder - 2000) * 0.20; // 20% ab 2001
@@ -422,7 +435,7 @@ export const applyWeeklyInflation = async (userId) => {
         let totalDeductedLc = 0;
 
         // Inflation auf POSITIVE Bestände
-        let newNc = data.nc;
+        let newNc = parseSafeNumber(data.nc, 0);
         if (newNc > 0) {
             let originalNc = newNc;
             if (newNc > DEBT_CONFIG.MAX_CREDIT_MINUTES) newNc = DEBT_CONFIG.MAX_CREDIT_MINUTES; // Stilles Cap für Legacy-Daten
@@ -436,7 +449,7 @@ export const applyWeeklyInflation = async (userId) => {
             if (totalDeductedNc > 0) inflationApplied = true;
         }
 
-        let newLc = data.lc;
+        let newLc = parseSafeNumber(data.lc, 0);
         if (newLc > 0) {
             let originalLc = newLc;
             if (newLc > DEBT_CONFIG.MAX_CREDIT_MINUTES) newLc = DEBT_CONFIG.MAX_CREDIT_MINUTES; // Stilles Cap für Legacy-Daten
@@ -514,8 +527,8 @@ export const applyThermalBonus = async (userId, bonusDetails) => {
         const interestPayload = await _applyPendingInterest(userId, data);
         const updates = { ...interestPayload };
         
-        let currentNc = interestPayload.nc !== undefined ? interestPayload.nc : data.nc;
-        let currentLc = interestPayload.lc !== undefined ? interestPayload.lc : data.lc;
+        let currentNc = parseSafeNumber(interestPayload.nc !== undefined ? interestPayload.nc : data.nc, 0);
+        let currentLc = parseSafeNumber(interestPayload.lc !== undefined ? interestPayload.lc : data.lc, 0);
 
         // 2. Bonus anwenden
         if (bonusDetails.type === 'dividend') {

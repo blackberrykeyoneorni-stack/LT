@@ -619,8 +619,10 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
 
                 for (const item of itemDetails) {
                     const mainCat = (item.mainCategory || '').toLowerCase();
-                    if (mainCat === 'nylons' || mainCat === 'nylon') earnNylon = true;
-                    if (mainCat === 'dessous' || mainCat === 'lingerie') earnLingerie = true;
+                    const subCat = (item.subCategory || '').toLowerCase();
+                    // KORREKTUR: Inklusive Erkennung für Kreditbuchung (Singular/Plural/Sub)
+                    if (mainCat.includes('nylon') || subCat.includes('nylon') || subCat.includes('strumpfhose')) earnNylon = true;
+                    if (mainCat.includes('dessous') || mainCat.includes('lingerie') || subCat.includes('dessous')) earnLingerie = true;
                 }
 
                 if (earnNylon) {

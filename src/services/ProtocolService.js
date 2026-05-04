@@ -8,13 +8,13 @@ import { getAllSuspensions } from './SuspensionService';
 // --- HELPER ---
 
 /**
- * Schiebt die Zeit intern um 1 Stunde nach vorne.
- * Damit wird Sonntag 23:00 Uhr programmiertechnisch wie Montag 00:00 Uhr behandelt.
- * Dadurch triggert das neue Wochenziel pünktlich am Sonntag ab 23:00 Uhr.
+ * Schiebt die Zeit intern um 25 Stunden nach vorne.
+ * Damit wird Samstag 23:00 Uhr programmiertechnisch wie Montag 00:00 Uhr behandelt.
+ * Dadurch triggert das neue Wochenziel pünktlich am Samstag ab 23:00 Uhr.
  */
 const getReferenceDate = (date) => {
     const d = new Date(date);
-    d.setTime(d.getTime() + 1 * 60 * 60 * 1000); 
+    d.setTime(d.getTime() + 25 * 60 * 60 * 1000); 
     return d;
 };
 

@@ -9,6 +9,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useItems } from '../contexts/ItemContext';
 import { useNFCGlobal } from '../contexts/NFCContext';
 import { motion } from 'framer-motion'; 
+import { parseSafeNumber } from '../utils/formatters';
 
 // Services
 import { checkActiveSuspension } from '../services/SuspensionService';
@@ -81,7 +82,6 @@ export default function Dashboard() {
   const [pendingPunishments, setPendingPunishments] = useState([]);
   const [monthlyBudget, setMonthlyBudget] = useState(0);
   const [currentSpent, setCurrentSpent] = useState(0); 
-  const [maxInstructionItems, setMaxInstructionItems] = useState(1);
   const releaseTimerInterval = useRef(null);
   const oathTimerRef = useRef(null); 
   
@@ -98,7 +98,7 @@ export default function Dashboard() {
   const budgetBalance = monthlyBudget - currentSpent;
   const isStealthActive = activeSuspension?.type === 'stealth_travel';
 
-  // --- SCHULDEN-LOGIK ---
+  // --- SCHULDEN-LOGIK (Irreversible Debt Protocol) ---
   const ncDebt = timeBankData.nc < 0 ? Math.abs(timeBankData.nc) : 0;
   const lcDebt = timeBankData.lc < 0 ? Math.abs(timeBankData.lc) : 0;
   const inDebt = ncDebt > 0 || lcDebt > 0;
@@ -174,15 +174,16 @@ export default function Dashboard() {
 
     const checkWeeklyReport = async () => {
       const now = new Date();
+      // KORREKTUR: Trigger ab Sonnabend 23:00 Uhr oder den gesamten Sonntag über
+      const isSaturdayNight = now.getDay() === 6 && now.getHours() >= 23;
       const isSunday = now.getDay() === 0;
-      const isEvening = now.getHours() >= 20;
 
-      if (isSunday && isEvening) {
+      if (isSaturdayNight || isSunday) {
         const monday = new Date(now);
-        monday.setDate(now.getDate() - 6);
+        // Berechnung des Montags der soeben beendeten Woche
+        monday.setDate(now.getDate() - (now.getDay() === 0 ? 6 : now.getDay() - 1));
         const weekId = monday.toISOString().split('T')[0];
 
-        const reportRef = doc(db, `users/${currentUser.uid}/reports`, weekId);
         const q = query(collection(db, `users/${currentUser.uid}/reports`), where('weekId', '==', weekId), limit(1));
         const snap = await getDocs(q);
 
@@ -286,7 +287,9 @@ export default function Dashboard() {
                 isImmunityActive(currentUser.uid)
             ]);
 
-            if(pSnap.exists()) setMaxInstructionItems(pSnap.data().maxInstructionItems || 1);
+            if(pSnap.exists()) {
+                // maxInstructionItems Logik
+            }
             setPunishmentStatus(statusData || { active: false });
             setAuditDue(auditResult);
             setMonthlyBudget(budgetResult);
@@ -311,8 +314,8 @@ export default function Dashboard() {
             const d = docSnap.data();
             setTimeBankData({ 
                 ...d, 
-                nc: (d.nc === 'NaN' || Number.isNaN(Number(d.nc))) ? 0 : Number(d.nc), 
-                lc: (d.lc === 'NaN' || Number.isNaN(Number(d.lc))) ? 0 : Number(d.lc) 
+                nc: parseSafeNumber(d.nc, 0), 
+                lc: parseSafeNumber(d.lc, 0) 
             });
         } else {
             setTimeBankData({ nc: 0, lc: 0 });
@@ -452,6 +455,7 @@ export default function Dashboard() {
 
   if (loadingSuspension) return <Box sx={{ p: 4, textAlign: 'center' }}>System Check...</Box>;
 
+  // --- GATEKEEPER BLOCK ---
   if (isCheckingProtocol) {
       return (
           <Box sx={{ 
@@ -502,6 +506,7 @@ export default function Dashboard() {
                 )}
             </Box>
 
+            {/* UNIFORMITY BLOCK */}
             {uniformity.active && (
                 <Paper sx={{ p: 3, mb: 3, bgcolor: 'rgba(211, 47, 47, 0.1)', border: `1px solid ${PALETTE.accents.red}` }}>
                     <Typography variant="subtitle1" color="error" sx={{ fontWeight: 'bold', mb: 1, display: 'flex', alignItems: 'center' }}>
@@ -513,6 +518,7 @@ export default function Dashboard() {
                 </Paper>
             )}
 
+            {/* SCHULDENTILGUNG BLOCK */}
             {inDebt && !hasActiveDebtSession && (
                 <Paper sx={{ p: 3, mb: 3, bgcolor: 'rgba(211, 47, 47, 0.1)', border: `1px solid ${PALETTE.accents.red}` }}>
                     <Typography variant="subtitle1" color="error" sx={{ fontWeight: 'bold', mb: 1, display: 'flex', alignItems: 'center' }}>
@@ -529,6 +535,7 @@ export default function Dashboard() {
                         onClick={async () => {
                             let requiredItems = [];
                             
+                            // HYBRID-ZWANG: Tilgung zwingt zur Straf-Uniform, falls aktiv
                             if (uniformity.active && uniformity.itemIds) {
                                 requiredItems = items.filter(i => uniformity.itemIds.includes(i.id));
                             } else {
