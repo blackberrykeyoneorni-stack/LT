@@ -508,7 +508,12 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
         };
         
         if (isCurrentlyActive) {
-            updatePayload.status = isTransitItem ? 'washing' : 'active';
+            // SEAMLESS TRANSITION CHECK: Wird das Item aus dem Overlay heraus anbehalten?
+            if (feedback.keptItemIds && feedback.keptItemIds.includes(id)) {
+                updatePayload.status = 'worn';
+            } else {
+                updatePayload.status = isTransitItem ? 'washing' : 'active';
+            }
             updatePayload.lastWorn = serverTimestamp();
         }
         
@@ -669,6 +674,36 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
         const punRef = doc(db, `users/${userId}/status/punishment`);
         batch.set(punRef, { activeSessionId: null }, { merge: true });
     }
+
+    // --- SEAMLESS TRANSITION (SILENT START) ---
+    if (feedback.keptItemIds && feedback.keptItemIds.length > 0 && sessionData.type === 'instruction') {
+        const newSessionRef = doc(collection(db, `users/${userId}/sessions`));
+        
+        const newItemsDetails = itemDetails.filter(i => feedback.keptItemIds.includes(i.id));
+        const newItemLedger = {};
+        feedback.keptItemIds.forEach(id => {
+            newItemLedger[id] = { joinedAt: updateData.endTime, leftAt: null };
+        });
+
+        const newSessionPayload = {
+            itemIds: feedback.keptItemIds,
+            itemLedger: newItemLedger,
+            itemsDetails: newItemsDetails,
+            type: 'voluntary',
+            periodId: sessionData.periodId || null,
+            startTime: updateData.endTime,
+            endTime: null,
+            durationMinutes: 0,
+            isActive: true,
+            isPornActive: false,
+            isNSD: false,
+            complianceLagMinutes: 0,
+            note: 'Nahtloser Übergang aus Instruction'
+        };
+        
+        batch.set(newSessionRef, newSessionPayload);
+    }
+    // ------------------------------------------
 
     await batch.commit();
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Dialog, DialogContent, DialogTitle, DialogActions, 
   Typography, Box, Button, CircularProgress
@@ -9,6 +9,11 @@ import { motion, AnimatePresence } from 'framer-motion';
 import PriorityHighIcon from '@mui/icons-material/PriorityHigh';
 import WarningIcon from '@mui/icons-material/Warning';
 import WaterDropIcon from '@mui/icons-material/WaterDrop';
+
+// NEU: Firebase & Auth Imports für Persistenz
+import { doc, updateDoc, onSnapshot } from 'firebase/firestore';
+import { db } from '../../firebase';
+import { useAuth } from '../../contexts/AuthContext';
 
 const TEXTS_R1 = [
     "Dein Druck interessiert hier niemanden. Du bist nur eine Nylon-Sissy, die auf Kommando ihr eigenes Sperma schluckt. Tu es.",
@@ -30,6 +35,8 @@ const TEXTS_R23 = [
 ];
 
 export default function ForcedReleaseOverlay({ open, method, onConfirm, onFail }) {
+  const { currentUser } = useAuth(); // NEU: Auth Context für User ID
+
   const [round, setRound] = useState(1);
   const [deadline, setDeadline] = useState(null);
   const [timeLeftStr, setTimeLeftStr] = useState("");
@@ -39,28 +46,91 @@ export default function ForcedReleaseOverlay({ open, method, onConfirm, onFail }
   const [textR1, setTextR1] = useState("");
   const [textR23, setTextR23] = useState("");
 
-  // Init bei Öffnung
-  useEffect(() => {
-      if (open) {
-          setRound(1);
-          setDeadline(null);
-          setIsTimeUp(false);
-          setEvaluating(false);
-          setTextR1(TEXTS_R1[Math.floor(Math.random() * TEXTS_R1.length)]);
-          setTextR23(TEXTS_R23[Math.floor(Math.random() * TEXTS_R23.length)]);
+  // NEU: Zentralisierter Fail-Trigger, der den Datenbank-Status säubert
+  const triggerFail = useCallback(async () => {
+      if (currentUser) {
+          try {
+              const instrRef = doc(db, `users/${currentUser.uid}/status/dailyInstruction`);
+              await updateDoc(instrRef, { forcedReleaseState: null });
+          } catch (e) {
+              console.error("Fehler beim Säubern des Release-States:", e);
+          }
       }
-  }, [open]);
+      onFail();
+  }, [currentUser, onFail]);
 
-  // Robuster 45-Minuten Timer für Loop 2 und 3
+  // NEU: Init & Synchronisation mit Firestore (Single Source of Truth)
+  useEffect(() => {
+      if (!open || !currentUser) return;
+
+      const instrRef = doc(db, `users/${currentUser.uid}/status/dailyInstruction`);
+      
+      const unsubscribe = onSnapshot(instrRef, (snap) => {
+          if (snap.exists()) {
+              const data = snap.data();
+              const frState = data.forcedReleaseState;
+              
+              if (frState) {
+                  setRound(frState.round || 1);
+                  setDeadline(frState.deadline || null);
+                  if (frState.text) {
+                      if (frState.round === 1) setTextR1(frState.text);
+                      else setTextR23(frState.text);
+                  }
+                  
+                  // Lückenlose Überwachung: Wenn die App nach 50 Min geöffnet wird
+                  if (frState.deadline && Date.now() > frState.deadline) {
+                      setIsTimeUp(true);
+                      setTimeLeftStr("00:00");
+                      triggerFail();
+                  }
+              } else {
+                  // Initiale Erstellung in der DB falls noch kein State existiert
+                  const initText = TEXTS_R1[Math.floor(Math.random() * TEXTS_R1.length)];
+                  setTextR1(initText);
+                  setRound(1);
+                  setDeadline(null);
+                  setIsTimeUp(false);
+                  
+                  updateDoc(instrRef, {
+                      forcedReleaseState: {
+                          round: 1,
+                          deadline: null,
+                          text: initText
+                      }
+                  }).catch(e => console.error("Fehler bei Init:", e));
+              }
+          }
+      });
+
+      return () => unsubscribe();
+  }, [open, currentUser, triggerFail]);
+
+  // KORRIGIERT: Robuster 45-Minuten Timer gekoppelt an absolute Deadline
   useEffect(() => {
       if (!deadline) return;
       
+      const checkAndFail = () => {
+          if (Date.now() > deadline) {
+              setTimeLeftStr("00:00");
+              setIsTimeUp(true);
+              triggerFail();
+              return true;
+          }
+          return false;
+      };
+
+      if (checkAndFail()) return;
+
+      setIsTimeUp(false);
+
       const interval = setInterval(() => {
           const remaining = deadline - Date.now();
           if (remaining <= 0) {
+              clearInterval(interval);
               setTimeLeftStr("00:00");
               setIsTimeUp(true);
-              clearInterval(interval);
+              triggerFail();
           } else {
               const m = Math.floor(remaining / 60000).toString().padStart(2, '0');
               const s = Math.floor((remaining % 60000) / 1000).toString().padStart(2, '0');
@@ -69,7 +139,7 @@ export default function ForcedReleaseOverlay({ open, method, onConfirm, onFail }
       }, 1000);
       
       return () => clearInterval(interval);
-  }, [deadline]);
+  }, [deadline, triggerFail]);
 
   const formatMethod = (m) => {
       if (!m) return "Manuell";
@@ -80,31 +150,50 @@ export default function ForcedReleaseOverlay({ open, method, onConfirm, onFail }
   };
 
   const handleSuccess = () => {
+      if (isTimeUp) return; // Sperre bei Ablauf
       setEvaluating(true);
       
       // 2 Sekunden systemischer Terror
-      setTimeout(() => {
+      setTimeout(async () => {
           setEvaluating(false);
           
+          if (!currentUser) return;
+          const instrRef = doc(db, `users/${currentUser.uid}/status/dailyInstruction`);
+
           if (round === 1) {
               if (Math.random() < 0.15) {
-                  setRound(2);
-                  setDeadline(Date.now() + 45 * 60 * 1000);
-                  setTextR23(TEXTS_R23[Math.floor(Math.random() * TEXTS_R23.length)]);
-                  setIsTimeUp(false);
+                  const nextDeadline = Date.now() + 45 * 60 * 1000;
+                  const nextText = TEXTS_R23[Math.floor(Math.random() * TEXTS_R23.length)];
+                  
+                  await updateDoc(instrRef, {
+                      forcedReleaseState: {
+                          round: 2,
+                          deadline: nextDeadline,
+                          text: nextText
+                      }
+                  });
               } else {
+                  await updateDoc(instrRef, { forcedReleaseState: null });
                   onConfirm('clean');
               }
           } else if (round === 2) {
               if (Math.random() < 0.05) {
-                  setRound(3);
-                  setDeadline(Date.now() + 45 * 60 * 1000);
-                  setTextR23(TEXTS_R23[Math.floor(Math.random() * TEXTS_R23.length)]);
-                  setIsTimeUp(false);
+                  const nextDeadline = Date.now() + 45 * 60 * 1000;
+                  const nextText = TEXTS_R23[Math.floor(Math.random() * TEXTS_R23.length)];
+                  
+                  await updateDoc(instrRef, {
+                      forcedReleaseState: {
+                          round: 3,
+                          deadline: nextDeadline,
+                          text: nextText
+                      }
+                  });
               } else {
+                  await updateDoc(instrRef, { forcedReleaseState: null });
                   onConfirm('clean');
               }
           } else {
+              await updateDoc(instrRef, { forcedReleaseState: null });
               onConfirm('clean');
           }
       }, 2000);
@@ -196,7 +285,7 @@ export default function ForcedReleaseOverlay({ open, method, onConfirm, onFail }
 
               <Button 
                   fullWidth variant="outlined" size="small"
-                  onClick={onFail}
+                  onClick={triggerFail} // KORRIGIERT: Führt zentralisierte Säuberung durch
                   color="error"
                   sx={{ py: 1, borderColor: 'rgba(255,0,0,0.3)', textTransform: 'none', lineHeight: 1.2 }}
               >

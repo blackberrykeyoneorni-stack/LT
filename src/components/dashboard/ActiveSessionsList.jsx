@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { 
     Card, CardContent, Typography, Box, Button, Chip, LinearProgress, Avatar,
-    Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, TextField
+    Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, TextField,
+    List, ListItem, ListItemAvatar, ListItemText, Switch
 } from '@mui/material';
 import StopIcon from '@mui/icons-material/Stop';
 import LockIcon from '@mui/icons-material/Lock';
@@ -19,6 +20,10 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
 
   const [gatekeeperSession, setGatekeeperSession] = useState(null);
   const [confessionText, setConfessionText] = useState("");
+
+  // --- SEAMLESS TRANSITION STATE ---
+  const [transitionDialog, setTransitionDialog] = useState(null);
+  const [keptItems, setKeptItems] = useState([]);
 
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -60,6 +65,11 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
               console.error(e);
           }
       }
+  };
+
+  // --- SEAMLESS TRANSITION HANDLER ---
+  const handleToggleKeep = (id) => {
+      setKeptItems(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
   };
 
   if (!activeSessions || activeSessions.length === 0) return null;
@@ -325,7 +335,14 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
                                         color="primary" 
                                         size="small"
                                         fullWidth
-                                        onClick={() => onStopSession(session)}
+                                        onClick={() => {
+                                            if (session.type === 'instruction') {
+                                                setTransitionDialog(session);
+                                                setKeptItems([]);
+                                            } else {
+                                                onStopSession(session);
+                                            }
+                                        }}
                                         startIcon={<StopIcon />}
                                     >
                                         Beenden
@@ -381,6 +398,78 @@ export default function ActiveSessionsList({ activeSessions, items, onStopSessio
               </Button>
           </DialogActions>
       </Dialog>
+
+      {/* SEAMLESS TRANSITION DIALOG */}
+      {transitionDialog && (
+          <Dialog
+              open={!!transitionDialog}
+              onClose={() => setTransitionDialog(null)}
+              PaperProps={{
+                  sx: { ...DESIGN_TOKENS.glassCard, border: `1px solid ${PALETTE.accents.blue}` }
+              }}
+              maxWidth="xs"
+              fullWidth
+          >
+              <DialogTitle sx={{ color: PALETTE.accents.blue, fontWeight: 'bold' }}>
+                  NAHTLOSER ÜBERGANG
+              </DialogTitle>
+              <DialogContent>
+                  <DialogContentText sx={{ color: 'text.secondary', mb: 2 }}>
+                      Die Pflicht ist erfüllt. Welche Items möchtest du freiwillig anbehalten? Nicht ausgewählte Items werden abgelegt.
+                  </DialogContentText>
+                  <List sx={{ bgcolor: 'rgba(0,0,0,0.2)', borderRadius: 2 }}>
+                      {(() => {
+                          const tIds = transitionDialog.itemIds || (transitionDialog.itemId ? [transitionDialog.itemId] : []);
+                          return tIds.map(id => {
+                              const item = items.find(i => i.id === id);
+                              if (!item) return null;
+                              return (
+                                  <ListItem key={id} divider sx={{ borderColor: 'rgba(255,255,255,0.05)' }}>
+                                      <ListItemAvatar>
+                                          <Avatar 
+                                              src={item.imageUrl || item.image} 
+                                              variant="rounded" 
+                                              sx={{ width: 40, height: 40, border: `1px solid ${PALETTE.accents.blue}` }} 
+                                          />
+                                      </ListItemAvatar>
+                                      <ListItemText 
+                                          primary={item.name} 
+                                          secondary={item.subCategory}
+                                          primaryTypographyProps={{ sx: { color: '#fff', fontWeight: 'bold', fontSize: '0.9rem' } }}
+                                          secondaryTypographyProps={{ sx: { color: 'rgba(255,255,255,0.5)', fontSize: '0.75rem' } }}
+                                      />
+                                      <Switch 
+                                          checked={keptItems.includes(id)}
+                                          onChange={() => handleToggleKeep(id)}
+                                          sx={{ 
+                                              '& .MuiSwitch-switchBase.Mui-checked': { color: PALETTE.accents.blue },
+                                              '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': { backgroundColor: PALETTE.accents.blue }
+                                          }}
+                                      />
+                                  </ListItem>
+                              );
+                          });
+                      })()}
+                  </List>
+              </DialogContent>
+              <DialogActions sx={{ p: 2, pt: 0 }}>
+                  <Button onClick={() => setTransitionDialog(null)} sx={{ color: 'text.secondary' }}>
+                      Abbrechen
+                  </Button>
+                  <Button 
+                      onClick={() => {
+                          onStopSession(transitionDialog, { keptItemIds: keptItems });
+                          setTransitionDialog(null);
+                      }} 
+                      variant="contained" 
+                      sx={{ bgcolor: PALETTE.accents.blue, color: '#000', fontWeight: 'bold', '&:hover': { bgcolor: '#fff'} }}
+                  >
+                      Session Beenden
+                  </Button>
+              </DialogActions>
+          </Dialog>
+      )}
+
     </Box>
   );
 }
