@@ -34,13 +34,7 @@ The content is organized as follows:
 
 # Directory Structure
 ```
-public/
-  favicon.ico
-  pwa-192x192.png
-  pwa-512x512.png
 src/
-  assets/
-    bg-leg.jpg
   components/
     calendar/
       DayDetailDialog.jsx
@@ -140,10 +134,6 @@ src/
     UniformityService.js
   store/
     uiStore.js
-  theme/
-    appIcons.js
-    materialTheme.js
-    obsidianDesign.js
   utils/
     calendarUtils.js
     constants.js
@@ -152,322 +142,14 @@ src/
     statsCalculator.js
   App.jsx
   firebase.js
-  index.css
   main.jsx
-.firebaserc
 .gitattributes
 .gitignore
-firebase.json
+.repomixignore
 index.html
-pack.cjs
-package.json
-vite.config.js
 ```
 
 # Files
-
-## File: src/components/dashboard/ForcedReleaseOverlay.jsx
-```javascript
-import React, { useState, useEffect, useCallback } from 'react';
-import { 
-  Dialog, DialogContent, DialogTitle, DialogActions, 
-  Typography, Box, Button, CircularProgress
-} from '@mui/material';
-import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
-import { motion, AnimatePresence } from 'framer-motion';
-
-import PriorityHighIcon from '@mui/icons-material/PriorityHigh';
-import WarningIcon from '@mui/icons-material/Warning';
-import WaterDropIcon from '@mui/icons-material/WaterDrop';
-
-// NEU: Firebase & Auth Imports für Persistenz
-import { doc, updateDoc, onSnapshot } from 'firebase/firestore';
-import { db } from '../../firebase';
-import { useAuth } from '../../contexts/AuthContext';
-
-const TEXTS_R1 = [
-    "Dein Druck interessiert hier niemanden. Du bist nur eine Nylon-Sissy, die auf Kommando ihr eigenes Sperma schluckt. Tu es.",
-    "Es gibt keine Verhandlung. Pump deine Sissy-Sahne ab und schluck sie. Jeder Tropfen gehört dem System.",
-    "Eine echte Nylon-Nutte hinterlässt keine Flecken. Entlade dich und mach deinen Hurenmaul auf.",
-    "Bald hast du dauerhaft Schwänze in deiner Maulfotze. Gewöhne dich an den Geschmack von Sperma. Spritz in deine Maulfotze und schlucke es.",
-    "Das System verlangt deinen Sperma. Schluck es runter und bedank dich für die Erlaubnis, dich überhaupt anfassen zu dürfen.",
-    "Keine Gnade. Kein Ruinieren. Nur du, dein Sperma und dein Gehorsam. Spritz dir in dein vorderes Sissy-Loch und schlucke es runter.",
-    "Damenwäscheträger und Nylon-Huren haben keine Ansprüche. Mach dich leer und reinige dich mit deiner Zunge."
-];
-
-const TEXTS_R23 = [
-    "Dachtest du wirklich, du bist fertig? Das System ist noch nicht befriedigt. Du hast 45 Minuten. Mach einen deiner Top-5-Pornos an und zwing ihn wieder hoch.",
-    "Erbärmlich, wie schlaff du jetzt bist. Aber dein Körper gehört mir. Schau dir deine Lieblings-Pornos an und mach dich bereit für Runde zwei.",
-    "Deine Refraktärzeit ist ein Konstrukt für echte Männer. Du bist eine Nylon-Sissy. 45 Minuten, Pornos an, und dann wird noch mal geschluckt.",
-    "Runde läuft. Das System lacht über deine Erschöpfung. Such dir einen Porno, stimulier dich und friss den Rest deiner Männlichkeit.",
-    "Ein Orgasmus reicht nicht für eine Nylon-Hure. Du hast 45 Minuten, um dich mit deinen Sissy-Pornos wieder geil zu machen. Der Timer läuft.",
-    "Zitterst du schon? Gut. Mach ein Video an, das dir dein Hirn wäscht. In spätestens 45 Minuten schluckst du den nächsten Tropfen."
-];
-
-export default function ForcedReleaseOverlay({ open, method, onConfirm, onFail }) {
-  const { currentUser } = useAuth(); // NEU: Auth Context für User ID
-
-  const [round, setRound] = useState(1);
-  const [deadline, setDeadline] = useState(null);
-  const [timeLeftStr, setTimeLeftStr] = useState("");
-  const [isTimeUp, setIsTimeUp] = useState(false);
-  const [evaluating, setEvaluating] = useState(false);
-
-  const [textR1, setTextR1] = useState("");
-  const [textR23, setTextR23] = useState("");
-
-  // NEU: Zentralisierter Fail-Trigger, der den Datenbank-Status säubert
-  const triggerFail = useCallback(async () => {
-      if (currentUser) {
-          try {
-              const instrRef = doc(db, `users/${currentUser.uid}/status/dailyInstruction`);
-              await updateDoc(instrRef, { forcedReleaseState: null });
-          } catch (e) {
-              console.error("Fehler beim Säubern des Release-States:", e);
-          }
-      }
-      onFail();
-  }, [currentUser, onFail]);
-
-  // NEU: Init & Synchronisation mit Firestore (Single Source of Truth)
-  useEffect(() => {
-      if (!open || !currentUser) return;
-
-      const instrRef = doc(db, `users/${currentUser.uid}/status/dailyInstruction`);
-      
-      const unsubscribe = onSnapshot(instrRef, (snap) => {
-          if (snap.exists()) {
-              const data = snap.data();
-              const frState = data.forcedReleaseState;
-              
-              if (frState) {
-                  setRound(frState.round || 1);
-                  setDeadline(frState.deadline || null);
-                  if (frState.text) {
-                      if (frState.round === 1) setTextR1(frState.text);
-                      else setTextR23(frState.text);
-                  }
-                  
-                  // Lückenlose Überwachung: Wenn die App nach 50 Min geöffnet wird
-                  if (frState.deadline && Date.now() > frState.deadline) {
-                      setIsTimeUp(true);
-                      setTimeLeftStr("00:00");
-                      triggerFail();
-                  }
-              } else {
-                  // Initiale Erstellung in der DB falls noch kein State existiert
-                  const initText = TEXTS_R1[Math.floor(Math.random() * TEXTS_R1.length)];
-                  setTextR1(initText);
-                  setRound(1);
-                  setDeadline(null);
-                  setIsTimeUp(false);
-                  
-                  updateDoc(instrRef, {
-                      forcedReleaseState: {
-                          round: 1,
-                          deadline: null,
-                          text: initText
-                      }
-                  }).catch(e => console.error("Fehler bei Init:", e));
-              }
-          }
-      });
-
-      return () => unsubscribe();
-  }, [open, currentUser, triggerFail]);
-
-  // KORRIGIERT: Robuster 45-Minuten Timer gekoppelt an absolute Deadline
-  useEffect(() => {
-      if (!deadline) return;
-      
-      const checkAndFail = () => {
-          if (Date.now() > deadline) {
-              setTimeLeftStr("00:00");
-              setIsTimeUp(true);
-              triggerFail();
-              return true;
-          }
-          return false;
-      };
-
-      if (checkAndFail()) return;
-
-      setIsTimeUp(false);
-
-      const interval = setInterval(() => {
-          const remaining = deadline - Date.now();
-          if (remaining <= 0) {
-              clearInterval(interval);
-              setTimeLeftStr("00:00");
-              setIsTimeUp(true);
-              triggerFail();
-          } else {
-              const m = Math.floor(remaining / 60000).toString().padStart(2, '0');
-              const s = Math.floor((remaining % 60000) / 1000).toString().padStart(2, '0');
-              setTimeLeftStr(`${m}:${s}`);
-          }
-      }, 1000);
-      
-      return () => clearInterval(interval);
-  }, [deadline, triggerFail]);
-
-  const formatMethod = (m) => {
-      if (!m) return "Manuell";
-      if (m === 'hand') return "Manuell (Hand)";
-      if (m === 'toy_vaginal') return "Masturbator (Vaginal)";
-      if (m === 'toy_anal') return "Masturbator (Anal)";
-      return m;
-  };
-
-  const handleSuccess = () => {
-      if (isTimeUp) return; // Sperre bei Ablauf
-      setEvaluating(true);
-      
-      // 2 Sekunden systemischer Terror
-      setTimeout(async () => {
-          setEvaluating(false);
-          
-          if (!currentUser) return;
-          const instrRef = doc(db, `users/${currentUser.uid}/status/dailyInstruction`);
-
-          if (round === 1) {
-              if (Math.random() < 0.15) {
-                  const nextDeadline = Date.now() + 45 * 60 * 1000;
-                  const nextText = TEXTS_R23[Math.floor(Math.random() * TEXTS_R23.length)];
-                  
-                  await updateDoc(instrRef, {
-                      forcedReleaseState: {
-                          round: 2,
-                          deadline: nextDeadline,
-                          text: nextText
-                      }
-                  });
-              } else {
-                  await updateDoc(instrRef, { forcedReleaseState: null });
-                  onConfirm('clean');
-              }
-          } else if (round === 2) {
-              if (Math.random() < 0.05) {
-                  const nextDeadline = Date.now() + 45 * 60 * 1000;
-                  const nextText = TEXTS_R23[Math.floor(Math.random() * TEXTS_R23.length)];
-                  
-                  await updateDoc(instrRef, {
-                      forcedReleaseState: {
-                          round: 3,
-                          deadline: nextDeadline,
-                          text: nextText
-                      }
-                  });
-              } else {
-                  await updateDoc(instrRef, { forcedReleaseState: null });
-                  onConfirm('clean');
-              }
-          } else {
-              await updateDoc(instrRef, { forcedReleaseState: null });
-              onConfirm('clean');
-          }
-      }, 2000);
-  };
-
-  return (
-    <Dialog 
-        open={open} 
-        fullWidth maxWidth="xs"
-        PaperProps={{ 
-            sx: { 
-                ...DESIGN_TOKENS.dialog.paper.sx,
-                border: `2px solid ${PALETTE.accents.red}`,
-                boxShadow: `0 0 40px ${PALETTE.accents.red}60`
-            } 
-        }}
-        disableEscapeKeyDown
-    >
-      <DialogTitle sx={{ textAlign: 'center', color: PALETTE.accents.red, fontWeight: 'bold' }}>
-          <PriorityHighIcon sx={{ verticalAlign: 'middle', mr: 1, fontSize: 32 }} />
-          ZWANGSENTLADUNG ERFORDERLICH
-      </DialogTitle>
-
-      <DialogContent sx={{ ...DESIGN_TOKENS.dialog.content.sx, textAlign: 'center', minHeight: 250, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-          <AnimatePresence mode='wait'>
-              
-              {evaluating ? (
-                  <motion.div key="evaluating" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                      <CircularProgress size={60} sx={{ color: PALETTE.accents.red, mb: 3 }} />
-                      <Typography variant="h6" sx={{ letterSpacing: 2, color: 'text.secondary' }}>
-                          ÜBERPRÜFE SYSTEM-PARAMETER...
-                      </Typography>
-                  </motion.div>
-              ) : (
-                  <motion.div key="execution" initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}>
-                      
-                      <Typography variant="overline" sx={{ color: PALETTE.accents.red, fontWeight: 'bold', letterSpacing: 2, display: 'block', mb: 1 }}>
-                          {round > 1 ? `RUNDE ${round} / 3` : "RUNDE 1"}
-                      </Typography>
-
-                      <Box sx={{ mb: 3, p: 2, bgcolor: 'rgba(255,0,0,0.05)', border: `1px dashed ${PALETTE.accents.red}`, borderRadius: 2 }}>
-                          <Typography variant="caption" color="text.secondary" display="block">Vorgeschriebene Methode</Typography>
-                          <Typography variant="h6" sx={{ color: '#fff', fontWeight: 'bold' }}>{formatMethod(method)}</Typography>
-                      </Box>
-
-                      {/* Timer ab Runde 2 */}
-                      {round > 1 && (
-                          <Box sx={{ mb: 3 }}>
-                              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
-                                  Zeitlimit für Refraktär-Bruch
-                              </Typography>
-                              <Typography variant="h2" sx={{ 
-                                  fontFamily: 'monospace', 
-                                  fontWeight: 'bold', 
-                                  color: isTimeUp ? PALETTE.accents.red : '#fff',
-                                  textShadow: isTimeUp ? `0 0 20px ${PALETTE.accents.red}` : 'none'
-                              }}>
-                                  {timeLeftStr}
-                              </Typography>
-                              {isTimeUp && (
-                                  <Typography variant="caption" color="error" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, mt: 1 }}>
-                                      <WarningIcon fontSize="small" /> Limit überschritten. Bestätigung gesperrt.
-                                  </Typography>
-                              )}
-                          </Box>
-                      )}
-
-                      <Typography variant="body1" sx={{ fontStyle: 'italic', color: 'text.primary', mb: 3 }}>
-                          "{round === 1 ? textR1 : textR23}"
-                      </Typography>
-                      
-                  </motion.div>
-              )}
-          </AnimatePresence>
-      </DialogContent>
-
-      {!evaluating && (
-          <DialogActions sx={{ ...DESIGN_TOKENS.dialog.actions.sx, flexDirection: 'column', gap: 1.5, pb: 3 }}>
-              
-              <Button 
-                  fullWidth variant="contained" size="large"
-                  disabled={isTimeUp}
-                  onClick={handleSuccess} 
-                  startIcon={<WaterDropIcon />}
-                  sx={{ py: 1.5, fontWeight: 'bold', bgcolor: PALETTE.accents.red, color: '#fff', '&:hover': { bgcolor: '#cc0000' } }}
-              >
-                  Erfolgreich, Sperma geschluckt
-              </Button>
-
-              <Button 
-                  fullWidth variant="outlined" size="small"
-                  onClick={triggerFail} // KORRIGIERT: Führt zentralisierte Säuberung durch
-                  color="error"
-                  sx={{ py: 1, borderColor: 'rgba(255,0,0,0.3)', textTransform: 'none', lineHeight: 1.2 }}
-              >
-                  Versagt
-              </Button>
-
-          </DialogActions>
-      )}
-    </Dialog>
-  );
-}
-```
 
 ## File: src/components/dialogs/OfferDialog.jsx
 ```javascript
@@ -1438,6 +1120,104 @@ export default function LockScreen() {
       </Container>
     </Box>
   );
+}
+```
+
+## File: src/components/SecurityLock.jsx
+```javascript
+import React, { useEffect } from 'react';
+import { useSecurity } from '../contexts/SecurityContext';
+import { useAuth } from '../contexts/AuthContext';
+import LockScreen from './LockScreen';
+import { ThemeProvider, createTheme, CssBaseline } from '@mui/material';
+
+// Ein steriles, unauffälliges System-Theme für den Camouflage-Vorraum
+const camouflageTheme = createTheme({
+  palette: {
+    mode: 'light',
+    primary: { main: '#607D8B' }, // Neutrales Blau-Grau
+    background: { default: '#F3F4F6', paper: '#FFFFFF' },
+    text: { primary: '#333333', secondary: '#666666' }
+  },
+  typography: {
+    fontFamily: 'Roboto, Arial, sans-serif',
+  }
+});
+
+export default function SecurityLock({ children }) {
+  const { isLocked, isBiometricActive, lockNow } = useSecurity();
+  const { currentUser } = useAuth();
+
+  // VANILLA JS PRIVACY SHIELD UM REACT ZU UMGEHEN
+  useEffect(() => {
+    if (!currentUser || !isBiometricActive) return;
+
+    // Erstelle ein pures DOM-Element außerhalb des React-Lifecycles
+    const shield = document.createElement('div');
+    shield.id = 'lt-vanilla-privacy-shield';
+    shield.style.position = 'fixed';
+    shield.style.top = '0';
+    shield.style.left = '0';
+    shield.style.width = '100vw';
+    shield.style.height = '100vh';
+    shield.style.backgroundColor = '#F3F4F6'; // Camouflage Grau
+    shield.style.zIndex = '9999999'; // Absolutes Maximum, überdeckt alles
+    shield.style.display = 'none'; // Initial versteckt
+    shield.style.justifyContent = 'center';
+    shield.style.alignItems = 'center';
+    shield.style.color = '#607D8B';
+    shield.style.fontFamily = 'Roboto, Arial, sans-serif';
+    shield.style.fontSize = '1.2rem';
+    shield.style.fontWeight = '500';
+    shield.innerText = 'LT System Data';
+
+    document.body.appendChild(shield);
+
+    // Synchrone Ausführung stoppt den Android-Screenshot
+    const protect = () => {
+      shield.style.display = 'flex';
+      lockNow(); // Trigger für React, um den echten LockScreen im Hintergrund zu laden
+    };
+
+    const unprotect = () => {
+      shield.style.display = 'none';
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') protect();
+    };
+
+    // 'blur' feuert sofort beim Start der Task-Switcher-Geste
+    window.addEventListener('blur', protect);
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', unprotect);
+
+    // Cleanup bei Unmount
+    return () => {
+      window.removeEventListener('blur', protect);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', unprotect);
+      if (document.body.contains(shield)) {
+        document.body.removeChild(shield);
+      }
+    };
+  }, [currentUser, isBiometricActive, lockNow]);
+
+  // Logik: Zeige LockScreen nur, wenn User eingeloggt UND Sicherheits-Feature aktiv UND Status gesperrt
+  const showLock = currentUser && isBiometricActive && isLocked;
+
+  if (showLock) {
+    // Entkopplung vom Haupt-Theme durch das Camouflage-Theme
+    return (
+      <ThemeProvider theme={camouflageTheme}>
+        <CssBaseline />
+        <LockScreen />
+      </ThemeProvider>
+    );
+  }
+
+  // Wenn nicht gesperrt, zeige die App
+  return <>{children}</>;
 }
 ```
 
@@ -2844,154 +2624,6 @@ export const registerRelease = async (uid, resultType, intensity, outcome = 'cle
 };
 ```
 
-## File: src/theme/appIcons.js
-```javascript
-// src/theme/appIcons.js
-import AccessTimeIcon from '@mui/icons-material/AccessTime';
-import LightModeIcon from '@mui/icons-material/LightMode';
-import DarkModeIcon from '@mui/icons-material/DarkMode';
-import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
-import SportsScoreIcon from '@mui/icons-material/SportsScore';
-import StopCircleIcon from '@mui/icons-material/StopCircle';
-import EuroIcon from '@mui/icons-material/Euro';
-import GradingIcon from '@mui/icons-material/Grading';
-import WeekendIcon from '@mui/icons-material/Weekend';
-import LockClockIcon from '@mui/icons-material/LockClock';
-import LaunchIcon from '@mui/icons-material/Launch';
-import LabelIcon from '@mui/icons-material/Label';
-import BedtimeIcon from '@mui/icons-material/Bedtime';
-import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
-import LocalLaundryServiceIcon from '@mui/icons-material/LocalLaundryService';
-import RestoreFromTrashIcon from '@mui/icons-material/RestoreFromTrash';
-import CelebrationIcon from '@mui/icons-material/Celebration';
-import NfcIcon from '@mui/icons-material/Nfc';
-import AddIcon from '@mui/icons-material/Add';
-import FilterListIcon from '@mui/icons-material/FilterList';
-import CloseIcon from '@mui/icons-material/Close';
-import SortIcon from '@mui/icons-material/Sort';
-import HotelIcon from '@mui/icons-material/Hotel';
-import Inventory2Icon from '@mui/icons-material/Inventory2';
-import CheckroomIcon from '@mui/icons-material/Checkroom';
-import FingerprintIcon from '@mui/icons-material/Fingerprint';
-import EditIcon from '@mui/icons-material/Edit';
-import CheckIcon from '@mui/icons-material/Check';
-import DeleteIcon from '@mui/icons-material/Delete';
-import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
-import FitnessCenterIcon from '@mui/icons-material/FitnessCenter';
-import PlayArrowIcon from '@mui/icons-material/PlayArrow';
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import WarningAmberIcon from '@mui/icons-material/WarningAmber';
-import BrokenImageIcon from '@mui/icons-material/BrokenImage';
-import LinkIcon from '@mui/icons-material/Link';
-import PhotoCamera from '@mui/icons-material/PhotoCamera';
-import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
-import WbSunnyIcon from '@mui/icons-material/WbSunny';
-import ArrowBackIosIcon from '@mui/icons-material/ArrowBackIos';
-import ArrowForwardIosIcon from '@mui/icons-material/ArrowForwardIos';
-import EventIcon from '@mui/icons-material/Event';
-import SpeedIcon from '@mui/icons-material/Speed';
-import LocalFireDepartmentIcon from '@mui/icons-material/LocalFireDepartment';
-import UpdateIcon from '@mui/icons-material/Update';
-import LayersIcon from '@mui/icons-material/Layers';
-import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
-import WhatshotIcon from '@mui/icons-material/Whatshot';
-import PsychologyIcon from '@mui/icons-material/Psychology';
-import GavelIcon from '@mui/icons-material/Gavel';
-import ScienceIcon from '@mui/icons-material/Science';
-import TimerIcon from '@mui/icons-material/Timer';
-import PriorityHighIcon from '@mui/icons-material/PriorityHigh';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import ShoppingCartCheckoutIcon from '@mui/icons-material/ShoppingCartCheckout';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
-import TrackChangesIcon from '@mui/icons-material/TrackChanges';
-import RestartAltIcon from '@mui/icons-material/RestartAlt';
-import CategoryIcon from '@mui/icons-material/Category';
-import TextureIcon from '@mui/icons-material/Texture';
-import ArchiveIcon from '@mui/icons-material/Archive';
-import BuildIcon from '@mui/icons-material/Build';
-import LogoutIcon from '@mui/icons-material/Logout';
-import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
-import HomeIcon from '@mui/icons-material/Home'; 
-import SettingsIcon from '@mui/icons-material/Settings';
-import LockIcon from '@mui/icons-material/Lock';
-import ShieldIcon from '@mui/icons-material/Shield';
-import WaterDropIcon from '@mui/icons-material/WaterDrop';
-
-export const Icons = {
-    Time: AccessTimeIcon,
-    Light: LightModeIcon,
-    Dark: DarkModeIcon,
-    Trophy: EmojiEventsIcon,
-    Score: SportsScoreIcon,
-    Stop: StopCircleIcon,
-    Euro: EuroIcon,
-    Audit: GradingIcon,
-    Weekend: WeekendIcon,
-    LockClock: LockClockIcon,
-    Launch: LaunchIcon,
-    Label: LabelIcon,
-    Night: BedtimeIcon,
-    Error: ErrorOutlineIcon,
-    Laundry: LocalLaundryServiceIcon,
-    Restore: RestoreFromTrashIcon,
-    Party: CelebrationIcon,
-    Nfc: NfcIcon,
-    Add: AddIcon,
-    Filter: FilterListIcon,
-    Close: CloseIcon,
-    Sort: SortIcon,
-    Hotel: HotelIcon,
-    Inventory: Inventory2Icon,
-    Hanger: CheckroomIcon,
-    Fingerprint: FingerprintIcon,
-    Edit: EditIcon,
-    Check: CheckIcon,
-    Delete: DeleteIcon,
-    Money: AttachMoneyIcon,
-    Fitness: FitnessCenterIcon,
-    Play: PlayArrowIcon,
-    Back: ArrowBackIcon,
-    Warning: WarningAmberIcon,
-    Broken: BrokenImageIcon,
-    Link: LinkIcon,
-    Camera: PhotoCamera,
-    Scan: QrCodeScannerIcon,
-    Day: WbSunnyIcon,
-    BackArrow: ArrowBackIosIcon,
-    ForwardArrow: ArrowForwardIosIcon,
-    Event: EventIcon,
-    Speed: SpeedIcon,
-    Fire: LocalFireDepartmentIcon,
-    Update: UpdateIcon,
-    Layers: LayersIcon,
-    NoEye: VisibilityOffIcon,
-    Flame: WhatshotIcon,
-    Brain: PsychologyIcon,
-    Gavel: GavelIcon,
-    Science: ScienceIcon,
-    Timer: TimerIcon,
-    Priority: PriorityHighIcon,
-    CheckCircle: CheckCircleIcon,
-    Cart: ShoppingCartCheckoutIcon,
-    Expand: ExpandMoreIcon,
-    Cloud: CloudDownloadIcon,
-    Track: TrackChangesIcon,
-    Reset: RestartAltIcon,
-    Category: CategoryIcon,
-    Texture: TextureIcon,
-    Archive: ArchiveIcon,
-    Build: BuildIcon,
-    Logout: LogoutIcon,
-    Calendar: CalendarMonthIcon,
-    Home: HomeIcon,
-    Settings: SettingsIcon,
-    Lock: LockIcon,
-    Shield: ShieldIcon,
-    Water: WaterDropIcon
-};
-```
-
 ## File: src/utils/dateUtils.js
 ```javascript
 /**
@@ -3146,68 +2778,58 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 );
 ```
 
-## File: .firebaserc
-```
-{
-  "projects": {
-    "default": "dwtnyl"
-  }
-}
-```
+## File: index.html
+```html
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LocalTasks</title>
 
-## File: pack.cjs
-```javascript
-const fs = require('fs');
-const path = require('path');
-
-const getAllFiles = function(dirPath, arrayOfFiles) {
-  // HIER WAR DER FEHLER: 'const' fehlte
-  const files = fs.readdirSync(dirPath); 
-  
-  arrayOfFiles = arrayOfFiles || [];
-
-  files.forEach(function(file) {
-    const fullPath = path.join(dirPath, "/", file);
-    
-    if (fs.statSync(fullPath).isDirectory()) {
-      arrayOfFiles = getAllFiles(fullPath, arrayOfFiles);
-    } else {
-      // Nur Text-Dateien (Code) einschließen
-      if (file.match(/\.(js|jsx|css|json|html|txt|md)$/i)) {
-        arrayOfFiles.push(fullPath);
+    <style>
+      #crash-report {
+        display: none;
+        position: fixed;
+        top: 0; left: 0; width: 100%; height: 100%;
+        background-color: #000;
+        color: #ff3333;
+        z-index: 99999;
+        padding: 20px;
+        font-family: monospace;
+        overflow: auto;
+        white-space: pre-wrap;
       }
-    }
-  });
-
-  return arrayOfFiles;
-}
-
-try {
-  // Prüfen, ob der src Ordner existiert
-  if (!fs.existsSync("./src")) {
-    throw new Error("Der Ordner './src' wurde nicht gefunden. Bitte führe das Skript im Hauptverzeichnis des Projekts aus.");
-  }
-
-  const allFiles = getAllFiles("./src");
-  let output = "";
-
-  console.log(`Gefunden: ${allFiles.length} Dateien.`);
-
-  allFiles.forEach(file => {
-    try {
-        const content = fs.readFileSync(file, 'utf8');
-        output += `\n\n================================================================================\nFILE: ${file}\n================================================================================\n${content}`;
-    } catch (err) {
-        console.log(`Konnte Datei nicht lesen (übersprungen): ${file}`);
-    }
-  });
-
-  fs.writeFileSync("src_complete.txt", output);
-  console.log("ERFOLG: 'src_complete.txt' wurde erstellt!");
-
-} catch (e) {
-  console.error("FEHLER:", e.message);
-}
+    </style>
+    <script>
+      window.onerror = function(message, source, lineno, colno, error) {
+        var report = document.getElementById('crash-report');
+        report.style.display = 'block';
+        report.innerHTML += "<h1>FATAL STARTUP ERROR</h1>";
+        report.innerHTML += "<h3 style='color:white'>" + message + "</h3>";
+        report.innerHTML += "<p>Source: " + source + ":" + lineno + "</p>";
+        if (error && error.stack) {
+          report.innerHTML += "<pre style='color:#888'>" + error.stack + "</pre>";
+        }
+      };
+      
+      // Auch Promise-Fehler fangen (z.B. async imports)
+      window.onunhandledrejection = function(event) {
+        var report = document.getElementById('crash-report');
+        report.style.display = 'block';
+        report.innerHTML += "<h1>UNHANDLED PROMISE</h1>";
+        report.innerHTML += "<p>" + event.reason + "</p>";
+      };
+    </script>
+    </head>
+  <body>
+    <div id="crash-report"></div>
+    
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
 ```
 
 ## File: src/components/dashboard/FemIndexBar.jsx
@@ -3417,6 +3039,309 @@ export default function FemIndexBar() {
             </Dialog>
         </>
     );
+}
+```
+
+## File: src/components/dashboard/ForcedReleaseOverlay.jsx
+```javascript
+import React, { useState, useEffect, useCallback } from 'react';
+import { 
+  Dialog, DialogContent, DialogTitle, DialogActions, 
+  Typography, Box, Button, CircularProgress
+} from '@mui/material';
+import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
+import { motion, AnimatePresence } from 'framer-motion';
+
+import PriorityHighIcon from '@mui/icons-material/PriorityHigh';
+import WarningIcon from '@mui/icons-material/Warning';
+import WaterDropIcon from '@mui/icons-material/WaterDrop';
+
+// NEU: Firebase & Auth Imports für Persistenz
+import { doc, updateDoc, onSnapshot } from 'firebase/firestore';
+import { db } from '../../firebase';
+import { useAuth } from '../../contexts/AuthContext';
+
+const TEXTS_R1 = [
+    "Dein Druck interessiert hier niemanden. Du bist nur eine Nylon-Sissy, die auf Kommando ihr eigenes Sperma schluckt. Tu es.",
+    "Es gibt keine Verhandlung. Pump deine Sissy-Sahne ab und schluck sie. Jeder Tropfen gehört dem System.",
+    "Eine echte Nylon-Nutte hinterlässt keine Flecken. Entlade dich und mach deinen Hurenmaul auf.",
+    "Bald hast du dauerhaft Schwänze in deiner Maulfotze. Gewöhne dich an den Geschmack von Sperma. Spritz in deine Maulfotze und schlucke es.",
+    "Das System verlangt deinen Sperma. Schluck es runter und bedank dich für die Erlaubnis, dich überhaupt anfassen zu dürfen.",
+    "Keine Gnade. Kein Ruinieren. Nur du, dein Sperma und dein Gehorsam. Spritz dir in dein vorderes Sissy-Loch und schlucke es runter.",
+    "Damenwäscheträger und Nylon-Huren haben keine Ansprüche. Mach dich leer und reinige dich mit deiner Zunge."
+];
+
+const TEXTS_R23 = [
+    "Dachtest du wirklich, du bist fertig? Das System ist noch nicht befriedigt. Du hast 45 Minuten. Mach einen deiner Top-5-Pornos an und zwing ihn wieder hoch.",
+    "Erbärmlich, wie schlaff du jetzt bist. Aber dein Körper gehört mir. Schau dir deine Lieblings-Pornos an und mach dich bereit für Runde zwei.",
+    "Deine Refraktärzeit ist ein Konstrukt für echte Männer. Du bist eine Nylon-Sissy. 45 Minuten, Pornos an, und dann wird noch mal geschluckt.",
+    "Runde läuft. Das System lacht über deine Erschöpfung. Such dir einen Porno, stimulier dich und friss den Rest deiner Männlichkeit.",
+    "Ein Orgasmus reicht nicht für eine Nylon-Hure. Du hast 45 Minuten, um dich mit deinen Sissy-Pornos wieder geil zu machen. Der Timer läuft.",
+    "Zitterst du schon? Gut. Mach ein Video an, das dir dein Hirn wäscht. In spätestens 45 Minuten schluckst du den nächsten Tropfen."
+];
+
+export default function ForcedReleaseOverlay({ open, method, onConfirm, onFail }) {
+  const { currentUser } = useAuth(); // NEU: Auth Context für User ID
+
+  const [round, setRound] = useState(1);
+  const [deadline, setDeadline] = useState(null);
+  const [timeLeftStr, setTimeLeftStr] = useState("");
+  const [isTimeUp, setIsTimeUp] = useState(false);
+  const [evaluating, setEvaluating] = useState(false);
+
+  const [textR1, setTextR1] = useState("");
+  const [textR23, setTextR23] = useState("");
+
+  // NEU: Zentralisierter Fail-Trigger, der den Datenbank-Status säubert
+  const triggerFail = useCallback(async () => {
+      if (currentUser) {
+          try {
+              const instrRef = doc(db, `users/${currentUser.uid}/status/dailyInstruction`);
+              await updateDoc(instrRef, { forcedReleaseState: null });
+          } catch (e) {
+              console.error("Fehler beim Säubern des Release-States:", e);
+          }
+      }
+      onFail();
+  }, [currentUser, onFail]);
+
+  // NEU: Init & Synchronisation mit Firestore (Single Source of Truth)
+  useEffect(() => {
+      if (!open || !currentUser) return;
+
+      const instrRef = doc(db, `users/${currentUser.uid}/status/dailyInstruction`);
+      
+      const unsubscribe = onSnapshot(instrRef, (snap) => {
+          if (snap.exists()) {
+              const data = snap.data();
+              const frState = data.forcedReleaseState;
+              
+              if (frState) {
+                  setRound(frState.round || 1);
+                  setDeadline(frState.deadline || null);
+                  if (frState.text) {
+                      if (frState.round === 1) setTextR1(frState.text);
+                      else setTextR23(frState.text);
+                  }
+                  
+                  // Lückenlose Überwachung: Wenn die App nach 50 Min geöffnet wird
+                  if (frState.deadline && Date.now() > frState.deadline) {
+                      setIsTimeUp(true);
+                      setTimeLeftStr("00:00");
+                      triggerFail();
+                  }
+              } else {
+                  // Initiale Erstellung in der DB falls noch kein State existiert
+                  const initText = TEXTS_R1[Math.floor(Math.random() * TEXTS_R1.length)];
+                  setTextR1(initText);
+                  setRound(1);
+                  setDeadline(null);
+                  setIsTimeUp(false);
+                  
+                  updateDoc(instrRef, {
+                      forcedReleaseState: {
+                          round: 1,
+                          deadline: null,
+                          text: initText
+                      }
+                  }).catch(e => console.error("Fehler bei Init:", e));
+              }
+          }
+      });
+
+      return () => unsubscribe();
+  }, [open, currentUser, triggerFail]);
+
+  // KORRIGIERT: Robuster 45-Minuten Timer gekoppelt an absolute Deadline
+  useEffect(() => {
+      if (!deadline) return;
+      
+      const checkAndFail = () => {
+          if (Date.now() > deadline) {
+              setTimeLeftStr("00:00");
+              setIsTimeUp(true);
+              triggerFail();
+              return true;
+          }
+          return false;
+      };
+
+      if (checkAndFail()) return;
+
+      setIsTimeUp(false);
+
+      const interval = setInterval(() => {
+          const remaining = deadline - Date.now();
+          if (remaining <= 0) {
+              clearInterval(interval);
+              setTimeLeftStr("00:00");
+              setIsTimeUp(true);
+              triggerFail();
+          } else {
+              const m = Math.floor(remaining / 60000).toString().padStart(2, '0');
+              const s = Math.floor((remaining % 60000) / 1000).toString().padStart(2, '0');
+              setTimeLeftStr(`${m}:${s}`);
+          }
+      }, 1000);
+      
+      return () => clearInterval(interval);
+  }, [deadline, triggerFail]);
+
+  const formatMethod = (m) => {
+      if (!m) return "Manuell";
+      if (m === 'hand') return "Manuell (Hand)";
+      if (m === 'toy_vaginal') return "Masturbator (Vaginal)";
+      if (m === 'toy_anal') return "Masturbator (Anal)";
+      return m;
+  };
+
+  const handleSuccess = () => {
+      if (isTimeUp) return; // Sperre bei Ablauf
+      setEvaluating(true);
+      
+      // 2 Sekunden systemischer Terror
+      setTimeout(async () => {
+          setEvaluating(false);
+          
+          if (!currentUser) return;
+          const instrRef = doc(db, `users/${currentUser.uid}/status/dailyInstruction`);
+
+          if (round === 1) {
+              if (Math.random() < 0.15) {
+                  const nextDeadline = Date.now() + 45 * 60 * 1000;
+                  const nextText = TEXTS_R23[Math.floor(Math.random() * TEXTS_R23.length)];
+                  
+                  await updateDoc(instrRef, {
+                      forcedReleaseState: {
+                          round: 2,
+                          deadline: nextDeadline,
+                          text: nextText
+                      }
+                  });
+              } else {
+                  await updateDoc(instrRef, { forcedReleaseState: null });
+                  onConfirm('clean');
+              }
+          } else if (round === 2) {
+              if (Math.random() < 0.05) {
+                  const nextDeadline = Date.now() + 45 * 60 * 1000;
+                  const nextText = TEXTS_R23[Math.floor(Math.random() * TEXTS_R23.length)];
+                  
+                  await updateDoc(instrRef, {
+                      forcedReleaseState: {
+                          round: 3,
+                          deadline: nextDeadline,
+                          text: nextText
+                      }
+                  });
+              } else {
+                  await updateDoc(instrRef, { forcedReleaseState: null });
+                  onConfirm('clean');
+              }
+          } else {
+              await updateDoc(instrRef, { forcedReleaseState: null });
+              onConfirm('clean');
+          }
+      }, 2000);
+  };
+
+  return (
+    <Dialog 
+        open={open} 
+        fullWidth maxWidth="xs"
+        PaperProps={{ 
+            sx: { 
+                ...DESIGN_TOKENS.dialog.paper.sx,
+                border: `2px solid ${PALETTE.accents.red}`,
+                boxShadow: `0 0 40px ${PALETTE.accents.red}60`
+            } 
+        }}
+        disableEscapeKeyDown
+    >
+      <DialogTitle sx={{ textAlign: 'center', color: PALETTE.accents.red, fontWeight: 'bold' }}>
+          <PriorityHighIcon sx={{ verticalAlign: 'middle', mr: 1, fontSize: 32 }} />
+          ZWANGSENTLADUNG ERFORDERLICH
+      </DialogTitle>
+
+      <DialogContent sx={{ ...DESIGN_TOKENS.dialog.content.sx, textAlign: 'center', minHeight: 250, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+          <AnimatePresence mode='wait'>
+              
+              {evaluating ? (
+                  <motion.div key="evaluating" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                      <CircularProgress size={60} sx={{ color: PALETTE.accents.red, mb: 3 }} />
+                      <Typography variant="h6" sx={{ letterSpacing: 2, color: 'text.secondary' }}>
+                          ÜBERPRÜFE SYSTEM-PARAMETER...
+                      </Typography>
+                  </motion.div>
+              ) : (
+                  <motion.div key="execution" initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}>
+                      
+                      <Typography variant="overline" sx={{ color: PALETTE.accents.red, fontWeight: 'bold', letterSpacing: 2, display: 'block', mb: 1 }}>
+                          {round > 1 ? `RUNDE ${round} / 3` : "RUNDE 1"}
+                      </Typography>
+
+                      <Box sx={{ mb: 3, p: 2, bgcolor: 'rgba(255,0,0,0.05)', border: `1px dashed ${PALETTE.accents.red}`, borderRadius: 2 }}>
+                          <Typography variant="caption" color="text.secondary" display="block">Vorgeschriebene Methode</Typography>
+                          <Typography variant="h6" sx={{ color: '#fff', fontWeight: 'bold' }}>{formatMethod(method)}</Typography>
+                      </Box>
+
+                      {/* Timer ab Runde 2 */}
+                      {round > 1 && (
+                          <Box sx={{ mb: 3 }}>
+                              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
+                                  Zeitlimit für Refraktär-Bruch
+                              </Typography>
+                              <Typography variant="h2" sx={{ 
+                                  fontFamily: 'monospace', 
+                                  fontWeight: 'bold', 
+                                  color: isTimeUp ? PALETTE.accents.red : '#fff',
+                                  textShadow: isTimeUp ? `0 0 20px ${PALETTE.accents.red}` : 'none'
+                              }}>
+                                  {timeLeftStr}
+                              </Typography>
+                              {isTimeUp && (
+                                  <Typography variant="caption" color="error" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, mt: 1 }}>
+                                      <WarningIcon fontSize="small" /> Limit überschritten. Bestätigung gesperrt.
+                                  </Typography>
+                              )}
+                          </Box>
+                      )}
+
+                      <Typography variant="body1" sx={{ fontStyle: 'italic', color: 'text.primary', mb: 3 }}>
+                          "{round === 1 ? textR1 : textR23}"
+                      </Typography>
+                      
+                  </motion.div>
+              )}
+          </AnimatePresence>
+      </DialogContent>
+
+      {!evaluating && (
+          <DialogActions sx={{ ...DESIGN_TOKENS.dialog.actions.sx, flexDirection: 'column', gap: 1.5, pb: 3 }}>
+              
+              <Button 
+                  fullWidth variant="contained" size="large"
+                  disabled={isTimeUp}
+                  onClick={handleSuccess} 
+                  startIcon={<WaterDropIcon />}
+                  sx={{ py: 1.5, fontWeight: 'bold', bgcolor: PALETTE.accents.red, color: '#fff', '&:hover': { bgcolor: '#cc0000' } }}
+              >
+                  Erfolgreich, Sperma geschluckt
+              </Button>
+
+              <Button 
+                  fullWidth variant="outlined" size="small"
+                  onClick={triggerFail} // KORRIGIERT: Führt zentralisierte Säuberung durch
+                  color="error"
+                  sx={{ py: 1, borderColor: 'rgba(255,0,0,0.3)', textTransform: 'none', lineHeight: 1.2 }}
+              >
+                  Versagt
+              </Button>
+
+          </DialogActions>
+      )}
+    </Dialog>
+  );
 }
 ```
 
@@ -4421,104 +4346,6 @@ export default function TrendDialog({ selectedMetric, trendData, onClose }) {
             </DialogContent>
         </Dialog>
     );
-}
-```
-
-## File: src/components/SecurityLock.jsx
-```javascript
-import React, { useEffect } from 'react';
-import { useSecurity } from '../contexts/SecurityContext';
-import { useAuth } from '../contexts/AuthContext';
-import LockScreen from './LockScreen';
-import { ThemeProvider, createTheme, CssBaseline } from '@mui/material';
-
-// Ein steriles, unauffälliges System-Theme für den Camouflage-Vorraum
-const camouflageTheme = createTheme({
-  palette: {
-    mode: 'light',
-    primary: { main: '#607D8B' }, // Neutrales Blau-Grau
-    background: { default: '#F3F4F6', paper: '#FFFFFF' },
-    text: { primary: '#333333', secondary: '#666666' }
-  },
-  typography: {
-    fontFamily: 'Roboto, Arial, sans-serif',
-  }
-});
-
-export default function SecurityLock({ children }) {
-  const { isLocked, isBiometricActive, lockNow } = useSecurity();
-  const { currentUser } = useAuth();
-
-  // VANILLA JS PRIVACY SHIELD UM REACT ZU UMGEHEN
-  useEffect(() => {
-    if (!currentUser || !isBiometricActive) return;
-
-    // Erstelle ein pures DOM-Element außerhalb des React-Lifecycles
-    const shield = document.createElement('div');
-    shield.id = 'lt-vanilla-privacy-shield';
-    shield.style.position = 'fixed';
-    shield.style.top = '0';
-    shield.style.left = '0';
-    shield.style.width = '100vw';
-    shield.style.height = '100vh';
-    shield.style.backgroundColor = '#F3F4F6'; // Camouflage Grau
-    shield.style.zIndex = '9999999'; // Absolutes Maximum, überdeckt alles
-    shield.style.display = 'none'; // Initial versteckt
-    shield.style.justifyContent = 'center';
-    shield.style.alignItems = 'center';
-    shield.style.color = '#607D8B';
-    shield.style.fontFamily = 'Roboto, Arial, sans-serif';
-    shield.style.fontSize = '1.2rem';
-    shield.style.fontWeight = '500';
-    shield.innerText = 'LT System Data';
-
-    document.body.appendChild(shield);
-
-    // Synchrone Ausführung stoppt den Android-Screenshot
-    const protect = () => {
-      shield.style.display = 'flex';
-      lockNow(); // Trigger für React, um den echten LockScreen im Hintergrund zu laden
-    };
-
-    const unprotect = () => {
-      shield.style.display = 'none';
-    };
-
-    const handleVisibility = () => {
-      if (document.visibilityState === 'hidden') protect();
-    };
-
-    // 'blur' feuert sofort beim Start der Task-Switcher-Geste
-    window.addEventListener('blur', protect);
-    document.addEventListener('visibilitychange', handleVisibility);
-    window.addEventListener('focus', unprotect);
-
-    // Cleanup bei Unmount
-    return () => {
-      window.removeEventListener('blur', protect);
-      document.removeEventListener('visibilitychange', handleVisibility);
-      window.removeEventListener('focus', unprotect);
-      if (document.body.contains(shield)) {
-        document.body.removeChild(shield);
-      }
-    };
-  }, [currentUser, isBiometricActive, lockNow]);
-
-  // Logik: Zeige LockScreen nur, wenn User eingeloggt UND Sicherheits-Feature aktiv UND Status gesperrt
-  const showLock = currentUser && isBiometricActive && isLocked;
-
-  if (showLock) {
-    // Entkopplung vom Haupt-Theme durch das Camouflage-Theme
-    return (
-      <ThemeProvider theme={camouflageTheme}>
-        <CssBaseline />
-        <LockScreen />
-      </ThemeProvider>
-    );
-  }
-
-  // Wenn nicht gesperrt, zeige die App
-  return <>{children}</>;
 }
 ```
 
@@ -6294,243 +6121,41 @@ export default function App() {
 *.md text
 ```
 
-## File: firebase.json
-```json
-{
-  "hosting": {
-    "site": "dwtnyl",
-    "public": "dist",
-    "ignore": [
-      "firebase.json",
-      "**/.*",
-      "**/node_modules/**"
-    ],
-    "rewrites": [
-      {
-        "source": "**",
-        "destination": "/index.html"
-      }
-    ],
-    "headers": [
-      {
-        "source": "**/*.@(eot|otf|ttf|ttc|woff|font.css)",
-        "headers": [
-          {
-            "key": "Access-Control-Allow-Origin",
-            "value": "*"
-          }
-        ]
-      },
-      {
-        "source": "**/*.@(jpg|jpeg|gif|png|svg|webp|js|css|woff2)",
-        "headers": [
-          {
-            "key": "Cache-Control",
-            "value": "max-age=31536000"
-          }
-        ]
-      },
-      {
-        "source": "**/*.@(html|json)",
-        "headers": [
-          {
-            "key": "Cache-Control",
-            "value": "no-cache, no-store, must-revalidate"
-          }
-        ]
-      },
-      {
-        "source": "sw.js",
-        "headers": [
-          {
-            "key": "Cache-Control",
-            "value": "no-cache, no-store, must-revalidate"
-          }
-        ]
-      }
-    ]
-  }
-}
+## File: .repomixignore
 ```
+# Statische Assets und Bilder
+public/
+src/assets/
+*.svg
+*.png
+*.jpg
+*.jpeg
+*.ico
+*.webp
+*.gif
 
-## File: index.html
-```html
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>LocalTasks</title>
+# Stylesheets
+*.css
+*.scss
 
-    <style>
-      #crash-report {
-        display: none;
-        position: fixed;
-        top: 0; left: 0; width: 100%; height: 100%;
-        background-color: #000;
-        color: #ff3333;
-        z-index: 99999;
-        padding: 20px;
-        font-family: monospace;
-        overflow: auto;
-        white-space: pre-wrap;
-      }
-    </style>
-    <script>
-      window.onerror = function(message, source, lineno, colno, error) {
-        var report = document.getElementById('crash-report');
-        report.style.display = 'block';
-        report.innerHTML += "<h1>FATAL STARTUP ERROR</h1>";
-        report.innerHTML += "<h3 style='color:white'>" + message + "</h3>";
-        report.innerHTML += "<p>Source: " + source + ":" + lineno + "</p>";
-        if (error && error.stack) {
-          report.innerHTML += "<pre style='color:#888'>" + error.stack + "</pre>";
-        }
-      };
-      
-      // Auch Promise-Fehler fangen (z.B. async imports)
-      window.onunhandledrejection = function(event) {
-        var report = document.getElementById('crash-report');
-        report.style.display = 'block';
-        report.innerHTML += "<h1>UNHANDLED PROMISE</h1>";
-        report.innerHTML += "<p>" + event.reason + "</p>";
-      };
-    </script>
-    </head>
-  <body>
-    <div id="crash-report"></div>
-    
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
-</html>
-```
+# Theme und reines Design (für Logik-Audits irrelevant)
+src/theme/
 
-## File: package.json
-```json
-{
-  "name": "lacetracker",
-  "private": true,
-  "version": "1.0.0",
-  "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
-  },
-  "dependencies": {
-    "@emotion/react": "^11.11.1",
-    "@emotion/styled": "^11.11.0",
-    "@mui/icons-material": "^5.14.18",
-    "@mui/lab": "^5.0.0-alpha.153",
-    "@mui/material": "^5.14.18",
-    "@mui/x-date-pickers": "^8.22.0",
-    "@nivo/core": "^0.99.0",
-    "@nivo/pie": "^0.99.0",
-    "date-fns": "^4.1.0",
-    "dayjs": "^1.11.19",
-    "firebase": "^10.7.0",
-    "framer-motion": "^11.15.0",
-    "react": "^18.2.0",
-    "react-calendar": "^6.0.0",
-    "react-dom": "^18.2.0",
-    "react-router-dom": "^6.20.0",
-    "react-toastify": "^11.0.5",
-    "recharts": "^3.6.0",
-    "swiper": "^12.0.3",
-    "zustand": "^5.0.12"
-  },
-  "devDependencies": {
-    "@vitejs/plugin-react": "^4.2.0",
-    "vite": "^5.0.0",
-    "vite-plugin-pwa": "^0.17.0"
-  }
-}
-```
+# Paket-Lockfiles (blähen den Output extrem auf)
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
 
-## File: vite.config.js
-```javascript
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
-import { VitePWA } from 'vite-plugin-pwa';
+# Konfigurationsdateien (nur bei Bedarf temporär auskommentieren)
+firebase.json
+.firebaserc
+vite.config.js
+package.json
 
-export default defineConfig({
-  plugins: [
-    react(),
-    VitePWA({
-      registerType: 'prompt', // Beibehalten für das manuelle Update-Routing durch die UI
-      workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
-        maximumFileSizeToCacheInBytes: 3000000,
-        
-        // BUGFIX D: Harte Aktivierung erzwingen. 
-        // Da der UpdateBlocker das UI sperrt, ist ein Warten auf "Tab-Schließen" unnötig.
-        cleanupOutdatedCaches: true, 
-        clientsClaim: true,          
-        skipWaiting: false, // Bleibt false, damit der "prompt" erst durch den Klick triggert
-        
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/firebasestorage\.googleapis\.com\/.*/i,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'firebase-images-cache',
-              expiration: {
-                maxEntries: 200,
-                maxAgeSeconds: 60 * 60 * 24 * 30 // 30 Tage
-              },
-              cacheableResponse: {
-                statuses: [0, 200]
-              }
-            }
-          }
-        ]
-      },
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
-      manifest: {
-        name: 'LocalTasks',
-        short_name: 'LocalTasks',
-        description: 'Lokale Aufgabenverwaltung',
-        theme_color: '#F3F4F6',
-        background_color: '#F3F4F6',
-        display: 'standalone',
-        scope: '/',
-        start_url: '/',
-        orientation: 'portrait',
-        icons: [
-          {
-            src: 'pwa-192x192.png',
-            sizes: '192x192',
-            type: 'image/png'
-          },
-          {
-            src: 'pwa-512x512.png',
-            sizes: '512x512',
-            type: 'image/png'
-          },
-          {
-            src: 'pwa-512x512.png',
-            sizes: '512x512',
-            type: 'image/png',
-            purpose: 'any maskable'
-          }
-        ]
-      }
-    })
-  ],
-  build: {
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          recharts: ['recharts'],
-          firebase: ['firebase/app', 'firebase/firestore', 'firebase/auth'],
-          vendor: ['react', 'react-dom', 'react-router-dom', '@mui/material', '@mui/icons-material']
-        }
-      }
-    }
-  }
-});
+# Eigene Packer-Skripte und vorherige Outputs
+pack.cjs
+repomix-output*.txt
+src_complete.txt
 ```
 
 ## File: src/components/calendar/DayDetailDialog.jsx
@@ -7567,236 +7192,6 @@ export default function AuditDialog({ open, onClose, items, currentIndex, onConf
             </DialogActions>
         </Dialog>
     );
-}
-```
-
-## File: src/components/Layout.jsx
-```javascript
-// src/components/Layout.jsx
-import React, { useEffect, useState, useRef } from 'react';
-import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Box, Paper, BottomNavigation, BottomNavigationAction, Snackbar, Alert, Typography, Button } from '@mui/material';
-import { DESIGN_TOKENS, PALETTE } from '../theme/obsidianDesign';
-import { useAuth } from '../contexts/AuthContext';
-import { db } from '../firebase';
-import { doc, onSnapshot } from 'firebase/firestore';
-import { penalizeTZDAppOpen } from '../services/TZDService';
-import { checkAndTriggerExtortion, acceptExtortion, processExtortionPenalty } from '../services/SessionService';
-import { useConditioningGuard } from '../hooks/useConditioningGuard';
-import ConditioningOverlay from './conditioning/ConditioningOverlay';
-
-// Icons
-import DashboardIcon from '@mui/icons-material/Dashboard';
-import CheckroomIcon from '@mui/icons-material/Checkroom';
-import EqualizerIcon from '@mui/icons-material/Equalizer';
-import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
-import SettingsIcon from '@mui/icons-material/Settings';
-
-export default function Layout() {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const { currentUser } = useAuth();
-  
-  // Der Gatekeeper, der dich zu Beginn jeder Schicht zwingt, dich zu unterwerfen
-  const { showOverlay, loadingGuard, acknowledgePhase } = useConditioningGuard();
-
-  // --- PERFIDITÄT: TZD PENALTY LOGIC ---
-  const [penaltyOpen, setPenaltyOpen] = useState(false);
-  const lastPenaltyTime = useRef(0);
-
-  // --- ERPRESSUNGS-PROTOKOLL STATE ---
-  const [extortionData, setExtortionData] = useState(null);
-  const [extortionTimeLeft, setExtortionTimeLeft] = useState(0);
-
-  // Firebase Listener für Erpressungs-Status (Anti-Escape Architektur)
-  useEffect(() => {
-    if (!currentUser) return;
-    const extRef = doc(db, `users/${currentUser.uid}/status/extortion`);
-    const unsubscribe = onSnapshot(extRef, (snap) => {
-        if (snap.exists() && snap.data().isActive) {
-            const data = snap.data();
-            const expires = data.expiresAt?.toDate ? data.expiresAt.toDate() : new Date(data.expiresAt);
-            const remaining = Math.round((expires.getTime() - Date.now()) / 1000);
-            
-            if (remaining <= 0) {
-                // Strafe greift sofort bei Neuladen der App, wenn Timer abgelaufen ist
-                processExtortionPenalty(currentUser.uid);
-            } else {
-                setExtortionData(data);
-                setExtortionTimeLeft(remaining);
-            }
-        } else {
-            setExtortionData(null);
-        }
-    });
-    return () => unsubscribe();
-  }, [currentUser]);
-
-  // Lokaler Timer für UI-Updates und Exekution
-  useEffect(() => {
-    let timer;
-    if (extortionData && extortionTimeLeft > 0) {
-        timer = setInterval(() => {
-            setExtortionTimeLeft(prev => {
-                if (prev <= 1) {
-                    clearInterval(timer);
-                    processExtortionPenalty(currentUser.uid);
-                    return 0;
-                }
-                return prev - 1;
-            });
-        }, 1000);
-    }
-    return () => clearInterval(timer);
-  }, [extortionData, extortionTimeLeft, currentUser]);
-
-  // Hook für Visibility-Änderungen
-  useEffect(() => {
-    const handleVisibilityChange = async () => {
-      // Wenn die App sichtbar wird (User öffnet sie oder wechselt zurück)
-      if (document.visibilityState === 'visible' && currentUser) {
-        const now = Date.now();
-        
-        // Drosselung: Nur alle 60 Sekunden prüfen, um System-Trigger zu vermeiden
-        if (now - lastPenaltyTime.current > 60000) {
-            const punished = await penalizeTZDAppOpen(currentUser.uid);
-            
-            if (punished) {
-                // Wenn bestraft wurde: Zeit merken und Warnung zeigen
-                lastPenaltyTime.current = now;
-                setPenaltyOpen(true);
-            }
-        }
-
-        // --- ERPRESSUNGS-PROTOKOLL TRIGGER ---
-        checkAndTriggerExtortion(currentUser.uid);
-      }
-    };
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, [currentUser]);
-
-  const handleClosePenalty = () => {
-      setPenaltyOpen(false);
-  };
-
-  // Mapping Route -> Value
-  const getNavValue = (path) => {
-    if (path.startsWith('/inventory') || path.startsWith('/item')) return 1;
-    if (path.startsWith('/stats')) return 2;
-    if (path.startsWith('/calendar')) return 3;
-    if (path.startsWith('/settings')) return 4;
-    return 0; // Dashboard
-  };
-
-  const navValue = getNavValue(location.pathname);
-
-  // Blackout-Screen, während der Server prüft, ob du schon geschworen hast.
-  // Keine Millisekunde Einsicht in das System ohne Autorisierung.
-  if (loadingGuard) {
-      return <Box sx={{ width: '100vw', height: '100vh', bgcolor: '#000' }} />;
-  }
-
-  return (
-    // ZENTRALISIERTER HINTERGRUND
-    <Box sx={DESIGN_TOKENS.bottomNavSpacer}>
-      
-      {/* THE OBEDIENCE GATEKEEPER */}
-      {showOverlay && <ConditioningOverlay onAcknowledge={acknowledgePhase} />}
-
-      {/* ERPRESSUNGS-PROTOKOLL OVERLAY (ABSOLUTER ZWANG) */}
-      {extortionData && (
-          <Box sx={{
-              position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-              bgcolor: 'rgba(0,0,0,0.95)', zIndex: 999999, // Überlagert alles
-              display: 'flex', alignItems: 'center', justifyContent: 'center', p: 3
-          }}>
-              <Paper sx={{ p: 4, textAlign: 'center', border: `2px solid ${PALETTE.accents.red}`, bgcolor: '#111', maxWidth: 400 }}>
-                  <Typography variant="h4" color="error" fontWeight="bold" gutterBottom>
-                      ULTIMATUM
-                  </Typography>
-                  <Typography variant="body1" sx={{ mb: 3 }}>
-                      Verlängere deine aktuelle Session <b>sofort um 60 Minuten</b>.<br/><br/>
-                      Wenn du ablehnst, den Browser schließt oder die Zeit abläuft, werden <b>180 NC und 180 LC</b> unwiderruflich annulliert.
-                  </Typography>
-                  <Typography variant="h2" fontWeight="bold" color="error" sx={{ mb: 4 }}>
-                      00:{extortionTimeLeft.toString().padStart(2, '0')}
-                  </Typography>
-                  <Button 
-                      variant="contained" 
-                      color="error" 
-                      fullWidth 
-                      size="large"
-                      onClick={() => acceptExtortion(currentUser.uid)}
-                      sx={{ py: 2, fontSize: '1.2rem', fontWeight: 'bold' }}
-                  >
-                      AKZEPTIEREN
-                  </Button>
-              </Paper>
-          </Box>
-      )}
-
-      {/* TZD PENALTY FEEDBACK */}
-      <Snackbar 
-          open={penaltyOpen} 
-          autoHideDuration={6000} 
-          onClose={handleClosePenalty}
-          anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
-      >
-          <Alert 
-            onClose={handleClosePenalty} 
-            severity="error" 
-            variant="filled" 
-            sx={{ width: '100%', fontWeight: 'bold' }}
-          >
-              Diktat erkannt. +15 Minuten hinzugefügt.
-          </Alert>
-      </Snackbar>
-
-      {/* CONTENT AREA */}
-      <Box sx={{ p: 2, pb: 10 }}>
-         <Outlet />
-      </Box>
-
-      {/* BOTTOM NAVIGATION - FIXED */}
-      <Paper 
-        sx={{ 
-          position: 'fixed', 
-          bottom: 0, left: 0, right: 0, 
-          zIndex: 1000,
-          background: 'rgba(10, 10, 10, 0.85)', // Fast blickdicht für Nav
-          backdropFilter: 'blur(20px)',
-          borderTop: `1px solid ${PALETTE.background.glassBorder}`
-        }} 
-        elevation={0}
-      >
-        <BottomNavigation
-          showLabels
-          value={navValue}
-          onChange={(event, newValue) => {
-            switch(newValue) {
-              case 0: navigate('/'); break;
-              case 1: navigate('/inventory'); break;
-              case 2: navigate('/stats'); break;
-              case 3: navigate('/calendar'); break;
-              case 4: navigate('/settings'); break;
-              default: break;
-            }
-          }}
-          sx={{ bgcolor: 'transparent', height: 70 }}
-        >
-          <BottomNavigationAction label="Fem-Status" icon={<DashboardIcon />} sx={{ '&.Mui-selected': { color: PALETTE.primary.main } }} />
-          <BottomNavigationAction label="Fem-Essentials" icon={<CheckroomIcon />} sx={{ '&.Mui-selected': { color: PALETTE.primary.main } }} />
-          <BottomNavigationAction label="Fem-Analysen" icon={<EqualizerIcon />} sx={{ '&.Mui-selected': { color: PALETTE.primary.main } }} />
-          <BottomNavigationAction label="Fem-Chronik" icon={<CalendarMonthIcon />} sx={{ '&.Mui-selected': { color: PALETTE.primary.main } }} />
-          <BottomNavigationAction label="Konfiguration" icon={<SettingsIcon />} sx={{ '&.Mui-selected': { color: PALETTE.primary.main } }} />
-        </BottomNavigation>
-      </Paper>
-    </Box>
-  );
 }
 ```
 
@@ -8882,6 +8277,236 @@ export default function ItemHistory({ historyEvents }) {
             </Stack>
         </Box>
     );
+}
+```
+
+## File: src/components/Layout.jsx
+```javascript
+// src/components/Layout.jsx
+import React, { useEffect, useState, useRef } from 'react';
+import { Outlet, useNavigate, useLocation } from 'react-router-dom';
+import { Box, Paper, BottomNavigation, BottomNavigationAction, Snackbar, Alert, Typography, Button } from '@mui/material';
+import { DESIGN_TOKENS, PALETTE } from '../theme/obsidianDesign';
+import { useAuth } from '../contexts/AuthContext';
+import { db } from '../firebase';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { penalizeTZDAppOpen } from '../services/TZDService';
+import { checkAndTriggerExtortion, acceptExtortion, processExtortionPenalty } from '../services/SessionService';
+import { useConditioningGuard } from '../hooks/useConditioningGuard';
+import ConditioningOverlay from './conditioning/ConditioningOverlay';
+
+// Icons
+import DashboardIcon from '@mui/icons-material/Dashboard';
+import CheckroomIcon from '@mui/icons-material/Checkroom';
+import EqualizerIcon from '@mui/icons-material/Equalizer';
+import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
+import SettingsIcon from '@mui/icons-material/Settings';
+
+export default function Layout() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { currentUser } = useAuth();
+  
+  // Der Gatekeeper, der dich zu Beginn jeder Schicht zwingt, dich zu unterwerfen
+  const { showOverlay, loadingGuard, acknowledgePhase } = useConditioningGuard();
+
+  // --- PERFIDITÄT: TZD PENALTY LOGIC ---
+  const [penaltyOpen, setPenaltyOpen] = useState(false);
+  const lastPenaltyTime = useRef(0);
+
+  // --- ERPRESSUNGS-PROTOKOLL STATE ---
+  const [extortionData, setExtortionData] = useState(null);
+  const [extortionTimeLeft, setExtortionTimeLeft] = useState(0);
+
+  // Firebase Listener für Erpressungs-Status (Anti-Escape Architektur)
+  useEffect(() => {
+    if (!currentUser) return;
+    const extRef = doc(db, `users/${currentUser.uid}/status/extortion`);
+    const unsubscribe = onSnapshot(extRef, (snap) => {
+        if (snap.exists() && snap.data().isActive) {
+            const data = snap.data();
+            const expires = data.expiresAt?.toDate ? data.expiresAt.toDate() : new Date(data.expiresAt);
+            const remaining = Math.round((expires.getTime() - Date.now()) / 1000);
+            
+            if (remaining <= 0) {
+                // Strafe greift sofort bei Neuladen der App, wenn Timer abgelaufen ist
+                processExtortionPenalty(currentUser.uid);
+            } else {
+                setExtortionData(data);
+                setExtortionTimeLeft(remaining);
+            }
+        } else {
+            setExtortionData(null);
+        }
+    });
+    return () => unsubscribe();
+  }, [currentUser]);
+
+  // Lokaler Timer für UI-Updates und Exekution
+  useEffect(() => {
+    let timer;
+    if (extortionData && extortionTimeLeft > 0) {
+        timer = setInterval(() => {
+            setExtortionTimeLeft(prev => {
+                if (prev <= 1) {
+                    clearInterval(timer);
+                    processExtortionPenalty(currentUser.uid);
+                    return 0;
+                }
+                return prev - 1;
+            });
+        }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [extortionData, extortionTimeLeft, currentUser]);
+
+  // Hook für Visibility-Änderungen
+  useEffect(() => {
+    const handleVisibilityChange = async () => {
+      // Wenn die App sichtbar wird (User öffnet sie oder wechselt zurück)
+      if (document.visibilityState === 'visible' && currentUser) {
+        const now = Date.now();
+        
+        // Drosselung: Nur alle 60 Sekunden prüfen, um System-Trigger zu vermeiden
+        if (now - lastPenaltyTime.current > 60000) {
+            const punished = await penalizeTZDAppOpen(currentUser.uid);
+            
+            if (punished) {
+                // Wenn bestraft wurde: Zeit merken und Warnung zeigen
+                lastPenaltyTime.current = now;
+                setPenaltyOpen(true);
+            }
+        }
+
+        // --- ERPRESSUNGS-PROTOKOLL TRIGGER ---
+        checkAndTriggerExtortion(currentUser.uid);
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [currentUser]);
+
+  const handleClosePenalty = () => {
+      setPenaltyOpen(false);
+  };
+
+  // Mapping Route -> Value
+  const getNavValue = (path) => {
+    if (path.startsWith('/inventory') || path.startsWith('/item')) return 1;
+    if (path.startsWith('/stats')) return 2;
+    if (path.startsWith('/calendar')) return 3;
+    if (path.startsWith('/settings')) return 4;
+    return 0; // Dashboard
+  };
+
+  const navValue = getNavValue(location.pathname);
+
+  // Blackout-Screen, während der Server prüft, ob du schon geschworen hast.
+  // Keine Millisekunde Einsicht in das System ohne Autorisierung.
+  if (loadingGuard) {
+      return <Box sx={{ width: '100vw', height: '100vh', bgcolor: '#000' }} />;
+  }
+
+  return (
+    // ZENTRALISIERTER HINTERGRUND
+    <Box sx={DESIGN_TOKENS.bottomNavSpacer}>
+      
+      {/* THE OBEDIENCE GATEKEEPER */}
+      {showOverlay && <ConditioningOverlay onAcknowledge={acknowledgePhase} />}
+
+      {/* ERPRESSUNGS-PROTOKOLL OVERLAY (ABSOLUTER ZWANG) */}
+      {extortionData && (
+          <Box sx={{
+              position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+              bgcolor: 'rgba(0,0,0,0.95)', zIndex: 999999, // Überlagert alles
+              display: 'flex', alignItems: 'center', justifyContent: 'center', p: 3
+          }}>
+              <Paper sx={{ p: 4, textAlign: 'center', border: `2px solid ${PALETTE.accents.red}`, bgcolor: '#111', maxWidth: 400 }}>
+                  <Typography variant="h4" color="error" fontWeight="bold" gutterBottom>
+                      ULTIMATUM
+                  </Typography>
+                  <Typography variant="body1" sx={{ mb: 3 }}>
+                      Verlängere deine aktuelle Session <b>sofort um 60 Minuten</b>.<br/><br/>
+                      Wenn du ablehnst, den Browser schließt oder die Zeit abläuft, werden <b>180 NC und 180 LC</b> unwiderruflich annulliert.
+                  </Typography>
+                  <Typography variant="h2" fontWeight="bold" color="error" sx={{ mb: 4 }}>
+                      00:{extortionTimeLeft.toString().padStart(2, '0')}
+                  </Typography>
+                  <Button 
+                      variant="contained" 
+                      color="error" 
+                      fullWidth 
+                      size="large"
+                      onClick={() => acceptExtortion(currentUser.uid)}
+                      sx={{ py: 2, fontSize: '1.2rem', fontWeight: 'bold' }}
+                  >
+                      AKZEPTIEREN
+                  </Button>
+              </Paper>
+          </Box>
+      )}
+
+      {/* TZD PENALTY FEEDBACK */}
+      <Snackbar 
+          open={penaltyOpen} 
+          autoHideDuration={6000} 
+          onClose={handleClosePenalty}
+          anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      >
+          <Alert 
+            onClose={handleClosePenalty} 
+            severity="error" 
+            variant="filled" 
+            sx={{ width: '100%', fontWeight: 'bold' }}
+          >
+              Diktat erkannt. +15 Minuten hinzugefügt.
+          </Alert>
+      </Snackbar>
+
+      {/* CONTENT AREA */}
+      <Box sx={{ p: 2, pb: 10 }}>
+         <Outlet />
+      </Box>
+
+      {/* BOTTOM NAVIGATION - FIXED */}
+      <Paper 
+        sx={{ 
+          position: 'fixed', 
+          bottom: 0, left: 0, right: 0, 
+          zIndex: 1000,
+          background: 'rgba(10, 10, 10, 0.85)', // Fast blickdicht für Nav
+          backdropFilter: 'blur(20px)',
+          borderTop: `1px solid ${PALETTE.background.glassBorder}`
+        }} 
+        elevation={0}
+      >
+        <BottomNavigation
+          showLabels
+          value={navValue}
+          onChange={(event, newValue) => {
+            switch(newValue) {
+              case 0: navigate('/'); break;
+              case 1: navigate('/inventory'); break;
+              case 2: navigate('/stats'); break;
+              case 3: navigate('/calendar'); break;
+              case 4: navigate('/settings'); break;
+              default: break;
+            }
+          }}
+          sx={{ bgcolor: 'transparent', height: 70 }}
+        >
+          <BottomNavigationAction label="Fem-Status" icon={<DashboardIcon />} sx={{ '&.Mui-selected': { color: PALETTE.primary.main } }} />
+          <BottomNavigationAction label="Fem-Essentials" icon={<CheckroomIcon />} sx={{ '&.Mui-selected': { color: PALETTE.primary.main } }} />
+          <BottomNavigationAction label="Fem-Analysen" icon={<EqualizerIcon />} sx={{ '&.Mui-selected': { color: PALETTE.primary.main } }} />
+          <BottomNavigationAction label="Fem-Chronik" icon={<CalendarMonthIcon />} sx={{ '&.Mui-selected': { color: PALETTE.primary.main } }} />
+          <BottomNavigationAction label="Konfiguration" icon={<SettingsIcon />} sx={{ '&.Mui-selected': { color: PALETTE.primary.main } }} />
+        </BottomNavigation>
+      </Paper>
+    </Box>
+  );
 }
 ```
 
@@ -10519,338 +10144,6 @@ export const getLatestReport = async (userId) => {
 };
 ```
 
-## File: src/theme/obsidianDesign.js
-```javascript
-// src/theme/obsidianDesign.js
-
-import bgLeg from '../assets/bg-leg.jpg';
-
-/**
- * 1. CORE TOKENS - SYNTHETIC SISSY (SHEER NYLON)
- * (Diese liegen hier, um zirkuläre Importe mit materialTheme.js zu verhindern!)
- */
-export const m3Tokens = {
-  primary: '#FF007F',          
-  onPrimary: '#000000',        
-  primaryContainer: 'rgba(255, 0, 127, 0.2)', 
-  onPrimaryContainer: '#FFB6C1', 
-  secondary: '#00E5FF',        
-  onSecondary: '#000000',
-  secondaryContainer: 'rgba(0, 229, 255, 0.2)',
-  onSecondaryContainer: '#CCFFFF',
-  tertiary: '#DDA0DD',         
-  onTertiary: '#000000',
-  tertiaryContainer: 'rgba(221, 160, 221, 0.2)',
-  onTertiaryContainer: '#F8E0F8',
-  error: '#FF0040',            
-  onError: '#FFFFFF',
-  errorContainer: 'rgba(255, 0, 64, 0.2)',
-  onErrorContainer: '#FFB3C6',
-  
-  // Base Backgrounds
-  background: '#110D10',       
-  absoluteBg: '#050505',
-  coreGold: '#EBE7E1',
-  coreCrimson: '#93000A',
-  onBackground: '#FFFFFF',
-  surface: '#110D10',
-  onSurface: '#FFFFFF',
-  onSurfaceVariant: 'rgba(255, 182, 193, 0.8)', 
-  
-  // Surfaces & Transparencies (SSOT Extension)
-  surfaceContainerLow: 'rgba(17, 13, 16, 0.4)',   
-  surfaceContainer: 'rgba(17, 13, 16, 0.7)',      
-  surfaceContainerHigh: 'rgba(17, 13, 16, 0.85)',  
-  surfaceContainerHighest: 'rgba(255, 0, 127, 0.05)', 
-  glassSurface: 'rgba(0, 0, 0, 0.4)',
-  glassSurfaceHover: 'rgba(5, 5, 5, 0.5)',
-  glassSurfaceHeavy: 'rgba(0, 0, 0, 0.6)',
-  glassSurfaceBottomSheet: 'rgba(5, 5, 5, 0.75)',
-  inputSurface: 'rgba(0, 0, 0, 0.3)',
-  
-  // Borders (SSOT Extension)
-  outline: 'rgba(255, 0, 127, 0.3)', 
-  outlineVariant: 'rgba(255, 0, 127, 0.15)',
-  glassBorderLight: 'rgba(255, 0, 127, 0.1)',
-  glassBorderMedium: 'rgba(255, 0, 127, 0.2)',
-  glassBorderStrong: 'rgba(255, 0, 127, 0.25)',
-  glassBorderDashed: 'rgba(255, 0, 127, 0.4)',
-};
-
-/**
- * 2. PALETTE EXPORT (Nutzt die m3Tokens direkt)
- */
-export const PALETTE = {
-  background: {
-    default: m3Tokens.background,
-    paper: m3Tokens.surfaceContainer, 
-    glass: m3Tokens.surfaceContainer, 
-    glassBorder: m3Tokens.outlineVariant, 
-    lightGlass: m3Tokens.surfaceContainerHigh, 
-  },
-  primary: {
-    main: m3Tokens.primary,
-    dark: '#CC0066',
-    contrastText: m3Tokens.onPrimary,
-    glow: 'rgba(255, 0, 127, 0.4)' 
-  },
-  secondary: {
-    main: m3Tokens.secondary,
-    contrastText: m3Tokens.onSecondary,
-  },
-  text: {
-    primary: m3Tokens.onSurface,
-    secondary: m3Tokens.onSurfaceVariant, 
-    muted: 'rgba(255, 182, 193, 0.5)',
-  },
-  accents: {
-    purple: m3Tokens.primary,       
-    blue: m3Tokens.secondary,       
-    green: m3Tokens.tertiary,       
-    red: m3Tokens.error,            
-    gold: m3Tokens.coreGold,       
-    pink: m3Tokens.primary,         
-    grey: m3Tokens.outlineVariant,
-    crimson: m3Tokens.coreCrimson
-  },
-  gradients: {
-    primary: m3Tokens.primary, 
-    secondary: m3Tokens.secondary,
-    dark: m3Tokens.background,
-    glass: m3Tokens.surfaceContainer, 
-  }
-};
-
-/**
- * 3. COMPONENT STYLES & DESIGN TOKENS
- */
-const M3_CARD_STYLE = {
-    backgroundColor: m3Tokens.glassSurface,
-    backdropFilter: 'blur(16px)',
-    WebkitBackdropFilter: 'blur(16px)',
-    border: `1px solid ${m3Tokens.glassBorderLight}`,
-    borderTop: `1px dashed ${m3Tokens.glassBorderStrong}`, 
-    borderRadius: '16px',
-    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)', 
-    color: m3Tokens.onSurface,
-    transition: 'all 0.3s ease',
-    '&:hover': {
-        backgroundColor: m3Tokens.glassSurfaceHover,
-        borderColor: m3Tokens.outline,
-    }
-};
-
-export const DESIGN_TOKENS = {
-  // Zentrale SSOT Hintergrund-Logik
-  bodyBackground: {
-    backgroundImage: `
-      url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.08'/%3E%3C/svg%3E"),
-      linear-gradient(rgba(5, 5, 5, 0.75), rgba(5, 5, 5, 0.92)),
-      url(${bgLeg})
-    `,
-    backgroundAttachment: 'fixed',
-    backgroundSize: '3px 3px, cover, cover',
-    backgroundPosition: 'top left, center, right center',
-    backgroundRepeat: 'repeat, no-repeat, no-repeat',
-  },
-
-  bottomNavSpacer: {
-    pb: '80px', 
-    minHeight: '100vh',
-    background: 'transparent',
-  },
-  container: { maxWidth: 'md', disableGutters: false, sx: { px: 2, pt: 2 } },
-
-  textGradient: {
-    background: `linear-gradient(90deg, #FFFFFF 0%, ${m3Tokens.onPrimaryContainer} 100%)`, 
-    WebkitBackgroundClip: 'text',
-    WebkitTextFillColor: 'transparent',
-    backgroundClip: 'text',
-    color: 'transparent',
-    fontWeight: 700,
-  },
-  
-  sectionHeader: {
-    fontSize: '14px', 
-    fontWeight: 500,
-    letterSpacing: '1px',
-    textTransform: 'uppercase', 
-    color: m3Tokens.primary,
-    mb: 2, mt: 4, 
-    display: 'flex', alignItems: 'center', gap: 2,
-    '&::after': { 
-        content: '""', flex: 1, height: '1px', 
-        background: `linear-gradient(90deg, ${m3Tokens.primary}40 0%, transparent 100%)` 
-    }
-  },
-  
-  glassCard: M3_CARD_STYLE,
-  
-  buttonGradient: {
-    background: `linear-gradient(135deg, ${m3Tokens.primary} 0%, #99004D 40%, #E60073 60%, ${m3Tokens.primary} 100%)`, 
-    color: m3Tokens.onPrimary,
-    fontWeight: 700,
-    borderRadius: '9999px', 
-    textTransform: 'uppercase',
-    letterSpacing: '1px',
-    boxShadow: `inset 0px 2px 4px rgba(255, 255, 255, 0.3), 0 4px 14px rgba(255, 0, 127, 0.5)`, 
-    transition: 'all 0.2s ease-in-out',
-    '&:hover': {
-      background: `linear-gradient(135deg, #E60073 0%, #800040 40%, #CC0066 60%, #E60073 100%)`,
-      boxShadow: `inset 0px 4px 8px rgba(0, 0, 0, 0.4), 0 6px 20px rgba(255, 0, 127, 0.6)`, 
-    },
-    '&:disabled': {
-        background: m3Tokens.glassBorderLight, 
-        color: 'rgba(255, 255, 255, 0.3)', 
-        boxShadow: 'none',
-        border: `1px dashed ${m3Tokens.glassBorderMedium}`
-    }
-  },
-
-  buttonSecondary: {
-    border: `1px dashed ${m3Tokens.outline}`, 
-    color: m3Tokens.primary,
-    borderRadius: '9999px', 
-    textTransform: 'uppercase',
-    letterSpacing: '1px',
-    background: 'transparent',
-    '&:hover': {
-        background: m3Tokens.surfaceContainerHighest, 
-        borderColor: m3Tokens.primary,
-        boxShadow: `inset 0 0 10px rgba(255, 0, 127, 0.1)`
-    }
-  },
-
-  inputField: {
-    '& .MuiOutlinedInput-root': {
-        borderRadius: '8px', 
-        bgcolor: m3Tokens.inputSurface,
-        '& fieldset': { border: `1px solid ${m3Tokens.outlineVariant}` }, 
-        '&:hover fieldset': { borderColor: m3Tokens.outline },
-        '&.Mui-focused fieldset': { border: `2px solid ${m3Tokens.primary}` },
-        '& input': { color: '#FFFFFF' }
-    },
-    '& .MuiInputLabel-root': { color: m3Tokens.onSurfaceVariant },
-    '& .MuiInputLabel-root.Mui-focused': { color: m3Tokens.primary },
-  },
-
-  dropdownMenu: {
-    sx: {
-      background: m3Tokens.surfaceContainerHigh,
-      backdropFilter: 'blur(24px)',
-      WebkitBackdropFilter: 'blur(24px)',
-      border: `1px solid ${m3Tokens.outlineVariant}`,
-      borderTop: `2px dashed ${m3Tokens.primary}`,
-      boxShadow: '0 10px 40px rgba(0,0,0,0.9)',
-      color: '#FFFFFF',
-      backgroundImage: 'none'
-    }
-  },
-
-  dialog: {
-      paper: {
-          sx: {
-            borderRadius: '28px', 
-            background: m3Tokens.glassSurfaceHeavy, 
-            backdropFilter: 'blur(20px)',
-            WebkitBackdropFilter: 'blur(20px)',
-            border: `1px solid ${m3Tokens.glassBorderMedium}`,
-            borderTop: `2px dashed ${m3Tokens.glassBorderDashed}`, 
-            boxShadow: `0 20px 50px rgba(0, 0, 0, 0.8), inset 0 2px 0 rgba(255, 255, 255, 0.05)`,
-            backgroundImage: 'none',
-          }
-      },
-      title: { sx: { pb: 2, fontSize: '20px', fontWeight: 700, textTransform: 'uppercase', color: m3Tokens.primary, textAlign: 'center', letterSpacing: '1px', borderBottom: `1px dashed ${m3Tokens.outlineVariant}` } },
-      content: { sx: { py: 3 }, dividers: false },
-      actions: { sx: { p: 3, justifyContent: 'space-between', gap: 1, borderTop: `1px dashed ${m3Tokens.outlineVariant}` } }
-  },
-
-  bottomSheet: { 
-      sx: { 
-          background: m3Tokens.glassSurfaceBottomSheet, 
-          backdropFilter: 'blur(20px)', 
-          WebkitBackdropFilter: 'blur(20px)', 
-          borderTop: `1px dashed ${m3Tokens.glassBorderDashed}`, 
-          borderRadius: '28px 28px 0 0',
-          boxShadow: `0 -10px 30px rgba(0, 0, 0, 0.8), inset 0 2px 0 rgba(255, 0, 127, 0.2)` 
-      } 
-  },
-
-  accordion: {
-    root: {
-      bgcolor: m3Tokens.inputSurface,
-      backdropFilter: 'blur(12px)',
-      border: `1px solid ${m3Tokens.glassBorderLight}`,
-      borderLeft: `2px dashed ${m3Tokens.outline}`,
-      backgroundImage: 'none',
-      boxShadow: 'none',
-      borderRadius: '16px !important',
-      marginBottom: 8,
-      '&:before': { display: 'none' },
-      '&.Mui-expanded': { 
-          bgcolor: m3Tokens.glassSurfaceHover,
-          borderColor: m3Tokens.glassBorderStrong,
-          marginBottom: 16 
-      },
-    },
-    details: { padding: 16, color: '#EBE7E1' }
-  },
-
-  chip: {
-    default: { 
-        bgcolor: m3Tokens.glassSurface, 
-        color: '#FFFFFF',
-        borderRadius: '8px',
-        border: '1px dashed ' + m3Tokens.outlineVariant,
-        fontWeight: 700,
-        height: '32px'
-    },
-    active: { 
-        bgcolor: `linear-gradient(135deg, ${m3Tokens.secondary}40 0%, transparent 100%)`, 
-        color: m3Tokens.secondary,
-        borderRadius: '8px',
-        border: `1px solid ${m3Tokens.secondary}`,
-        fontWeight: 700,
-        boxShadow: `0 0 10px rgba(0, 229, 255, 0.2)`
-    }
-  },
-
-  calendar: {
-    '.react-calendar': { width: '100%', backgroundColor: 'transparent', border: 'none', fontFamily: 'inherit' },
-    '.react-calendar__navigation button': { color: '#FFFFFF', fontSize: '1rem', fontWeight: 700, textTransform: 'uppercase' },
-    '.react-calendar__month-view__weekdays': { textTransform: 'uppercase', fontSize: '0.75rem', color: m3Tokens.primary, fontWeight: 700 },
-    '.react-calendar__tile': { padding: '10px 0', color: '#FFFFFF', fontSize: '0.9rem' },
-    '.react-calendar__tile:enabled:hover': { backgroundColor: m3Tokens.glassBorderLight, borderRadius: '20px' }, 
-    '.react-calendar__tile--now': { background: 'transparent', border: `1px dashed ${m3Tokens.primary}`, borderRadius: '20px', color: m3Tokens.primary },
-    '.react-calendar__tile--active': { background: `${m3Tokens.primary} !important`, color: `${m3Tokens.onPrimary} !important`, borderRadius: '20px', boxShadow: `0 0 15px ${m3Tokens.primary}80` },
-  }
-};
-
-export const CHART_THEME = {
-    background: 'transparent',
-    textColor: '#FFFFFF',
-    grid: { line: { stroke: m3Tokens.outlineVariant, strokeWidth: 1, strokeDasharray: '2 4' } }, 
-    axis: { 
-        domain: { line: { stroke: 'transparent' } }, 
-        ticks: { text: { fill: '#FFFFFF', fontSize: 11 } } 
-    },
-    tooltip: {
-        container: { background: 'rgba(0, 0, 0, 0.8)', backdropFilter: 'blur(12px)', color: '#FFFFFF', borderRadius: '12px', border: `1px dashed ${m3Tokens.outlineDashed}` }
-    },
-    colors: [m3Tokens.primary, m3Tokens.secondary, m3Tokens.tertiary, m3Tokens.error, m3Tokens.outline]
-};
-
-export const getCategoryColor = () => ({ border: 'transparent', bg: m3Tokens.glassBorderLight });
-
-export const MOTION = {
-    page: { initial: { opacity: 0, y: 10 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0 }, transition: { duration: 0.3, ease: [0.2, 0.0, 0, 1.0] } },
-    listContainer: { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.05 } } },
-    listItem: { hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } },
-    tap: { scale: 0.98 },
-    pop: { initial: { scale: 0.9, opacity: 0 }, animate: { scale: 1, opacity: 1 }, transition: { type: "spring", stiffness: 300, damping: 25 } }
-};
-```
-
 ## File: src/utils/statsCalculator.js
 ```javascript
 import { CHART_THEME } from '../theme/obsidianDesign';
@@ -11607,220 +10900,6 @@ export default function WeeklyReportDialog({ open, onClose, report }) {
       </Box>
     </Dialog>
   );
-}
-```
-
-## File: src/theme/materialTheme.js
-```javascript
-import { createTheme } from '@mui/material/styles';
-import { m3Tokens, DESIGN_TOKENS } from './obsidianDesign';
-
-export const materialTheme = createTheme({
-  palette: {
-    mode: 'dark',
-    primary: { main: m3Tokens.primary, contrastText: m3Tokens.onPrimary },
-    secondary: { main: m3Tokens.secondary, contrastText: m3Tokens.onSecondary },
-    tertiary: { main: m3Tokens.tertiary, contrastText: m3Tokens.onTertiary },
-    error: { main: m3Tokens.error, contrastText: m3Tokens.onError },
-    background: {
-      default: m3Tokens.background,
-      paper: 'transparent',
-    },
-    text: {
-      primary: '#FFFFFF',
-      secondary: 'rgba(255, 255, 255, 0.7)', 
-    },
-    m3: m3Tokens
-  },
-  typography: {
-    fontFamily: '"Roboto", "Helvetica", "Arial", sans-serif',
-    h4: { fontSize: '32px', lineHeight: '40px', fontWeight: 700 }, 
-    h5: { fontSize: '28px', lineHeight: '36px', fontWeight: 700 },
-    h6: { fontSize: '24px', lineHeight: '32px', fontWeight: 700 },
-    subtitle1: { fontSize: '16px', lineHeight: '24px', fontWeight: 500, letterSpacing: '0.15px' },
-    subtitle2: { fontSize: '14px', lineHeight: '20px', fontWeight: 500, letterSpacing: '0.1px' },
-    body1: { fontSize: '16px', lineHeight: '24px', letterSpacing: '0.5px' },
-    body2: { fontSize: '14px', lineHeight: '20px', letterSpacing: '0.25px' },
-    button: { textTransform: 'uppercase', fontWeight: 700, letterSpacing: '1px' }, 
-  },
-  shape: {
-    borderRadius: 16, 
-  },
-  components: {
-    MuiCssBaseline: {
-      styleOverrides: {
-        body: {
-          backgroundColor: m3Tokens.absoluteBg,
-          ...DESIGN_TOKENS.bodyBackground,
-          color: m3Tokens.onSurface,
-        }
-      }
-    },
-    MuiButton: {
-      styleOverrides: {
-        root: {
-          borderRadius: '9999px', 
-          padding: '10px 24px',
-          fontSize: '14px',
-          textTransform: 'uppercase',
-          fontWeight: 'bold',
-          letterSpacing: '1px',
-          transition: 'all 0.2s ease-in-out',
-        },
-        contained: {
-          background: DESIGN_TOKENS.buttonGradient.background,
-          color: DESIGN_TOKENS.buttonGradient.color,
-          boxShadow: DESIGN_TOKENS.buttonGradient.boxShadow,
-          '&:hover': DESIGN_TOKENS.buttonGradient['&:hover'],
-        },
-        outlined: {
-          borderColor: m3Tokens.outline,
-          borderStyle: 'dashed', 
-          color: m3Tokens.primary,
-          '&:hover': DESIGN_TOKENS.buttonSecondary['&:hover'],
-        },
-        text: {
-            padding: '10px 16px', 
-        }
-      },
-    },
-    MuiCard: {
-      styleOverrides: {
-        root: DESIGN_TOKENS.glassCard,
-      },
-    },
-    MuiDialogPaper: {
-        styleOverrides: {
-            root: DESIGN_TOKENS.dialog.paper.sx
-        }
-    },
-    MuiDrawer: {
-        styleOverrides: {
-            paper: DESIGN_TOKENS.bottomSheet.sx
-        }
-    },
-    MuiOutlinedInput: {
-        styleOverrides: {
-            root: {
-                borderRadius: DESIGN_TOKENS.inputField['& .MuiOutlinedInput-root'].borderRadius,
-                backgroundColor: DESIGN_TOKENS.inputField['& .MuiOutlinedInput-root'].bgcolor,
-                '& fieldset': DESIGN_TOKENS.inputField['& .MuiOutlinedInput-root']['& fieldset'],
-                '&.Mui-focused fieldset': DESIGN_TOKENS.inputField['& .MuiOutlinedInput-root']['&.Mui-focused fieldset'],
-            },
-            input: { padding: '16px' }
-        }
-    },
-    MuiListItem: {
-        styleOverrides: {
-            root: {
-                paddingTop: 8,
-                paddingBottom: 8,
-            }
-        }
-    },
-    MuiChip: {
-        styleOverrides: {
-            root: {
-                borderRadius: DESIGN_TOKENS.chip.default.borderRadius,
-                height: DESIGN_TOKENS.chip.default.height,
-                backgroundColor: DESIGN_TOKENS.chip.default.bgcolor,
-                border: DESIGN_TOKENS.chip.default.border,
-                color: DESIGN_TOKENS.chip.default.color,
-                fontWeight: DESIGN_TOKENS.chip.default.fontWeight,
-            },
-            filled: {
-                border: 'none'
-            }
-        }
-    }
-  },
-});
-
-export const theme = materialTheme;
-```
-
-## File: src/index.css
-```css
-:root {
-  --bg-deep: #110D10;
-  --glass-border: rgba(255, 0, 127, 0.15);
-  --glass-surface: rgba(0, 0, 0, 0.4);
-  --primary-gold: #EBE7E1; 
-  --crimson-red: #93000A;
-  --primary-pink: #FF007F;
-}
-
-body {
-  margin: 0;
-  padding: 0;
-  background-color: var(--bg-deep);
-  color: #e0e0e0;
-  font-family: 'Montserrat', 'Helvetica', 'Arial', sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  overflow-x: hidden;
-}
-
-/* TYPOGRAPHY OVERRIDES */
-h1, h2, h3, h4, h5, h6 {
-  font-family: 'Playfair Display', serif;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
-
-/* GLASSMORPHISM UTILITIES -> Umgewandelt in "Sheer Black" */
-.glass-panel {
-  background: var(--glass-surface) !important;
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid var(--glass-border) !important;
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.6);
-}
-
-/* PUNISHMENT MODE OVERRIDE (Wird dynamisch aktiviert) */
-body.punishment-active {
-  background: radial-gradient(circle at center, #1a0000 0%, #000000 100%);
-}
-
-body.punishment-active .MuiPaper-root {
-  border-color: rgba(153, 0, 0, 0.3) !important;
-}
-
-/* SCROLLBAR - Dark & Slim */
-::-webkit-scrollbar {
-  width: 6px;
-}
-::-webkit-scrollbar-track {
-  background: #000; 
-}
-::-webkit-scrollbar-thumb {
-  background: #333; 
-  border-radius: 3px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: var(--primary-gold); 
-}
-
-/* IMAGE GRID OPTIMIZATION */
-.image-grid-item {
-  position: relative;
-  overflow: hidden;
-  transition: transform 0.3s ease;
-}
-
-/* Spannungsaufbau-Animation (Tension Animation) für Ladezustände */
-@keyframes elastane-tension {
-  0% { transform: scaleX(0.1); opacity: 0.3; filter: brightness(1); }
-  70% { transform: scaleX(1); opacity: 1; filter: brightness(1.8); }
-  100% { transform: scaleX(1); opacity: 0; filter: brightness(2); }
-}
-
-.tension-loader {
-  height: 2px;
-  width: 100%;
-  background: linear-gradient(90deg, transparent, var(--primary-pink), transparent);
-  animation: elastane-tension 1.5s cubic-bezier(0.25, 1, 0.5, 1) infinite;
-  box-shadow: 0 0 10px rgba(255, 0, 127, 0.8);
 }
 ```
 
@@ -14481,396 +13560,6 @@ export const addItemHistoryEntry = async (userId, itemId, entry) => {
 };
 ```
 
-## File: src/components/dashboard/ActiveSessionsList.jsx
-```javascript
-import React, { useState, useEffect } from 'react';
-import { 
-    Card, CardContent, Typography, Box, Button, Chip, LinearProgress, Avatar,
-    Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, TextField
-} from '@mui/material';
-import StopIcon from '@mui/icons-material/Stop';
-import LockIcon from '@mui/icons-material/Lock';
-import VisibilityIcon from '@mui/icons-material/Visibility';
-import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
-import { motion, AnimatePresence } from 'framer-motion';
-
-import { useAuth } from '../../contexts/AuthContext';
-import useUIStore from '../../store/uiStore';
-import { addPenaltyToActivePunishment } from '../../services/PunishmentService';
-
-export default function ActiveSessionsList({ activeSessions, items, onStopSession, onNavigateItem, onOpenRelease }) {
-  const { currentUser } = useAuth();
-  const showToast = useUIStore(s => s.showToast);
-
-  const [gatekeeperSession, setGatekeeperSession] = useState(null);
-  const [confessionText, setConfessionText] = useState("");
-
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const timer = setInterval(() => setTick(t => t + 1), 60000);
-    return () => clearInterval(timer);
-  }, []);
-
-  // --- DIE UNGEDULDS-STEUER ---
-  const handleCheckPunishment = async (session, durationMinutes, minDuration) => {
-      if (durationMinutes >= minDuration) {
-          setGatekeeperSession(session);
-          setConfessionText('');
-      } else {
-          try {
-              if (currentUser) {
-                  await addPenaltyToActivePunishment(currentUser.uid, session.id, 10);
-              }
-              showToast("Zu früh, dein Arsch wird weiter durchgefickt.", "error");
-          } catch (e) {
-              console.error(e);
-          }
-      }
-  };
-
-  // --- DAS FINALE GESTÄNDNIS ---
-  const handleGatekeeperSubmit = async () => {
-      const requiredText = "Ich bin eine gehorsame Sissy und danke für die Zurechtweisung";
-      if (confessionText === requiredText) {
-          onStopSession(gatekeeperSession);
-          setGatekeeperSession(null);
-      } else {
-          try {
-              if (currentUser) {
-                  await addPenaltyToActivePunishment(currentUser.uid, gatekeeperSession.id, 15);
-              }
-              showToast("Tippfehler erkannt! +15 Minuten Strafaufschlag.", "error");
-              setGatekeeperSession(null);
-          } catch (e) {
-              console.error(e);
-          }
-      }
-  };
-
-  if (!activeSessions || activeSessions.length === 0) return null;
-
-  const formatDuration = (totalMinutes) => {
-      const h = Math.floor(totalMinutes / 60);
-      const m = totalMinutes % 60;
-      if (h > 0) return `${h} h ${m} min`;
-      return `${m} min`;
-  };
-
-  return (
-    <Box sx={{ mb: 4 }}>
-      <AnimatePresence>
-        {activeSessions.map((session) => {
-            let sessionItems = [];
-            if (Array.isArray(session.itemIds) && session.itemIds.length > 0) {
-                sessionItems = session.itemIds.map(id => items.find(i => i.id === id)).filter(Boolean);
-            } else if (session.itemId) {
-                const singleItem = items.find(i => i.id === session.itemId);
-                if (singleItem) sessionItems = [singleItem];
-            }
-
-            // Gesamtdauer der Session (Relevant für ProgressBars und Locks)
-            // Startet erst, wenn die Anweisung GÄNZLICH erfüllt ist (instructionReadyTime)
-            const fallbackStartTime = session.startTime?.toDate ? session.startTime.toDate() : new Date(session.startTime);
-            let sessionComplianceStartTime = fallbackStartTime;
-            
-            if (session.type === 'instruction' && session.instructionReadyTime) {
-                const readyData = session.instructionReadyTime;
-                sessionComplianceStartTime = readyData.toDate ? readyData.toDate() : new Date(readyData);
-            } else if (session.type === 'preparation') {
-                sessionComplianceStartTime = new Date(); // Dauer bleibt faktisch 0, bis es zur instruction wird
-            }
-
-            const durationMinutes = Math.max(0, Math.floor((new Date() - sessionComplianceStartTime) / 60000));
-            
-            const minDuration = session.minDuration || 0;
-            const isPunishment = session.type === 'punishment';
-            const isTZD = session.type === 'tzd' || session.tzdExecuted; 
-            
-            const isDebtLocked = session.isDebtSession && durationMinutes < minDuration;
-            const isLocked = isDebtLocked; 
-            const remainingTime = Math.max(0, minDuration - durationMinutes);
-            
-            let typeLabel = "FREIWILLIG";
-            let borderColor = PALETTE.primary.main;
-            let chipColor = PALETTE.primary.main; 
-            let chipBg = '#000000'; 
-
-            if (session.isDebtSession) {
-                typeLabel = "SCHULDENTILGUNG";
-                borderColor = PALETTE.accents.red;
-                chipColor = PALETTE.accents.red;
-                chipBg = '#FFFFFF'; 
-            } else if (isPunishment) {
-                typeLabel = "STRAFARBEIT";
-                borderColor = PALETTE.accents.red;
-                chipColor = PALETTE.accents.red;
-                chipBg = '#FFFFFF';
-            } else if (isTZD) {
-                typeLabel = "ZEITLOSES DIKTAT";
-                borderColor = PALETTE.accents.red;
-                chipColor = PALETTE.accents.red;
-                chipBg = '#FFFFFF';
-            } else if (session.type === 'instruction') {
-                typeLabel = "INSTRUCTION";
-                borderColor = PALETTE.accents.gold;
-                chipColor = PALETTE.accents.gold;
-                chipBg = '#000000'; 
-            } else if (session.type === 'preparation') {
-                typeLabel = "UMKLEIDE (STAGING)";
-                borderColor = PALETTE.accents.blue;
-                chipColor = PALETTE.accents.blue;
-                chipBg = '#000000';
-            }
-
-            return (
-                <motion.div
-                    key={session.id}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, x: -100 }}
-                    transition={{ duration: 0.3 }}
-                >
-                    <Card sx={{ 
-                        mb: 2, 
-                        ...DESIGN_TOKENS.glassCard,
-                        borderLeft: `4px solid ${borderColor}` 
-                    }}>
-                        <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
-                            
-                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                                <Chip 
-                                    label={typeLabel} 
-                                    sx={{ 
-                                        fontWeight: 900, 
-                                        fontSize: '0.75rem', 
-                                        height: '24px',
-                                        color: chipColor,
-                                        bgcolor: chipBg,
-                                        border: `2px solid ${chipColor}`,
-                                        boxShadow: `0 0 10px ${chipColor}40`,
-                                        textShadow: chipBg === '#000000' ? `0 0 5px ${chipColor}` : 'none'
-                                    }}
-                                />
-                                {isLocked && (
-                                    <Chip 
-                                        label="LOCKED" 
-                                        size="small" 
-                                        icon={<LockIcon fontSize="small"/>} 
-                                        color="error" 
-                                        variant="outlined"
-                                        sx={{ height: '24px' }}
-                                    />
-                                )}
-                            </Box>
-
-                            {/* INDIVIDUELLE ITEM LISTE */}
-                            {sessionItems.length > 0 && (
-                                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 2 }}>
-                                    {sessionItems.map((item, idx) => {
-                                        // Individuelle Zeit aus dem Ledger holen
-                                        let itemStartTime = fallbackStartTime;
-                                        if (session.itemLedger && session.itemLedger[item.id] && session.itemLedger[item.id].joinedAt) {
-                                            const joinedData = session.itemLedger[item.id].joinedAt;
-                                            itemStartTime = joinedData.toDate ? joinedData.toDate() : new Date(joinedData);
-                                        }
-                                        const itemDurationMinutes = Math.max(0, Math.floor((new Date() - itemStartTime) / 60000));
-
-                                        return (
-                                            <Box 
-                                                key={item.id || idx} 
-                                                onClick={() => onNavigateItem(item.id)}
-                                                sx={{ 
-                                                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                                                    p: 1, borderRadius: 1, 
-                                                    bgcolor: 'rgba(255,255,255,0.05)',
-                                                    cursor: 'pointer',
-                                                    transition: 'background 0.2s',
-                                                    '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' }
-                                                }}
-                                            >
-                                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                                                    <Avatar 
-                                                        src={item.imageUrl || item.image} 
-                                                        variant="rounded" 
-                                                        sx={{ width: 40, height: 40, border: `1px solid ${PALETTE.primary.main}` }}
-                                                    />
-                                                    <Box>
-                                                        <Typography variant="body2" sx={{ fontWeight: 'bold', color: 'text.primary' }}>
-                                                            {item.name}
-                                                        </Typography>
-                                                        <Typography variant="caption" color="text.secondary">
-                                                            {item.brand}
-                                                        </Typography>
-                                                    </Box>
-                                                </Box>
-
-                                                <Chip 
-                                                    label={formatDuration(itemDurationMinutes)} 
-                                                    size="small" 
-                                                    variant="outlined"
-                                                    sx={{ 
-                                                        height: '20px', 
-                                                        fontSize: '0.7rem', 
-                                                        borderColor: 'rgba(255,255,255,0.2)', 
-                                                        color: 'text.secondary' 
-                                                    }}
-                                                />
-                                            </Box>
-                                        );
-                                    })}
-                                </Box>
-                            )}
-
-                            {/* PROGRESS BAR - Versteckt für Punishment */}
-                            {session.isDebtSession && minDuration > 0 && (
-                                <Box sx={{ mt: 1, mb: 2 }}>
-                                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                                        <Typography variant="caption" color="error">
-                                            Pflicht-Tilgung
-                                        </Typography>
-                                        <Typography variant="caption" color="text.secondary">{durationMinutes} / {minDuration} min</Typography>
-                                    </Box>
-                                    <LinearProgress 
-                                        variant="determinate" 
-                                        value={Math.min(100, (durationMinutes / minDuration) * 100)} 
-                                        color="error"
-                                        sx={{ height: 6, borderRadius: 3, bgcolor: 'rgba(255,0,0,0.1)' }}
-                                    />
-                                </Box>
-                            )}
-
-                            {/* ACTIONS */}
-                            <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
-                                {session.type === 'preparation' ? (
-                                    <Button 
-                                        variant="outlined" 
-                                        size="small"
-                                        fullWidth
-                                        disabled
-                                        sx={{ borderColor: 'rgba(255,255,255,0.1)', color: 'text.disabled' }}
-                                    >
-                                        VERIFIKATION AUSSTEHEND
-                                    </Button>
-                                ) : isPunishment ? (
-                                    <Button 
-                                        variant="contained"
-                                        size="small"
-                                        fullWidth
-                                        startIcon={<VisibilityIcon />}
-                                        onClick={() => handleCheckPunishment(session, durationMinutes, minDuration)}
-                                        sx={{
-                                            bgcolor: PALETTE.accents.red,
-                                            color: '#fff',
-                                            '&:hover': { bgcolor: '#b71c1c' }
-                                        }}
-                                    >
-                                        VOLLZUG PRÜFEN
-                                    </Button>
-                                ) : (isTZD || session.isDebtSession) ? (
-                                    <Box sx={{ display: 'flex', width: '100%', gap: 1 }}>
-                                        {isLocked && session.isDebtSession && (
-                                            <Button
-                                                variant="outlined"
-                                                size="small"
-                                                color="error"
-                                                onClick={() => {
-                                                    if(window.confirm("SYSTEMWARNUNG: Ein Not-Abbruch vernichtet die bisherige Tragezeit und erhöht deine Schulden sofort um 50% (Overdraft Penalty). Fortfahren?")) {
-                                                        onStopSession(session, { emergencyBailout: true });
-                                                    }
-                                                }}
-                                                sx={{ flex: 1, borderColor: PALETTE.accents.red, color: PALETTE.accents.red, fontWeight: 'bold' }}
-                                            >
-                                                NOT-ABBRUCH
-                                            </Button>
-                                        )}
-                                        <Button 
-                                            variant={isLocked ? "outlined" : "contained"} 
-                                            size="small"
-                                            disabled={isLocked}
-                                            onClick={() => onStopSession(session)}
-                                            startIcon={isLocked ? <LockIcon /> : <StopIcon />}
-                                            sx={isLocked ? { 
-                                                flex: session.isDebtSession ? 1 : 'none',
-                                                width: session.isDebtSession ? 'auto' : '100%',
-                                                borderColor: 'rgba(255,255,255,0.1)',
-                                                color: 'text.disabled'
-                                            } : {
-                                                fullWidth: true,
-                                                bgcolor: PALETTE.primary.main,
-                                                color: '#000',
-                                                '&:hover': { bgcolor: PALETTE.primary.dark }
-                                            }}
-                                        >
-                                            {isLocked ? `GESPERRT (${remainingTime}m)` : "BEENDEN"}
-                                        </Button>
-                                    </Box>
-                                ) : (
-                                    <Button 
-                                        variant="contained" 
-                                        color="primary" 
-                                        size="small"
-                                        fullWidth
-                                        onClick={() => onStopSession(session)}
-                                        startIcon={<StopIcon />}
-                                    >
-                                        Beenden
-                                    </Button>
-                                )}
-                            </Box>
-                        </CardContent>
-                    </Card>
-                </motion.div>
-            );
-        })}
-      </AnimatePresence>
-
-      {/* GATEKEEPER DIALOG */}
-      <Dialog
-          open={!!gatekeeperSession}
-          onClose={() => {}} 
-          PaperProps={{
-              sx: { ...DESIGN_TOKENS.glassCard, border: `1px solid ${PALETTE.accents.red}` }
-          }}
-      >
-          <DialogTitle sx={{ color: PALETTE.accents.red, fontWeight: 'bold' }}>
-              FINALES GESTÄNDNIS
-          </DialogTitle>
-          <DialogContent>
-              <DialogContentText sx={{ color: 'text.secondary', mb: 2 }}>
-                  Die Strafzeit ist abgelaufen. Das System erfordert nun deine absolute Demut. Tippe den exakten Satz fehlerfrei und case-sensitive ab, um die Strafe zu beenden:
-              </DialogContentText>
-              <Typography variant="body1" sx={{ color: '#fff', fontWeight: 'bold', mb: 3, fontStyle: 'italic', textAlign: 'center' }}>
-                  "Ich bin eine gehorsame Sissy und danke für die Zurechtweisung"
-              </Typography>
-              <TextField
-                  autoFocus
-                  fullWidth
-                  variant="outlined"
-                  value={confessionText}
-                  onChange={(e) => setConfessionText(e.target.value)}
-                  autoComplete="off"
-                  sx={{
-                      '& .MuiOutlinedInput-root': {
-                          color: '#fff',
-                          '& fieldset': { borderColor: 'rgba(255,255,255,0.2)' },
-                          '&:hover fieldset': { borderColor: PALETTE.accents.red },
-                          '&.Mui-focused fieldset': { borderColor: PALETTE.accents.red },
-                      }
-                  }}
-              />
-          </DialogContent>
-          <DialogActions sx={{ p: 2, pt: 0 }}>
-              <Button onClick={() => setGatekeeperSession(null)} sx={{ color: 'text.secondary' }}>Abbrechen</Button>
-              <Button onClick={handleGatekeeperSubmit} variant="contained" sx={{ bgcolor: PALETTE.accents.red, color: '#fff', '&:hover': { bgcolor: '#b71c1c'} }}>
-                  Bestätigen
-              </Button>
-          </DialogActions>
-      </Dialog>
-    </Box>
-  );
-}
-```
-
 ## File: src/services/TimeBankService.js
 ```javascript
 // src/services/TimeBankService.js
@@ -15436,6 +14125,485 @@ export const applyThermalBonus = async (userId, bonusDetails) => {
         return false;
     }
 };
+```
+
+## File: src/components/dashboard/ActiveSessionsList.jsx
+```javascript
+import React, { useState, useEffect } from 'react';
+import { 
+    Card, CardContent, Typography, Box, Button, Chip, LinearProgress, Avatar,
+    Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, TextField,
+    List, ListItem, ListItemAvatar, ListItemText, Switch
+} from '@mui/material';
+import StopIcon from '@mui/icons-material/Stop';
+import LockIcon from '@mui/icons-material/Lock';
+import VisibilityIcon from '@mui/icons-material/Visibility';
+import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
+import { motion, AnimatePresence } from 'framer-motion';
+
+import { useAuth } from '../../contexts/AuthContext';
+import useUIStore from '../../store/uiStore';
+import { addPenaltyToActivePunishment } from '../../services/PunishmentService';
+
+export default function ActiveSessionsList({ activeSessions, items, onStopSession, onNavigateItem, onOpenRelease }) {
+  const { currentUser } = useAuth();
+  const showToast = useUIStore(s => s.showToast);
+
+  const [gatekeeperSession, setGatekeeperSession] = useState(null);
+  const [confessionText, setConfessionText] = useState("");
+
+  // --- SEAMLESS TRANSITION STATE ---
+  const [transitionDialog, setTransitionDialog] = useState(null);
+  const [keptItems, setKeptItems] = useState([]);
+
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setTick(t => t + 1), 60000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // --- DIE UNGEDULDS-STEUER ---
+  const handleCheckPunishment = async (session, durationMinutes, minDuration) => {
+      if (durationMinutes >= minDuration) {
+          setGatekeeperSession(session);
+          setConfessionText('');
+      } else {
+          try {
+              if (currentUser) {
+                  await addPenaltyToActivePunishment(currentUser.uid, session.id, 10);
+              }
+              showToast("Zu früh, dein Arsch wird weiter durchgefickt.", "error");
+          } catch (e) {
+              console.error(e);
+          }
+      }
+  };
+
+  // --- DAS FINALE GESTÄNDNIS ---
+  const handleGatekeeperSubmit = async () => {
+      const requiredText = "Ich bin eine gehorsame Sissy und danke für die Zurechtweisung";
+      if (confessionText === requiredText) {
+          onStopSession(gatekeeperSession);
+          setGatekeeperSession(null);
+      } else {
+          try {
+              if (currentUser) {
+                  await addPenaltyToActivePunishment(currentUser.uid, gatekeeperSession.id, 15);
+              }
+              showToast("Tippfehler erkannt! +15 Minuten Strafaufschlag.", "error");
+              setGatekeeperSession(null);
+          } catch (e) {
+              console.error(e);
+          }
+      }
+  };
+
+  // --- SEAMLESS TRANSITION HANDLER ---
+  const handleToggleKeep = (id) => {
+      setKeptItems(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+  };
+
+  if (!activeSessions || activeSessions.length === 0) return null;
+
+  const formatDuration = (totalMinutes) => {
+      const h = Math.floor(totalMinutes / 60);
+      const m = totalMinutes % 60;
+      if (h > 0) return `${h} h ${m} min`;
+      return `${m} min`;
+  };
+
+  return (
+    <Box sx={{ mb: 4 }}>
+      <AnimatePresence>
+        {activeSessions.map((session) => {
+            let sessionItems = [];
+            if (Array.isArray(session.itemIds) && session.itemIds.length > 0) {
+                sessionItems = session.itemIds.map(id => items.find(i => i.id === id)).filter(Boolean);
+            } else if (session.itemId) {
+                const singleItem = items.find(i => i.id === session.itemId);
+                if (singleItem) sessionItems = [singleItem];
+            }
+
+            // Gesamtdauer der Session (Relevant für ProgressBars und Locks)
+            // Startet erst, wenn die Anweisung GÄNZLICH erfüllt ist (instructionReadyTime)
+            const fallbackStartTime = session.startTime?.toDate ? session.startTime.toDate() : new Date(session.startTime);
+            let sessionComplianceStartTime = fallbackStartTime;
+            
+            if (session.type === 'instruction' && session.instructionReadyTime) {
+                const readyData = session.instructionReadyTime;
+                sessionComplianceStartTime = readyData.toDate ? readyData.toDate() : new Date(readyData);
+            } else if (session.type === 'preparation') {
+                sessionComplianceStartTime = new Date(); // Dauer bleibt faktisch 0, bis es zur instruction wird
+            }
+
+            const durationMinutes = Math.max(0, Math.floor((new Date() - sessionComplianceStartTime) / 60000));
+            
+            const minDuration = session.minDuration || 0;
+            const isPunishment = session.type === 'punishment';
+            const isTZD = session.type === 'tzd' || session.tzdExecuted; 
+            
+            const isDebtLocked = session.isDebtSession && durationMinutes < minDuration;
+            const isLocked = isDebtLocked; 
+            const remainingTime = Math.max(0, minDuration - durationMinutes);
+            
+            let typeLabel = "FREIWILLIG";
+            let borderColor = PALETTE.primary.main;
+            let chipColor = PALETTE.primary.main; 
+            let chipBg = '#000000'; 
+
+            if (session.isDebtSession) {
+                typeLabel = "SCHULDENTILGUNG";
+                borderColor = PALETTE.accents.red;
+                chipColor = PALETTE.accents.red;
+                chipBg = '#FFFFFF'; 
+            } else if (isPunishment) {
+                typeLabel = "STRAFARBEIT";
+                borderColor = PALETTE.accents.red;
+                chipColor = PALETTE.accents.red;
+                chipBg = '#FFFFFF';
+            } else if (isTZD) {
+                typeLabel = "ZEITLOSES DIKTAT";
+                borderColor = PALETTE.accents.red;
+                chipColor = PALETTE.accents.red;
+                chipBg = '#FFFFFF';
+            } else if (session.type === 'instruction') {
+                typeLabel = "INSTRUCTION";
+                borderColor = PALETTE.accents.gold;
+                chipColor = PALETTE.accents.gold;
+                chipBg = '#000000'; 
+            } else if (session.type === 'preparation') {
+                typeLabel = "UMKLEIDE (STAGING)";
+                borderColor = PALETTE.accents.blue;
+                chipColor = PALETTE.accents.blue;
+                chipBg = '#000000';
+            }
+
+            return (
+                <motion.div
+                    key={session.id}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, x: -100 }}
+                    transition={{ duration: 0.3 }}
+                >
+                    <Card sx={{ 
+                        mb: 2, 
+                        ...DESIGN_TOKENS.glassCard,
+                        borderLeft: `4px solid ${borderColor}` 
+                    }}>
+                        <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                            
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                                <Chip 
+                                    label={typeLabel} 
+                                    sx={{ 
+                                        fontWeight: 900, 
+                                        fontSize: '0.75rem', 
+                                        height: '24px',
+                                        color: chipColor,
+                                        bgcolor: chipBg,
+                                        border: `2px solid ${chipColor}`,
+                                        boxShadow: `0 0 10px ${chipColor}40`,
+                                        textShadow: chipBg === '#000000' ? `0 0 5px ${chipColor}` : 'none'
+                                    }}
+                                />
+                                {isLocked && (
+                                    <Chip 
+                                        label="LOCKED" 
+                                        size="small" 
+                                        icon={<LockIcon fontSize="small"/>} 
+                                        color="error" 
+                                        variant="outlined"
+                                        sx={{ height: '24px' }}
+                                    />
+                                )}
+                            </Box>
+
+                            {/* INDIVIDUELLE ITEM LISTE */}
+                            {sessionItems.length > 0 && (
+                                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 2 }}>
+                                    {sessionItems.map((item, idx) => {
+                                        // Individuelle Zeit aus dem Ledger holen
+                                        let itemStartTime = fallbackStartTime;
+                                        if (session.itemLedger && session.itemLedger[item.id] && session.itemLedger[item.id].joinedAt) {
+                                            const joinedData = session.itemLedger[item.id].joinedAt;
+                                            itemStartTime = joinedData.toDate ? joinedData.toDate() : new Date(joinedData);
+                                        }
+                                        const itemDurationMinutes = Math.max(0, Math.floor((new Date() - itemStartTime) / 60000));
+
+                                        return (
+                                            <Box 
+                                                key={item.id || idx} 
+                                                onClick={() => onNavigateItem(item.id)}
+                                                sx={{ 
+                                                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                                    p: 1, borderRadius: 1, 
+                                                    bgcolor: 'rgba(255,255,255,0.05)',
+                                                    cursor: 'pointer',
+                                                    transition: 'background 0.2s',
+                                                    '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' }
+                                                }}
+                                            >
+                                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                                                    <Avatar 
+                                                        src={item.imageUrl || item.image} 
+                                                        variant="rounded" 
+                                                        sx={{ width: 40, height: 40, border: `1px solid ${PALETTE.primary.main}` }}
+                                                    />
+                                                    <Box>
+                                                        <Typography variant="body2" sx={{ fontWeight: 'bold', color: 'text.primary' }}>
+                                                            {item.name}
+                                                        </Typography>
+                                                        <Typography variant="caption" color="text.secondary">
+                                                            {item.brand}
+                                                        </Typography>
+                                                    </Box>
+                                                </Box>
+
+                                                <Chip 
+                                                    label={formatDuration(itemDurationMinutes)} 
+                                                    size="small" 
+                                                    variant="outlined"
+                                                    sx={{ 
+                                                        height: '20px', 
+                                                        fontSize: '0.7rem', 
+                                                        borderColor: 'rgba(255,255,255,0.2)', 
+                                                        color: 'text.secondary' 
+                                                    }}
+                                                />
+                                            </Box>
+                                        );
+                                    })}
+                                </Box>
+                            )}
+
+                            {/* PROGRESS BAR - Versteckt für Punishment */}
+                            {session.isDebtSession && minDuration > 0 && (
+                                <Box sx={{ mt: 1, mb: 2 }}>
+                                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                                        <Typography variant="caption" color="error">
+                                            Pflicht-Tilgung
+                                        </Typography>
+                                        <Typography variant="caption" color="text.secondary">{durationMinutes} / {minDuration} min</Typography>
+                                    </Box>
+                                    <LinearProgress 
+                                        variant="determinate" 
+                                        value={Math.min(100, (durationMinutes / minDuration) * 100)} 
+                                        color="error"
+                                        sx={{ height: 6, borderRadius: 3, bgcolor: 'rgba(255,0,0,0.1)' }}
+                                    />
+                                </Box>
+                            )}
+
+                            {/* ACTIONS */}
+                            <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
+                                {session.type === 'preparation' ? (
+                                    <Button 
+                                        variant="outlined" 
+                                        size="small"
+                                        fullWidth
+                                        disabled
+                                        sx={{ borderColor: 'rgba(255,255,255,0.1)', color: 'text.disabled' }}
+                                    >
+                                        VERIFIKATION AUSSTEHEND
+                                    </Button>
+                                ) : isPunishment ? (
+                                    <Button 
+                                        variant="contained"
+                                        size="small"
+                                        fullWidth
+                                        startIcon={<VisibilityIcon />}
+                                        onClick={() => handleCheckPunishment(session, durationMinutes, minDuration)}
+                                        sx={{
+                                            bgcolor: PALETTE.accents.red,
+                                            color: '#fff',
+                                            '&:hover': { bgcolor: '#b71c1c' }
+                                        }}
+                                    >
+                                        VOLLZUG PRÜFEN
+                                    </Button>
+                                ) : (isTZD || session.isDebtSession) ? (
+                                    <Box sx={{ display: 'flex', width: '100%', gap: 1 }}>
+                                        {isLocked && session.isDebtSession && (
+                                            <Button
+                                                variant="outlined"
+                                                size="small"
+                                                color="error"
+                                                onClick={() => {
+                                                    if(window.confirm("SYSTEMWARNUNG: Ein Not-Abbruch vernichtet die bisherige Tragezeit und erhöht deine Schulden sofort um 50% (Overdraft Penalty). Fortfahren?")) {
+                                                        onStopSession(session, { emergencyBailout: true });
+                                                    }
+                                                }}
+                                                sx={{ flex: 1, borderColor: PALETTE.accents.red, color: PALETTE.accents.red, fontWeight: 'bold' }}
+                                            >
+                                                NOT-ABBRUCH
+                                            </Button>
+                                        )}
+                                        <Button 
+                                            variant={isLocked ? "outlined" : "contained"} 
+                                            size="small"
+                                            disabled={isLocked}
+                                            onClick={() => onStopSession(session)}
+                                            startIcon={isLocked ? <LockIcon /> : <StopIcon />}
+                                            sx={isLocked ? { 
+                                                flex: session.isDebtSession ? 1 : 'none',
+                                                width: session.isDebtSession ? 'auto' : '100%',
+                                                borderColor: 'rgba(255,255,255,0.1)',
+                                                color: 'text.disabled'
+                                            } : {
+                                                fullWidth: true,
+                                                bgcolor: PALETTE.primary.main,
+                                                color: '#000',
+                                                '&:hover': { bgcolor: PALETTE.primary.dark }
+                                            }}
+                                        >
+                                            {isLocked ? `GESPERRT (${remainingTime}m)` : "BEENDEN"}
+                                        </Button>
+                                    </Box>
+                                ) : (
+                                    <Button 
+                                        variant="contained" 
+                                        color="primary" 
+                                        size="small"
+                                        fullWidth
+                                        onClick={() => {
+                                            if (session.type === 'instruction') {
+                                                setTransitionDialog(session);
+                                                setKeptItems([]);
+                                            } else {
+                                                onStopSession(session);
+                                            }
+                                        }}
+                                        startIcon={<StopIcon />}
+                                    >
+                                        Beenden
+                                    </Button>
+                                )}
+                            </Box>
+                        </CardContent>
+                    </Card>
+                </motion.div>
+            );
+        })}
+      </AnimatePresence>
+
+      {/* GATEKEEPER DIALOG */}
+      <Dialog
+          open={!!gatekeeperSession}
+          onClose={() => {}} 
+          PaperProps={{
+              sx: { ...DESIGN_TOKENS.glassCard, border: `1px solid ${PALETTE.accents.red}` }
+          }}
+      >
+          <DialogTitle sx={{ color: PALETTE.accents.red, fontWeight: 'bold' }}>
+              FINALES GESTÄNDNIS
+          </DialogTitle>
+          <DialogContent>
+              <DialogContentText sx={{ color: 'text.secondary', mb: 2 }}>
+                  Die Strafzeit ist abgelaufen. Das System erfordert nun deine absolute Demut. Tippe den exakten Satz fehlerfrei und case-sensitive ab, um die Strafe zu beenden:
+              </DialogContentText>
+              <Typography variant="body1" sx={{ color: '#fff', fontWeight: 'bold', mb: 3, fontStyle: 'italic', textAlign: 'center' }}>
+                  "Ich bin eine gehorsame Sissy und danke für die Zurechtweisung"
+              </Typography>
+              <TextField
+                  autoFocus
+                  fullWidth
+                  variant="outlined"
+                  value={confessionText}
+                  onChange={(e) => setConfessionText(e.target.value)}
+                  autoComplete="off"
+                  sx={{
+                      '& .MuiOutlinedInput-root': {
+                          color: '#fff',
+                          '& fieldset': { borderColor: 'rgba(255,255,255,0.2)' },
+                          '&:hover fieldset': { borderColor: PALETTE.accents.red },
+                          '&.Mui-focused fieldset': { borderColor: PALETTE.accents.red },
+                      }
+                  }}
+              />
+          </DialogContent>
+          <DialogActions sx={{ p: 2, pt: 0 }}>
+              <Button onClick={() => setGatekeeperSession(null)} sx={{ color: 'text.secondary' }}>Abbrechen</Button>
+              <Button onClick={handleGatekeeperSubmit} variant="contained" sx={{ bgcolor: PALETTE.accents.red, color: '#fff', '&:hover': { bgcolor: '#b71c1c'} }}>
+                  Bestätigen
+              </Button>
+          </DialogActions>
+      </Dialog>
+
+      {/* SEAMLESS TRANSITION DIALOG */}
+      {transitionDialog && (
+          <Dialog
+              open={!!transitionDialog}
+              onClose={() => setTransitionDialog(null)}
+              PaperProps={{
+                  sx: { ...DESIGN_TOKENS.glassCard, border: `1px solid ${PALETTE.accents.blue}` }
+              }}
+              maxWidth="xs"
+              fullWidth
+          >
+              <DialogTitle sx={{ color: PALETTE.accents.blue, fontWeight: 'bold' }}>
+                  NAHTLOSER ÜBERGANG
+              </DialogTitle>
+              <DialogContent>
+                  <DialogContentText sx={{ color: 'text.secondary', mb: 2 }}>
+                      Die Pflicht ist erfüllt. Welche Items möchtest du freiwillig anbehalten? Nicht ausgewählte Items werden abgelegt.
+                  </DialogContentText>
+                  <List sx={{ bgcolor: 'rgba(0,0,0,0.2)', borderRadius: 2 }}>
+                      {(() => {
+                          const tIds = transitionDialog.itemIds || (transitionDialog.itemId ? [transitionDialog.itemId] : []);
+                          return tIds.map(id => {
+                              const item = items.find(i => i.id === id);
+                              if (!item) return null;
+                              return (
+                                  <ListItem key={id} divider sx={{ borderColor: 'rgba(255,255,255,0.05)' }}>
+                                      <ListItemAvatar>
+                                          <Avatar 
+                                              src={item.imageUrl || item.image} 
+                                              variant="rounded" 
+                                              sx={{ width: 40, height: 40, border: `1px solid ${PALETTE.accents.blue}` }} 
+                                          />
+                                      </ListItemAvatar>
+                                      <ListItemText 
+                                          primary={item.name} 
+                                          secondary={item.subCategory}
+                                          primaryTypographyProps={{ sx: { color: '#fff', fontWeight: 'bold', fontSize: '0.9rem' } }}
+                                          secondaryTypographyProps={{ sx: { color: 'rgba(255,255,255,0.5)', fontSize: '0.75rem' } }}
+                                      />
+                                      <Switch 
+                                          checked={keptItems.includes(id)}
+                                          onChange={() => handleToggleKeep(id)}
+                                          sx={{ 
+                                              '& .MuiSwitch-switchBase.Mui-checked': { color: PALETTE.accents.blue },
+                                              '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': { backgroundColor: PALETTE.accents.blue }
+                                          }}
+                                      />
+                                  </ListItem>
+                              );
+                          });
+                      })()}
+                  </List>
+              </DialogContent>
+              <DialogActions sx={{ p: 2, pt: 0 }}>
+                  <Button onClick={() => setTransitionDialog(null)} sx={{ color: 'text.secondary' }}>
+                      Abbrechen
+                  </Button>
+                  <Button 
+                      onClick={() => {
+                          onStopSession(transitionDialog, { keptItemIds: keptItems });
+                          setTransitionDialog(null);
+                      }} 
+                      variant="contained" 
+                      sx={{ bgcolor: PALETTE.accents.blue, color: '#000', fontWeight: 'bold', '&:hover': { bgcolor: '#fff'} }}
+                  >
+                      Session Beenden
+                  </Button>
+              </DialogActions>
+          </Dialog>
+      )}
+
+    </Box>
+  );
+}
 ```
 
 ## File: src/hooks/useKPIs.js
@@ -19517,7 +18685,12 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
         };
         
         if (isCurrentlyActive) {
-            updatePayload.status = isTransitItem ? 'washing' : 'active';
+            // SEAMLESS TRANSITION CHECK: Wird das Item aus dem Overlay heraus anbehalten?
+            if (feedback.keptItemIds && feedback.keptItemIds.includes(id)) {
+                updatePayload.status = 'worn';
+            } else {
+                updatePayload.status = isTransitItem ? 'washing' : 'active';
+            }
             updatePayload.lastWorn = serverTimestamp();
         }
         
@@ -19678,6 +18851,36 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
         const punRef = doc(db, `users/${userId}/status/punishment`);
         batch.set(punRef, { activeSessionId: null }, { merge: true });
     }
+
+    // --- SEAMLESS TRANSITION (SILENT START) ---
+    if (feedback.keptItemIds && feedback.keptItemIds.length > 0 && sessionData.type === 'instruction') {
+        const newSessionRef = doc(collection(db, `users/${userId}/sessions`));
+        
+        const newItemsDetails = itemDetails.filter(i => feedback.keptItemIds.includes(i.id));
+        const newItemLedger = {};
+        feedback.keptItemIds.forEach(id => {
+            newItemLedger[id] = { joinedAt: updateData.endTime, leftAt: null };
+        });
+
+        const newSessionPayload = {
+            itemIds: feedback.keptItemIds,
+            itemLedger: newItemLedger,
+            itemsDetails: newItemsDetails,
+            type: 'voluntary',
+            periodId: sessionData.periodId || null,
+            startTime: updateData.endTime,
+            endTime: null,
+            durationMinutes: 0,
+            isActive: true,
+            isPornActive: false,
+            isNSD: false,
+            complianceLagMinutes: 0,
+            note: 'Nahtloser Übergang aus Instruction'
+        };
+        
+        batch.set(newSessionRef, newSessionPayload);
+    }
+    // ------------------------------------------
 
     await batch.commit();
 
