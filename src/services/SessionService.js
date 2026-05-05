@@ -535,8 +535,9 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
             noteSuffix = 'ABBRUCH (Freiwillig)';
         } else {
             if (newNc < 0 || newLc < 0) {
-                const penaltyNc = newNc < 0 ? Math.floor(Math.abs(newNc) * 0.5) : 0;
-                const penaltyLc = newLc < 0 ? Math.floor(Math.abs(newLc) * 0.5) : 0;
+                // KORREKTUR: Math.ceil verhindert, dass kleine Schulden durch Abrunden ungestraft bleiben
+                const penaltyNc = newNc < 0 ? Math.ceil(Math.abs(newNc) * 0.5) : 0;
+                const penaltyLc = newLc < 0 ? Math.ceil(Math.abs(newLc) * 0.5) : 0;
                 newNc -= penaltyNc;
                 newLc -= penaltyLc;
                 bailoutMessage = `Not-Abbruch! 50% Strafaufschlag auf bestehende Sissy-Schulden.`;
@@ -909,26 +910,12 @@ export const acceptExtortion = async (userId) => {
 
         const batch = writeBatch(db);
 
-        // Dynamische Ziel-Ankerung berechnen
-        let totalMinutes = 0;
+        // Dynamische Ziel-Ankerung korrigiert: Ursprüngliches Tagesziel + 60 Minuten Zwang
+        const instrData = instrSnap.data();
+        const currentTarget = instrData.durationMinutes || 240; // Fallback auf 4h, falls nicht gesetzt
         
-        // Vergangene Sessions von heute summieren
-        const qPast = query(
-            collection(db, `users/${userId}/sessions`),
-            where('periodId', '==', extData.periodId),
-            where('isActive', '==', false)
-        );
-        const pastSnap = await getDocs(qPast);
-        pastSnap.forEach(d => { totalMinutes += (d.data().durationMinutes || 0); });
-
-        // Laufende Session berechnen
-        const sData = sessionSnap.data();
-        const startTime = sData.startTime?.toDate ? sData.startTime.toDate() : new Date();
-        const currentSessionMinutes = Math.round((Date.now() - startTime.getTime()) / 60000);
-        totalMinutes += currentSessionMinutes;
-
-        // Neues Ziel: Jetzt + 60 Minuten Zwang
-        const newTarget = totalMinutes + 60;
+        // Neues Ziel: Ursprüngliches Ziel + 60 Minuten Zwang
+        const newTarget = currentTarget + 60;
 
         // Rollback & Zwang etablieren
         batch.update(instrRef, {

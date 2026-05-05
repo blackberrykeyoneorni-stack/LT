@@ -138,6 +138,27 @@ export const checkActiveSuspension = async (userId) => {
             });
 
             if (data.type === 'stealth_travel') {
+                
+                // NEU: Alle offenen Strafen beim Start der Stealth-Phase in den Akkumulations-Modus zwingen
+                try {
+                    const qLedgerPending = query(
+                        collection(db, `users/${userId}/punishmentLedger`), 
+                        where('status', '==', 'pending'), 
+                        where('isStealthAkkumulation', '==', false)
+                    );
+                    const ledgerPendingSnap = await getDocs(qLedgerPending);
+                    if (!ledgerPendingSnap.empty) {
+                        const batch = writeBatch(db);
+                        ledgerPendingSnap.forEach(ticket => {
+                            batch.update(ticket.ref, { isStealthAkkumulation: true });
+                        });
+                        await batch.commit();
+                        console.log("Stealth Mode: Altlasten ins Zins-Ledger überführt.");
+                    }
+                } catch (e) {
+                    console.error("Fehler beim Transfer der Altlasten in den Stealth-Modus:", e);
+                }
+
                 await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), {
                     evasionPenaltyTriggered: false, 
                     tzdDurationMinutes: 0,

@@ -5,6 +5,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { clearInflationNotice } from '../../services/TimeBankService';
 import { updateDoc, doc } from 'firebase/firestore';
 import { db } from '../../firebase';
+import { addItemHistoryEntry } from '../../services/ItemService';
 
 /**
  * useDashboardActions
@@ -27,18 +28,38 @@ export const useDashboardActions = () => {
   const handleWashItem = useCallback(async (itemId) => {
     try {
       await updateItem(itemId, { status: 'active' });
+      
+      // NEU: Historien-Eintrag für den abgeschlossenen Waschgang
+      if (currentUser) {
+          await addItemHistoryEntry(currentUser.uid, itemId, {
+              type: 'WASHED',
+              message: 'Reinigung abgeschlossen. Item wieder einsatzbereit.'
+          });
+      }
+
       showToast("Item ist wieder einsatzbereit.", "success");
     } catch (e) {
       console.error("Fehler beim Waschen des Items:", e);
       showToast("Fehler beim Waschen.", "error");
     }
-  }, [updateItem, showToast]);
+  }, [updateItem, showToast, currentUser]);
 
   // Alle Items im Wäschekorb waschen
   const handleWashAll = useCallback(async () => {
     if (washingItems.length === 0) return;
     try {
-      const promises = washingItems.map(item => updateItem(item.id, { status: 'active' }));
+      const promises = washingItems.map(async (item) => {
+          await updateItem(item.id, { status: 'active' });
+          
+          // NEU: Historien-Eintrag für jedes gewaschene Item
+          if (currentUser) {
+              await addItemHistoryEntry(currentUser.uid, item.id, {
+                  type: 'WASHED',
+                  message: 'Reinigung abgeschlossen. Item wieder einsatzbereit.'
+              });
+          }
+      });
+      
       await Promise.all(promises);
       showToast("Wäschekorb vollständig geleert.", "success");
       setLaundryOpen(false);
@@ -46,7 +67,7 @@ export const useDashboardActions = () => {
       console.error("Fehler beim Leeren des Wäschekorbs:", e);
       showToast("Fehler beim Waschen aller Items.", "error");
     }
-  }, [washingItems, updateItem, showToast, setLaundryOpen]);
+  }, [washingItems, updateItem, showToast, setLaundryOpen, currentUser]);
 
   // Tribut bestätigen und Notification löschen
   const handleAcknowledgeInflation = useCallback(async () => {
