@@ -7195,582 +7195,6 @@ export default function AuditDialog({ open, onClose, items, currentIndex, onConf
 }
 ```
 
-## File: src/hooks/dashboard/useFemIndex.js
-```javascript
-import { useEffect, useState } from 'react';
-import useKPIs from '../useKPIs';
-import { useItems } from '../../contexts/ItemContext';
-import { useAuth } from '../../contexts/AuthContext';
-
-/**
- * useFemIndex Hook
- * Verbindet UI mit der zentralen KPI Logik.
- * Transformiert die Rohdaten in ein Format für die FemIndexBar.
- * SYNC: Alle Werte basieren nun auf dem 60-Tage-Rolling-Window der useKPIs.
- */
-export const useFemIndex = (preloadedKpis = null) => {
-    const { items } = useItems();
-    const { currentUser } = useAuth();
-    
-    // Nutze useKPIs für die Berechnung, falls nicht vorab geladen
-    const internalKpis = useKPIs(items);
-    
-    const sourceData = preloadedKpis || internalKpis;
-    const { femIndex, loading } = sourceData;
-
-    const [formattedData, setFormattedData] = useState({
-        femIndex: 0,
-        details: {
-            score: 0,
-            trend: 'stable',
-            phaseName: 'Männliche Verleugnung',
-            components: []
-        },
-        loading: true
-    });
-
-    useEffect(() => {
-        if (loading || !femIndex) return;
-
-        // Extrahiere Daten aus useKPIs Output
-        const score = femIndex.score || 0;
-        const trend = femIndex.trend || 'stable';
-        const subScores = femIndex.subScores || { physis: 0, psyche: 0, infiltration: 0 };
-
-        // Bestimme die Transformations-Phase basierend auf dem neuen Fem-Index Score
-        let phaseName = 'Männliche Verleugnung';
-        if (score > 25 && score <= 50) phaseName = 'Erwachende Anmut';
-        else if (score > 50 && score <= 85) phaseName = 'Bedingungslose Akzeptanz';
-        else if (score > 85) phaseName = 'Weibliche Vollendung';
-
-        setFormattedData({
-            femIndex: score,
-            details: {
-                score: score,
-                trend: trend,
-                phaseName: phaseName,
-                components: [
-                    { 
-                        label: 'Ästhetische Präsenz', 
-                        value: subScores.physis, 
-                        type: 'neutral',
-                        description: 'Konstanz der Nylon-Umschließung (60-Tage-Schnitt)'
-                    },
-                    { 
-                        label: 'Bedingungslose Hingabe', 
-                        value: subScores.psyche, 
-                        type: 'neutral',
-                        description: 'Gehorsam und freiwilliger Dienst der letzten 60 Tage'
-                    },
-                    { 
-                        label: 'Absolute Assimilation', 
-                        value: subScores.infiltration, 
-                        type: 'neutral',
-                        description: 'Tiefgreifende nächtliche Anpassung im 60-Tage-Fenster'
-                    }
-                ]
-            },
-            loading: false
-        });
-
-    }, [femIndex, loading]);
-
-    return formattedData;
-};
-
-export default useFemIndex;
-```
-
-## File: src/hooks/useConditioningGuard.js
-```javascript
-import { useState, useEffect, useCallback } from 'react';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { db } from '../firebase';
-import { useAuth } from '../contexts/AuthContext';
-import { runTimeBankAuditor } from '../services/TimeBankService';
-
-export function useConditioningGuard() {
-    const { currentUser } = useAuth();
-    const [showOverlay, setShowOverlay] = useState(false);
-    const [loadingGuard, setLoadingGuard] = useState(true);
-    const [currentPhase, setCurrentPhase] = useState('');
-
-    const calculatePhase = () => {
-        const now = new Date();
-        const hours = now.getHours();
-        const minutes = now.getMinutes();
-        const timeVal = hours + minutes / 60;
-        
-        let phaseType = '';
-        let referenceDate = new Date(now);
-
-        // Tag: 07:30 (7.5) bis 22:59 (22.99)
-        if (timeVal >= 7.5 && timeVal < 23) {
-            phaseType = 'day';
-        } else {
-            // Nacht: 23:00 bis 07:29
-            phaseType = 'night';
-            // Wenn es nach Mitternacht, aber VOR 07:30 ist, gehört die Nacht logisch zum Vortag.
-            if (timeVal < 7.5) {
-                referenceDate.setDate(referenceDate.getDate() - 1);
-            }
-        }
-        
-        const yyyy = referenceDate.getFullYear();
-        const mm = String(referenceDate.getMonth() + 1).padStart(2, '0');
-        const dd = String(referenceDate.getDate()).padStart(2, '0');
-        
-        return `${phaseType}_${yyyy}-${mm}-${dd}`;
-    };
-
-    const checkPhase = useCallback(async () => {
-        if (!currentUser) return;
-        try {
-            // NEU: Triggere den TimeBank-Auditor unauffällig im Hintergrund
-            runTimeBankAuditor(currentUser.uid).catch(err => console.error("Auditor Background Error:", err));
-
-            const phase = calculatePhase();
-            setCurrentPhase(phase);
-
-            const docRef = doc(db, `users/${currentUser.uid}/status/conditioning`);
-            const docSnap = await getDoc(docRef);
-
-            if (docSnap.exists()) {
-                const data = docSnap.data();
-                if (data.lastAcknowledgedPhase !== phase) {
-                    setShowOverlay(true);
-                } else {
-                    setShowOverlay(false);
-                }
-            } else {
-                // Dokument existiert noch nicht (erster Aufruf überhaupt) -> Overlay zeigen
-                setShowOverlay(true);
-            }
-        } catch (error) {
-            console.error("Fehler beim Prüfen der Conditioning-Phase:", error);
-        } finally {
-            setLoadingGuard(false);
-        }
-    }, [currentUser]);
-
-    useEffect(() => {
-        checkPhase();
-
-        // Überwache zusätzlich, ob der User die App aus dem Hintergrund zurückholt
-        const handleVisibilityChange = () => {
-            if (document.visibilityState === 'visible') {
-                checkPhase();
-            }
-        };
-
-        document.addEventListener("visibilitychange", handleVisibilityChange);
-        return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
-    }, [checkPhase]);
-
-    const acknowledgePhase = async () => {
-        if (!currentUser || !currentPhase) return;
-        try {
-            const docRef = doc(db, `users/${currentUser.uid}/status/conditioning`);
-            // SetDoc mit merge überschreibt nur das angegebene Feld, ohne andere zu löschen
-            await setDoc(docRef, { lastAcknowledgedPhase: currentPhase }, { merge: true });
-            setShowOverlay(false);
-        } catch (error) {
-            console.error("Fehler beim Bestätigen der Conditioning-Phase:", error);
-        }
-    };
-
-    return { showOverlay, loadingGuard, acknowledgePhase };
-}
-```
-
-## File: src/services/SuspensionService.js
-```javascript
-// src/services/SuspensionService.js
-import { db } from '../firebase';
-import { collection, addDoc, query, where, getDocs, updateDoc, doc, Timestamp, orderBy, deleteDoc, getDoc, writeBatch } from 'firebase/firestore';
-import { DEFAULT_PROTOCOL_RULES } from '../config/defaultRules';
-
-const COLLECTION = 'suspensions';
-
-export const addSuspension = async (userId, data) => {
-    const start = new Date(data.startDate);
-    const todayEnd = new Date();
-    todayEnd.setHours(23, 59, 59, 999);
-
-    if (start <= todayEnd) {
-        throw new Error("Unzulässig: Aussetzungen müssen mindestens für den Folgetag geplant werden.");
-    }
-
-    await addDoc(collection(db, `users/${userId}/${COLLECTION}`), {
-        type: data.type,
-        reason: data.reason,
-        startDate: Timestamp.fromDate(new Date(data.startDate)),
-        endDate: Timestamp.fromDate(new Date(data.endDate)),
-        packedItemIds: data.packedItemIds || [], 
-        packedItemsDay: data.packedItemsDay || [], 
-        packedItemsNight: data.packedItemsNight || [],
-        createdAt: Timestamp.now(),
-        status: 'scheduled'
-    });
-};
-
-export const deleteScheduledSuspension = async (userId, suspensionId) => {
-    await deleteDoc(doc(db, `users/${userId}/${COLLECTION}`, suspensionId));
-};
-
-export const getSuspensions = async (userId) => {
-    const q = query(
-        collection(db, `users/${userId}/${COLLECTION}`),
-        where('status', 'in', ['scheduled', 'active']),
-        orderBy('startDate', 'asc')
-    );
-    const snap = await getDocs(q);
-    
-    return snap.docs.map(d => ({ 
-        id: d.id, 
-        ...d.data(),
-        startDate: d.data().startDate.toDate(),
-        endDate: d.data().endDate.toDate()
-    }));
-};
-
-export const getAllSuspensions = async (userId) => {
-    try {
-        const q = query(
-            collection(db, `users/${userId}/${COLLECTION}`),
-            orderBy('startDate', 'desc')
-        );
-        const snap = await getDocs(q);
-        
-        return snap.docs.map(d => ({ 
-            id: d.id, 
-            ...d.data(),
-            startDate: d.data().startDate?.toDate ? d.data().startDate.toDate() : new Date(d.data().startDate),
-            endDate: d.data().endDate?.toDate ? d.data().endDate.toDate() : new Date(d.data().endDate)
-        }));
-    } catch (e) {
-        return [];
-    }
-};
-
-export const checkActiveSuspension = async (userId) => {
-    const now = new Date();
-    
-    const timeRules = DEFAULT_PROTOCOL_RULES?.time || { 
-        dayStartHour: 7, 
-        dayStartMinute: 30, 
-        nightStartHour: 23, 
-        nightStartMinute: 0 
-    };
-
-    const qActive = query(
-        collection(db, `users/${userId}/${COLLECTION}`),
-        where('status', '==', 'active')
-    );
-    const snapActive = await getDocs(qActive);
-    
-    if (!snapActive.empty) {
-        const docSnap = snapActive.docs[0];
-        const data = docSnap.data();
-        const end = data.endDate.toDate();
-
-        const endOfSuspension = new Date(end);
-        endOfSuspension.setHours(timeRules.nightStartHour, timeRules.nightStartMinute, 0, 0);
-
-        if (endOfSuspension < now) {
-            await updateDoc(doc(db, `users/${userId}/${COLLECTION}`, docSnap.id), { status: 'completed' });
-            
-            if (data.type === 'stealth_travel') {
-                const qLedger = query(collection(db, `users/${userId}/punishmentLedger`), where('status', '==', 'pending'), where('isStealthAkkumulation', '==', true));
-                const ledgerSnap = await getDocs(qLedger);
-                if (!ledgerSnap.empty) {
-                    const batch = writeBatch(db);
-                    ledgerSnap.forEach(ticket => batch.update(ticket.ref, { isStealthAkkumulation: false }));
-                    await batch.commit();
-                }
-            }
-            
-            await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), { 
-                activeSuspension: false,
-                suspensionReason: null,
-                stealthModeActive: false 
-            });
-            
-            return null;
-        }
-        return { id: docSnap.id, ...data, startDate: data.startDate.toDate(), endDate: end };
-    }
-
-    const qScheduled = query(
-        collection(db, `users/${userId}/${COLLECTION}`),
-        where('status', '==', 'scheduled')
-    );
-    const snapScheduled = await getDocs(qScheduled);
-    
-    for (const d of snapScheduled.docs) {
-        const data = d.data();
-        const start = data.startDate.toDate();
-        const end = data.endDate.toDate();
-        
-        const startOfSuspension = new Date(start);
-        startOfSuspension.setHours(timeRules.dayStartHour, timeRules.dayStartMinute, 0, 0);
-
-        if (startOfSuspension <= now) {
-            await updateDoc(doc(db, `users/${userId}/${COLLECTION}`, d.id), { status: 'active' });
-            
-            await updateDoc(doc(db, `users/${userId}/status/tzd`), {
-                isActive: false,
-                result: 'terminated_by_suspension',
-                endTime: Timestamp.now()
-            });
-
-            if (data.type === 'stealth_travel') {
-                await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), {
-                    evasionPenaltyTriggered: false, 
-                    tzdDurationMinutes: 0,
-                    stealthModeActive: true 
-                });
-            } else {
-                await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), {
-                    evasionPenaltyTriggered: false, 
-                    tzdDurationMinutes: 0,
-                    activeSuspension: true, 
-                    suspensionReason: data.reason
-                });
-            }
-            
-            return { id: d.id, ...data, status: 'active', startDate: start, endDate: end };
-        }
-    }
-
-    return null;
-};
-
-export const terminateSuspension = async (userId, suspensionId) => {
-    const suspRef = doc(db, `users/${userId}/${COLLECTION}`, suspensionId);
-    
-    const suspSnap = await getDoc(suspRef);
-    if (suspSnap.exists() && suspSnap.data().type === 'stealth_travel') {
-        const qLedger = query(collection(db, `users/${userId}/punishmentLedger`), where('status', '==', 'pending'), where('isStealthAkkumulation', '==', true));
-        const ledgerSnap = await getDocs(qLedger);
-        if (!ledgerSnap.empty) {
-            const batch = writeBatch(db);
-            ledgerSnap.forEach(ticket => batch.update(ticket.ref, { isStealthAkkumulation: false }));
-            await batch.commit();
-        }
-    }
-    
-    await updateDoc(suspRef, {
-        status: 'terminated',
-        terminatedAt: Timestamp.now()
-    });
-    
-    await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), { 
-        activeSuspension: false,
-        suspensionReason: null,
-        stealthModeActive: false 
-    });
-};
-```
-
-## File: .gitignore
-```
-# Logs
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-firebase-debug.log*
-firebase-debug.*.log*
-
-# Firebase cache
-.firebase/
-
-# Firebase config
-
-# Uncomment this if you'd like others to create their own Firebase project.
-# For a team working on the same Firebase project(s), it is recommended to leave
-# it commented so all members can deploy to the same project(s) in .firebaserc.
-# .firebaserc
-
-# Runtime data
-pids
-*.pid
-*.seed
-*.pid.lock
-
-# Directory for instrumented libs generated by jscoverage/JSCover
-lib-cov
-
-# Coverage directory used by tools like istanbul
-coverage
-
-# nyc test coverage
-.nyc_output
-
-# Grunt intermediate storage (http://gruntjs.com/creating-plugins#storing-task-files)
-.grunt
-
-# Bower dependency directory (https://bower.io/)
-bower_components
-
-# node-waf configuration
-.lock-wscript
-
-# Compiled binary addons (http://nodejs.org/api/addons.html)
-build/Release
-
-# Dependency directories
-node_modules/
-
-# Optional npm cache directory
-.npm
-
-# Optional eslint cache
-.eslintcache
-
-# Optional REPL history
-.node_repl_history
-
-# Output of 'npm pack'
-*.tgz
-
-# Yarn Integrity file
-.yarn-integrity
-
-# dotenv environment variables file
-.env
-.env.local
-.env.*.local
-
-# dataconnect generated files
-.dataconnect
-
-dist/
-
-bundle-project.js
-```
-
-## File: src/components/dashboard/ProgressBar.jsx
-```javascript
-// src/components/dashboard/ProgressBar.jsx
-import React from 'react';
-import { Box, Typography, LinearProgress, Paper, Stack } from '@mui/material';
-import NightlightRoundIcon from '@mui/icons-material/NightlightRound';
-import { PALETTE } from '../../theme/obsidianDesign';
-
-export default function ProgressBar({ currentMinutes, targetHours, isGoalMetToday, progressData }) {
-    
-    // Zielzeit = Ursprungsziel (aus Protokoll)
-    let targetMinutes = (targetHours * 60);
-    if (targetMinutes < 0) targetMinutes = 0; 
-
-    // Balken darf max 100% sein für die Anzeige
-    const progressPercent = targetMinutes > 0 ? Math.min(100, Math.max(0, (currentMinutes / targetMinutes) * 100)) : 100;
-    
-    // Status der Nacht extrahieren
-    const nightFailed = progressData?.nightCompliance === false;
-    const nightSuccess = progressData?.nightCompliance === true;
-
-    // 1. STRIKTE ERFOLGS-LOGIK
-    // Balken darf nur auf Smaragdgrün springen, wenn das Tagesziel erreicht ist 
-    // UND die vorangegangene Nacht nicht fehlgeschlagen ist.
-    const isStrictlySuccessful = isGoalMetToday && !nightFailed;
-    
-    // Neues "Dark Boudoir" Smaragdgrün für Erfolge
-    const emeraldGreen = '#10B981'; 
-    const activeColor = isStrictlySuccessful ? emeraldGreen : PALETTE.primary.main;
-    
-    // Nacht-Status Icon Farbe
-    let nightColor = 'text.disabled'; // Default: Grau (Offen/Wartend)
-    if (nightSuccess) nightColor = '#FFD700'; // Gold bei Erfolg
-    else if (nightFailed) nightColor = PALETTE.accents.red; // Crimson Rot bei Versagen
-
-    const formatTime = (totalMins) => {
-        const h = Math.floor(totalMins / 60);
-        const m = Math.floor(totalMins % 60);
-        return `${h}h ${m}m`;
-    };
-
-    return (
-        <Paper 
-            elevation={0}
-            sx={{ 
-                p: 2.5, 
-                mb: 3, 
-                borderRadius: '16px',
-                bgcolor: 'rgba(255,255,255,0.05)', 
-                border: `1px solid ${isStrictlySuccessful ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255,255,255,0.05)'}` // Zarter grüner Rahmen bei Erfolg
-            }}
-        >
-            {/* Header Zeile: Titel und Zeit */}
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                    <Typography variant="body2" sx={{ color: isStrictlySuccessful ? activeColor : 'text.secondary', letterSpacing: 1, fontWeight: 'bold' }}>
-                        TAGESZIEL
-                    </Typography>
-                    {/* NEU: Visueller Hinweis auf TimeBank-Tribut (als Aufschlag) */}
-                    {progressData?.discountMinutes > 0 && (
-                        <Typography variant="caption" sx={{ color: PALETTE.primary.main, ml: 1, fontWeight: 'bold' }}>
-                            (+{progressData.discountMinutes}m TimeBank)
-                        </Typography>
-                    )}
-                </Box>
-                
-                <Box sx={{ textAlign: 'right' }}>
-                    <Typography variant="h6" sx={{ fontWeight: 'bold', lineHeight: 1, color: isStrictlySuccessful ? '#fff' : 'text.primary' }}>
-                        {formatTime(currentMinutes)}
-                    </Typography>
-                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                        von {formatTime(targetMinutes)}
-                    </Typography>
-                </Box>
-            </Box>
-
-            {/* Der Balken */}
-            <LinearProgress 
-                variant="determinate" 
-                value={progressPercent} 
-                sx={{ 
-                    height: 12, 
-                    borderRadius: 6,
-                    bgcolor: 'rgba(255,255,255,0.1)',
-                    mb: 1.5,
-                    '& .MuiLinearProgress-bar': {
-                        backgroundColor: activeColor,
-                        borderRadius: 6,
-                        boxShadow: isStrictlySuccessful ? `0 0 10px ${activeColor}` : 'none' // Leichter Glow bei Erfolg
-                    }
-                }}
-            />
-
-            {/* Footer Zeile: Status Text und Mond */}
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Typography variant="caption" sx={{ color: activeColor, fontWeight: 'bold', textTransform: 'uppercase' }}>
-                    {isStrictlySuccessful ? "ZIEL ERREICHT" : (isGoalMetToday && nightFailed ? "ZEIT ERFÜLLT (ERFOLG VERWEIGERT)" : "IN PROGRESS")}
-                </Typography>
-
-                <Stack direction="row" spacing={0.5} alignItems="center">
-                    <NightlightRoundIcon sx={{ 
-                        fontSize: 16, 
-                        color: nightColor 
-                    }} />
-                    <Typography variant="caption" sx={{ 
-                        color: nightColor,
-                        fontWeight: (nightSuccess || nightFailed) ? 'bold' : 'normal',
-                        textTransform: 'uppercase',
-                        letterSpacing: 0.5
-                    }}>
-                        {nightSuccess ? "NACHT ERFÜLLT" : (nightFailed ? "NACHT GESCHEITERT" : "NACHT OFFEN")}
-                    </Typography>
-                </Stack>
-            </Box>
-        </Paper>
-    );
-}
-```
-
 ## File: src/components/dialogs/PunishmentDialog.jsx
 ```javascript
 import React, { useState, useEffect, useRef } from 'react';
@@ -7989,6 +7413,392 @@ export default function PunishmentDialog({ open, onClose, pendingPunishments, it
                 </Button>
             </DialogActions>
         </Dialog>
+    );
+}
+```
+
+## File: src/hooks/dashboard/useFemIndex.js
+```javascript
+import { useEffect, useState } from 'react';
+import useKPIs from '../useKPIs';
+import { useItems } from '../../contexts/ItemContext';
+import { useAuth } from '../../contexts/AuthContext';
+
+/**
+ * useFemIndex Hook
+ * Verbindet UI mit der zentralen KPI Logik.
+ * Transformiert die Rohdaten in ein Format für die FemIndexBar.
+ * SYNC: Alle Werte basieren nun auf dem 60-Tage-Rolling-Window der useKPIs.
+ */
+export const useFemIndex = (preloadedKpis = null) => {
+    const { items } = useItems();
+    const { currentUser } = useAuth();
+    
+    // Nutze useKPIs für die Berechnung, falls nicht vorab geladen
+    const internalKpis = useKPIs(items);
+    
+    const sourceData = preloadedKpis || internalKpis;
+    const { femIndex, loading } = sourceData;
+
+    const [formattedData, setFormattedData] = useState({
+        femIndex: 0,
+        details: {
+            score: 0,
+            trend: 'stable',
+            phaseName: 'Männliche Verleugnung',
+            components: []
+        },
+        loading: true
+    });
+
+    useEffect(() => {
+        if (loading || !femIndex) return;
+
+        // Extrahiere Daten aus useKPIs Output
+        const score = femIndex.score || 0;
+        const trend = femIndex.trend || 'stable';
+        const subScores = femIndex.subScores || { physis: 0, psyche: 0, infiltration: 0 };
+
+        // Bestimme die Transformations-Phase basierend auf dem neuen Fem-Index Score
+        let phaseName = 'Männliche Verleugnung';
+        if (score > 25 && score <= 50) phaseName = 'Erwachende Anmut';
+        else if (score > 50 && score <= 85) phaseName = 'Bedingungslose Akzeptanz';
+        else if (score > 85) phaseName = 'Weibliche Vollendung';
+
+        setFormattedData({
+            femIndex: score,
+            details: {
+                score: score,
+                trend: trend,
+                phaseName: phaseName,
+                components: [
+                    { 
+                        label: 'Ästhetische Präsenz', 
+                        value: subScores.physis, 
+                        type: 'neutral',
+                        description: 'Konstanz der Nylon-Umschließung (60-Tage-Schnitt)'
+                    },
+                    { 
+                        label: 'Bedingungslose Hingabe', 
+                        value: subScores.psyche, 
+                        type: 'neutral',
+                        description: 'Gehorsam und freiwilliger Dienst der letzten 60 Tage'
+                    },
+                    { 
+                        label: 'Absolute Assimilation', 
+                        value: subScores.infiltration, 
+                        type: 'neutral',
+                        description: 'Tiefgreifende nächtliche Anpassung im 60-Tage-Fenster'
+                    }
+                ]
+            },
+            loading: false
+        });
+
+    }, [femIndex, loading]);
+
+    return formattedData;
+};
+
+export default useFemIndex;
+```
+
+## File: src/hooks/useConditioningGuard.js
+```javascript
+import { useState, useEffect, useCallback } from 'react';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { db } from '../firebase';
+import { useAuth } from '../contexts/AuthContext';
+import { runTimeBankAuditor } from '../services/TimeBankService';
+
+export function useConditioningGuard() {
+    const { currentUser } = useAuth();
+    const [showOverlay, setShowOverlay] = useState(false);
+    const [loadingGuard, setLoadingGuard] = useState(true);
+    const [currentPhase, setCurrentPhase] = useState('');
+
+    const calculatePhase = () => {
+        const now = new Date();
+        const hours = now.getHours();
+        const minutes = now.getMinutes();
+        const timeVal = hours + minutes / 60;
+        
+        let phaseType = '';
+        let referenceDate = new Date(now);
+
+        // Tag: 07:30 (7.5) bis 22:59 (22.99)
+        if (timeVal >= 7.5 && timeVal < 23) {
+            phaseType = 'day';
+        } else {
+            // Nacht: 23:00 bis 07:29
+            phaseType = 'night';
+            // Wenn es nach Mitternacht, aber VOR 07:30 ist, gehört die Nacht logisch zum Vortag.
+            if (timeVal < 7.5) {
+                referenceDate.setDate(referenceDate.getDate() - 1);
+            }
+        }
+        
+        const yyyy = referenceDate.getFullYear();
+        const mm = String(referenceDate.getMonth() + 1).padStart(2, '0');
+        const dd = String(referenceDate.getDate()).padStart(2, '0');
+        
+        return `${phaseType}_${yyyy}-${mm}-${dd}`;
+    };
+
+    const checkPhase = useCallback(async () => {
+        if (!currentUser) return;
+        try {
+            // NEU: Triggere den TimeBank-Auditor unauffällig im Hintergrund
+            runTimeBankAuditor(currentUser.uid).catch(err => console.error("Auditor Background Error:", err));
+
+            const phase = calculatePhase();
+            setCurrentPhase(phase);
+
+            const docRef = doc(db, `users/${currentUser.uid}/status/conditioning`);
+            const docSnap = await getDoc(docRef);
+
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                if (data.lastAcknowledgedPhase !== phase) {
+                    setShowOverlay(true);
+                } else {
+                    setShowOverlay(false);
+                }
+            } else {
+                // Dokument existiert noch nicht (erster Aufruf überhaupt) -> Overlay zeigen
+                setShowOverlay(true);
+            }
+        } catch (error) {
+            console.error("Fehler beim Prüfen der Conditioning-Phase:", error);
+        } finally {
+            setLoadingGuard(false);
+        }
+    }, [currentUser]);
+
+    useEffect(() => {
+        checkPhase();
+
+        // Überwache zusätzlich, ob der User die App aus dem Hintergrund zurückholt
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                checkPhase();
+            }
+        };
+
+        document.addEventListener("visibilitychange", handleVisibilityChange);
+        return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+    }, [checkPhase]);
+
+    const acknowledgePhase = async () => {
+        if (!currentUser || !currentPhase) return;
+        try {
+            const docRef = doc(db, `users/${currentUser.uid}/status/conditioning`);
+            // SetDoc mit merge überschreibt nur das angegebene Feld, ohne andere zu löschen
+            await setDoc(docRef, { lastAcknowledgedPhase: currentPhase }, { merge: true });
+            setShowOverlay(false);
+        } catch (error) {
+            console.error("Fehler beim Bestätigen der Conditioning-Phase:", error);
+        }
+    };
+
+    return { showOverlay, loadingGuard, acknowledgePhase };
+}
+```
+
+## File: .gitignore
+```
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+firebase-debug.log*
+firebase-debug.*.log*
+
+# Firebase cache
+.firebase/
+
+# Firebase config
+
+# Uncomment this if you'd like others to create their own Firebase project.
+# For a team working on the same Firebase project(s), it is recommended to leave
+# it commented so all members can deploy to the same project(s) in .firebaserc.
+# .firebaserc
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Directory for instrumented libs generated by jscoverage/JSCover
+lib-cov
+
+# Coverage directory used by tools like istanbul
+coverage
+
+# nyc test coverage
+.nyc_output
+
+# Grunt intermediate storage (http://gruntjs.com/creating-plugins#storing-task-files)
+.grunt
+
+# Bower dependency directory (https://bower.io/)
+bower_components
+
+# node-waf configuration
+.lock-wscript
+
+# Compiled binary addons (http://nodejs.org/api/addons.html)
+build/Release
+
+# Dependency directories
+node_modules/
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Optional REPL history
+.node_repl_history
+
+# Output of 'npm pack'
+*.tgz
+
+# Yarn Integrity file
+.yarn-integrity
+
+# dotenv environment variables file
+.env
+.env.local
+.env.*.local
+
+# dataconnect generated files
+.dataconnect
+
+dist/
+
+bundle-project.js
+```
+
+## File: src/components/dashboard/ProgressBar.jsx
+```javascript
+// src/components/dashboard/ProgressBar.jsx
+import React from 'react';
+import { Box, Typography, LinearProgress, Paper, Stack } from '@mui/material';
+import NightlightRoundIcon from '@mui/icons-material/NightlightRound';
+import { PALETTE } from '../../theme/obsidianDesign';
+
+export default function ProgressBar({ currentMinutes, targetHours, isGoalMetToday, progressData }) {
+    
+    // Zielzeit = Ursprungsziel (aus Protokoll)
+    let targetMinutes = (targetHours * 60);
+    if (targetMinutes < 0) targetMinutes = 0; 
+
+    // Balken darf max 100% sein für die Anzeige
+    const progressPercent = targetMinutes > 0 ? Math.min(100, Math.max(0, (currentMinutes / targetMinutes) * 100)) : 100;
+    
+    // Status der Nacht extrahieren
+    const nightFailed = progressData?.nightCompliance === false;
+    const nightSuccess = progressData?.nightCompliance === true;
+
+    // 1. STRIKTE ERFOLGS-LOGIK
+    // Balken darf nur auf Smaragdgrün springen, wenn das Tagesziel erreicht ist 
+    // UND die vorangegangene Nacht nicht fehlgeschlagen ist.
+    const isStrictlySuccessful = isGoalMetToday && !nightFailed;
+    
+    // Neues "Dark Boudoir" Smaragdgrün für Erfolge
+    const emeraldGreen = '#10B981'; 
+    const activeColor = isStrictlySuccessful ? emeraldGreen : PALETTE.primary.main;
+    
+    // Nacht-Status Icon Farbe
+    let nightColor = 'text.disabled'; // Default: Grau (Offen/Wartend)
+    if (nightSuccess) nightColor = '#FFD700'; // Gold bei Erfolg
+    else if (nightFailed) nightColor = PALETTE.accents.red; // Crimson Rot bei Versagen
+
+    const formatTime = (totalMins) => {
+        const h = Math.floor(totalMins / 60);
+        const m = Math.floor(totalMins % 60);
+        return `${h}h ${m}m`;
+    };
+
+    return (
+        <Paper 
+            elevation={0}
+            sx={{ 
+                p: 2.5, 
+                mb: 3, 
+                borderRadius: '16px',
+                bgcolor: 'rgba(255,255,255,0.05)', 
+                border: `1px solid ${isStrictlySuccessful ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255,255,255,0.05)'}` // Zarter grüner Rahmen bei Erfolg
+            }}
+        >
+            {/* Header Zeile: Titel und Zeit */}
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                    <Typography variant="body2" sx={{ color: isStrictlySuccessful ? activeColor : 'text.secondary', letterSpacing: 1, fontWeight: 'bold' }}>
+                        TAGESZIEL
+                    </Typography>
+                    {/* NEU: Visueller Hinweis auf TimeBank-Tribut (als Aufschlag) */}
+                    {progressData?.discountMinutes > 0 && (
+                        <Typography variant="caption" sx={{ color: PALETTE.primary.main, ml: 1, fontWeight: 'bold' }}>
+                            (+{progressData.discountMinutes}m TimeBank)
+                        </Typography>
+                    )}
+                </Box>
+                
+                <Box sx={{ textAlign: 'right' }}>
+                    <Typography variant="h6" sx={{ fontWeight: 'bold', lineHeight: 1, color: isStrictlySuccessful ? '#fff' : 'text.primary' }}>
+                        {formatTime(currentMinutes)}
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                        von {formatTime(targetMinutes)}
+                    </Typography>
+                </Box>
+            </Box>
+
+            {/* Der Balken */}
+            <LinearProgress 
+                variant="determinate" 
+                value={progressPercent} 
+                sx={{ 
+                    height: 12, 
+                    borderRadius: 6,
+                    bgcolor: 'rgba(255,255,255,0.1)',
+                    mb: 1.5,
+                    '& .MuiLinearProgress-bar': {
+                        backgroundColor: activeColor,
+                        borderRadius: 6,
+                        boxShadow: isStrictlySuccessful ? `0 0 10px ${activeColor}` : 'none' // Leichter Glow bei Erfolg
+                    }
+                }}
+            />
+
+            {/* Footer Zeile: Status Text und Mond */}
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Typography variant="caption" sx={{ color: activeColor, fontWeight: 'bold', textTransform: 'uppercase' }}>
+                    {isStrictlySuccessful ? "ZIEL ERREICHT" : (isGoalMetToday && nightFailed ? "ZEIT ERFÜLLT (ERFOLG VERWEIGERT)" : "IN PROGRESS")}
+                </Typography>
+
+                <Stack direction="row" spacing={0.5} alignItems="center">
+                    <NightlightRoundIcon sx={{ 
+                        fontSize: 16, 
+                        color: nightColor 
+                    }} />
+                    <Typography variant="caption" sx={{ 
+                        color: nightColor,
+                        fontWeight: (nightSuccess || nightFailed) ? 'bold' : 'normal',
+                        textTransform: 'uppercase',
+                        letterSpacing: 0.5
+                    }}>
+                        {nightSuccess ? "NACHT ERFÜLLT" : (nightFailed ? "NACHT GESCHEITERT" : "NACHT OFFEN")}
+                    </Typography>
+                </Stack>
+            </Box>
+        </Paper>
     );
 }
 ```
@@ -8508,94 +8318,6 @@ export default function Layout() {
     </Box>
   );
 }
-```
-
-## File: src/hooks/dashboard/useDashboardActions.js
-```javascript
-import { useCallback, useMemo } from 'react';
-import { useItems } from '../../contexts/ItemContext';
-import useUIStore from '../../store/uiStore';
-import { useAuth } from '../../contexts/AuthContext';
-import { clearInflationNotice } from '../../services/TimeBankService';
-import { updateDoc, doc } from 'firebase/firestore';
-import { db } from '../../firebase';
-
-/**
- * useDashboardActions
- * Kapselt die Interaktionslogik für den Wäschekorb und Item-Status-Änderungen,
- * um die Dashboard.jsx übersichtlich zu halten.
- */
-export const useDashboardActions = () => {
-  const { items, updateItem } = useItems();
-  const showToast = useUIStore(s => s.showToast);
-  const setLaundryOpen = useUIStore(s => s.setLaundryOpen);
-  const { currentUser } = useAuth();
-
-  // Filtert die Items für den Wäschekorb
-  const washingItems = useMemo(() => 
-    (items || []).filter(item => item.status === 'washing'),
-    [items]
-  );
-
-  // Einzelnes Item waschen
-  const handleWashItem = useCallback(async (itemId) => {
-    try {
-      await updateItem(itemId, { status: 'active' });
-      showToast("Item ist wieder einsatzbereit.", "success");
-    } catch (e) {
-      console.error("Fehler beim Waschen des Items:", e);
-      showToast("Fehler beim Waschen.", "error");
-    }
-  }, [updateItem, showToast]);
-
-  // Alle Items im Wäschekorb waschen
-  const handleWashAll = useCallback(async () => {
-    if (washingItems.length === 0) return;
-    try {
-      const promises = washingItems.map(item => updateItem(item.id, { status: 'active' }));
-      await Promise.all(promises);
-      showToast("Wäschekorb vollständig geleert.", "success");
-      setLaundryOpen(false);
-    } catch (e) {
-      console.error("Fehler beim Leeren des Wäschekorbs:", e);
-      showToast("Fehler beim Waschen aller Items.", "error");
-    }
-  }, [washingItems, updateItem, showToast, setLaundryOpen]);
-
-  // Tribut bestätigen und Notification löschen
-  const handleAcknowledgeInflation = useCallback(async () => {
-    if (!currentUser) return;
-    try {
-        await clearInflationNotice(currentUser.uid);
-        showToast("Tribut akzeptiert. Salden aktualisiert.", "success");
-    } catch (e) {
-        console.error("Fehler beim Bestätigen des Tributs:", e);
-        showToast("Netzwerkfehler beim Quittieren.", "error");
-    }
-  }, [currentUser, showToast]);
-
-  // Wochenbericht bestätigen
-  const handleAcknowledgeReport = useCallback(async () => {
-    if (!currentUser) return;
-    try {
-        await updateDoc(doc(db, `users/${currentUser.uid}/settings/protocol`), {
-            "weeklyReport.acknowledged": true
-        });
-        showToast("Wochen-Audit bestätigt.", "success");
-    } catch (e) {
-        console.error("Fehler beim Bestätigen des Berichts:", e);
-        showToast("Netzwerkfehler.", "error");
-    }
-  }, [currentUser, showToast]);
-
-  return {
-    washingItems,
-    handleWashItem,
-    handleWashAll,
-    handleAcknowledgeInflation,
-    handleAcknowledgeReport
-  };
-};
 ```
 
 ## File: src/hooks/dashboard/useTZDController.js
@@ -10144,6 +9866,217 @@ export const getLatestReport = async (userId) => {
 };
 ```
 
+## File: src/services/SuspensionService.js
+```javascript
+// src/services/SuspensionService.js
+import { db } from '../firebase';
+import { collection, addDoc, query, where, getDocs, updateDoc, doc, Timestamp, orderBy, deleteDoc, getDoc, writeBatch } from 'firebase/firestore';
+import { DEFAULT_PROTOCOL_RULES } from '../config/defaultRules';
+
+const COLLECTION = 'suspensions';
+
+export const addSuspension = async (userId, data) => {
+    const start = new Date(data.startDate);
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
+
+    if (start <= todayEnd) {
+        throw new Error("Unzulässig: Aussetzungen müssen mindestens für den Folgetag geplant werden.");
+    }
+
+    await addDoc(collection(db, `users/${userId}/${COLLECTION}`), {
+        type: data.type,
+        reason: data.reason,
+        startDate: Timestamp.fromDate(new Date(data.startDate)),
+        endDate: Timestamp.fromDate(new Date(data.endDate)),
+        packedItemIds: data.packedItemIds || [], 
+        packedItemsDay: data.packedItemsDay || [], 
+        packedItemsNight: data.packedItemsNight || [],
+        createdAt: Timestamp.now(),
+        status: 'scheduled'
+    });
+};
+
+export const deleteScheduledSuspension = async (userId, suspensionId) => {
+    await deleteDoc(doc(db, `users/${userId}/${COLLECTION}`, suspensionId));
+};
+
+export const getSuspensions = async (userId) => {
+    const q = query(
+        collection(db, `users/${userId}/${COLLECTION}`),
+        where('status', 'in', ['scheduled', 'active']),
+        orderBy('startDate', 'asc')
+    );
+    const snap = await getDocs(q);
+    
+    return snap.docs.map(d => ({ 
+        id: d.id, 
+        ...d.data(),
+        startDate: d.data().startDate.toDate(),
+        endDate: d.data().endDate.toDate()
+    }));
+};
+
+export const getAllSuspensions = async (userId) => {
+    try {
+        const q = query(
+            collection(db, `users/${userId}/${COLLECTION}`),
+            orderBy('startDate', 'desc')
+        );
+        const snap = await getDocs(q);
+        
+        return snap.docs.map(d => ({ 
+            id: d.id, 
+            ...d.data(),
+            startDate: d.data().startDate?.toDate ? d.data().startDate.toDate() : new Date(d.data().startDate),
+            endDate: d.data().endDate?.toDate ? d.data().endDate.toDate() : new Date(d.data().endDate)
+        }));
+    } catch (e) {
+        return [];
+    }
+};
+
+export const checkActiveSuspension = async (userId) => {
+    const now = new Date();
+    
+    const timeRules = DEFAULT_PROTOCOL_RULES?.time || { 
+        dayStartHour: 7, 
+        dayStartMinute: 30, 
+        nightStartHour: 23, 
+        nightStartMinute: 0 
+    };
+
+    const qActive = query(
+        collection(db, `users/${userId}/${COLLECTION}`),
+        where('status', '==', 'active')
+    );
+    const snapActive = await getDocs(qActive);
+    
+    if (!snapActive.empty) {
+        const docSnap = snapActive.docs[0];
+        const data = docSnap.data();
+        const end = data.endDate.toDate();
+
+        const endOfSuspension = new Date(end);
+        endOfSuspension.setHours(timeRules.nightStartHour, timeRules.nightStartMinute, 0, 0);
+
+        if (endOfSuspension < now) {
+            await updateDoc(doc(db, `users/${userId}/${COLLECTION}`, docSnap.id), { status: 'completed' });
+            
+            if (data.type === 'stealth_travel') {
+                const qLedger = query(collection(db, `users/${userId}/punishmentLedger`), where('status', '==', 'pending'), where('isStealthAkkumulation', '==', true));
+                const ledgerSnap = await getDocs(qLedger);
+                if (!ledgerSnap.empty) {
+                    const batch = writeBatch(db);
+                    ledgerSnap.forEach(ticket => batch.update(ticket.ref, { isStealthAkkumulation: false }));
+                    await batch.commit();
+                }
+            }
+            
+            await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), { 
+                activeSuspension: false,
+                suspensionReason: null,
+                stealthModeActive: false 
+            });
+            
+            return null;
+        }
+        return { id: docSnap.id, ...data, startDate: data.startDate.toDate(), endDate: end };
+    }
+
+    const qScheduled = query(
+        collection(db, `users/${userId}/${COLLECTION}`),
+        where('status', '==', 'scheduled')
+    );
+    const snapScheduled = await getDocs(qScheduled);
+    
+    for (const d of snapScheduled.docs) {
+        const data = d.data();
+        const start = data.startDate.toDate();
+        const end = data.endDate.toDate();
+        
+        const startOfSuspension = new Date(start);
+        startOfSuspension.setHours(timeRules.dayStartHour, timeRules.dayStartMinute, 0, 0);
+
+        if (startOfSuspension <= now) {
+            await updateDoc(doc(db, `users/${userId}/${COLLECTION}`, d.id), { status: 'active' });
+            
+            await updateDoc(doc(db, `users/${userId}/status/tzd`), {
+                isActive: false,
+                result: 'terminated_by_suspension',
+                endTime: Timestamp.now()
+            });
+
+            if (data.type === 'stealth_travel') {
+                
+                // NEU: Alle offenen Strafen beim Start der Stealth-Phase in den Akkumulations-Modus zwingen
+                try {
+                    const qLedgerPending = query(
+                        collection(db, `users/${userId}/punishmentLedger`), 
+                        where('status', '==', 'pending'), 
+                        where('isStealthAkkumulation', '==', false)
+                    );
+                    const ledgerPendingSnap = await getDocs(qLedgerPending);
+                    if (!ledgerPendingSnap.empty) {
+                        const batch = writeBatch(db);
+                        ledgerPendingSnap.forEach(ticket => {
+                            batch.update(ticket.ref, { isStealthAkkumulation: true });
+                        });
+                        await batch.commit();
+                        console.log("Stealth Mode: Altlasten ins Zins-Ledger überführt.");
+                    }
+                } catch (e) {
+                    console.error("Fehler beim Transfer der Altlasten in den Stealth-Modus:", e);
+                }
+
+                await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), {
+                    evasionPenaltyTriggered: false, 
+                    tzdDurationMinutes: 0,
+                    stealthModeActive: true 
+                });
+            } else {
+                await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), {
+                    evasionPenaltyTriggered: false, 
+                    tzdDurationMinutes: 0,
+                    activeSuspension: true, 
+                    suspensionReason: data.reason
+                });
+            }
+            
+            return { id: d.id, ...data, status: 'active', startDate: start, endDate: end };
+        }
+    }
+
+    return null;
+};
+
+export const terminateSuspension = async (userId, suspensionId) => {
+    const suspRef = doc(db, `users/${userId}/${COLLECTION}`, suspensionId);
+    
+    const suspSnap = await getDoc(suspRef);
+    if (suspSnap.exists() && suspSnap.data().type === 'stealth_travel') {
+        const qLedger = query(collection(db, `users/${userId}/punishmentLedger`), where('status', '==', 'pending'), where('isStealthAkkumulation', '==', true));
+        const ledgerSnap = await getDocs(qLedger);
+        if (!ledgerSnap.empty) {
+            const batch = writeBatch(db);
+            ledgerSnap.forEach(ticket => batch.update(ticket.ref, { isStealthAkkumulation: false }));
+            await batch.commit();
+        }
+    }
+    
+    await updateDoc(suspRef, {
+        status: 'terminated',
+        terminatedAt: Timestamp.now()
+    });
+    
+    await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), { 
+        activeSuspension: false,
+        suspensionReason: null,
+        stealthModeActive: false 
+    });
+};
+```
+
 ## File: src/utils/statsCalculator.js
 ```javascript
 import { CHART_THEME } from '../theme/obsidianDesign';
@@ -10901,6 +10834,115 @@ export default function WeeklyReportDialog({ open, onClose, report }) {
     </Dialog>
   );
 }
+```
+
+## File: src/hooks/dashboard/useDashboardActions.js
+```javascript
+import { useCallback, useMemo } from 'react';
+import { useItems } from '../../contexts/ItemContext';
+import useUIStore from '../../store/uiStore';
+import { useAuth } from '../../contexts/AuthContext';
+import { clearInflationNotice } from '../../services/TimeBankService';
+import { updateDoc, doc } from 'firebase/firestore';
+import { db } from '../../firebase';
+import { addItemHistoryEntry } from '../../services/ItemService';
+
+/**
+ * useDashboardActions
+ * Kapselt die Interaktionslogik für den Wäschekorb und Item-Status-Änderungen,
+ * um die Dashboard.jsx übersichtlich zu halten.
+ */
+export const useDashboardActions = () => {
+  const { items, updateItem } = useItems();
+  const showToast = useUIStore(s => s.showToast);
+  const setLaundryOpen = useUIStore(s => s.setLaundryOpen);
+  const { currentUser } = useAuth();
+
+  // Filtert die Items für den Wäschekorb
+  const washingItems = useMemo(() => 
+    (items || []).filter(item => item.status === 'washing'),
+    [items]
+  );
+
+  // Einzelnes Item waschen
+  const handleWashItem = useCallback(async (itemId) => {
+    try {
+      await updateItem(itemId, { status: 'active' });
+      
+      // NEU: Historien-Eintrag für den abgeschlossenen Waschgang
+      if (currentUser) {
+          await addItemHistoryEntry(currentUser.uid, itemId, {
+              type: 'WASHED',
+              message: 'Reinigung abgeschlossen. Item wieder einsatzbereit.'
+          });
+      }
+
+      showToast("Item ist wieder einsatzbereit.", "success");
+    } catch (e) {
+      console.error("Fehler beim Waschen des Items:", e);
+      showToast("Fehler beim Waschen.", "error");
+    }
+  }, [updateItem, showToast, currentUser]);
+
+  // Alle Items im Wäschekorb waschen
+  const handleWashAll = useCallback(async () => {
+    if (washingItems.length === 0) return;
+    try {
+      const promises = washingItems.map(async (item) => {
+          await updateItem(item.id, { status: 'active' });
+          
+          // NEU: Historien-Eintrag für jedes gewaschene Item
+          if (currentUser) {
+              await addItemHistoryEntry(currentUser.uid, item.id, {
+                  type: 'WASHED',
+                  message: 'Reinigung abgeschlossen. Item wieder einsatzbereit.'
+              });
+          }
+      });
+      
+      await Promise.all(promises);
+      showToast("Wäschekorb vollständig geleert.", "success");
+      setLaundryOpen(false);
+    } catch (e) {
+      console.error("Fehler beim Leeren des Wäschekorbs:", e);
+      showToast("Fehler beim Waschen aller Items.", "error");
+    }
+  }, [washingItems, updateItem, showToast, setLaundryOpen, currentUser]);
+
+  // Tribut bestätigen und Notification löschen
+  const handleAcknowledgeInflation = useCallback(async () => {
+    if (!currentUser) return;
+    try {
+        await clearInflationNotice(currentUser.uid);
+        showToast("Tribut akzeptiert. Salden aktualisiert.", "success");
+    } catch (e) {
+        console.error("Fehler beim Bestätigen des Tributs:", e);
+        showToast("Netzwerkfehler beim Quittieren.", "error");
+    }
+  }, [currentUser, showToast]);
+
+  // Wochenbericht bestätigen
+  const handleAcknowledgeReport = useCallback(async () => {
+    if (!currentUser) return;
+    try {
+        await updateDoc(doc(db, `users/${currentUser.uid}/settings/protocol`), {
+            "weeklyReport.acknowledged": true
+        });
+        showToast("Wochen-Audit bestätigt.", "success");
+    } catch (e) {
+        console.error("Fehler beim Bestätigen des Berichts:", e);
+        showToast("Netzwerkfehler.", "error");
+    }
+  }, [currentUser, showToast]);
+
+  return {
+    washingItems,
+    handleWashItem,
+    handleWashAll,
+    handleAcknowledgeInflation,
+    handleAcknowledgeReport
+  };
+};
 ```
 
 ## File: src/hooks/useItemDetailLogic.js
@@ -14127,6 +14169,485 @@ export const applyThermalBonus = async (userId, bonusDetails) => {
 };
 ```
 
+## File: src/components/dashboard/ActiveSessionsList.jsx
+```javascript
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+    Card, CardContent, Typography, Box, Button, Chip, LinearProgress, Avatar,
+    Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, TextField,
+    List, ListItem, ListItemAvatar, ListItemText, Switch
+} from '@mui/material';
+import StopIcon from '@mui/icons-material/Stop';
+import LockIcon from '@mui/icons-material/Lock';
+import VisibilityIcon from '@mui/icons-material/Visibility';
+import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
+import { motion, AnimatePresence } from 'framer-motion';
+
+import { useAuth } from '../../contexts/AuthContext';
+import useUIStore from '../../store/uiStore';
+import { addPenaltyToActivePunishment } from '../../services/PunishmentService';
+
+export default function ActiveSessionsList({ activeSessions, items, onStopSession, onNavigateItem, onOpenRelease }) {
+  const { currentUser } = useAuth();
+  const showToast = useUIStore(s => s.showToast);
+
+  const [gatekeeperSession, setGatekeeperSession] = useState(null);
+  const [confessionText, setConfessionText] = useState("");
+
+  // --- SEAMLESS TRANSITION STATE ---
+  const [transitionDialog, setTransitionDialog] = useState(null);
+  const [keptItems, setKeptItems] = useState([]);
+
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setTick(t => t + 1), 60000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // --- DIE UNGEDULDS-STEUER ---
+  const handleCheckPunishment = async (session, durationMinutes, minDuration) => {
+      if (durationMinutes >= minDuration) {
+          setGatekeeperSession(session);
+          setConfessionText('');
+      } else {
+          try {
+              if (currentUser) {
+                  await addPenaltyToActivePunishment(currentUser.uid, session.id, 10);
+              }
+              showToast("Zu früh, dein Arsch wird weiter durchgefickt.", "error");
+          } catch (e) {
+              console.error(e);
+          }
+      }
+  };
+
+  // --- DAS FINALE GESTÄNDNIS ---
+  const handleGatekeeperSubmit = async () => {
+      const requiredText = "Ich bin eine gehorsame Sissy und danke für die Zurechtweisung";
+      if (confessionText === requiredText) {
+          onStopSession(gatekeeperSession);
+          setGatekeeperSession(null);
+      } else {
+          try {
+              if (currentUser) {
+                  await addPenaltyToActivePunishment(currentUser.uid, gatekeeperSession.id, 15);
+              }
+              showToast("Tippfehler erkannt! +15 Minuten Strafaufschlag.", "error");
+              setGatekeeperSession(null);
+          } catch (e) {
+              console.error(e);
+          }
+      }
+  };
+
+  // --- SEAMLESS TRANSITION HANDLER ---
+  const handleToggleKeep = (id) => {
+      setKeptItems(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+  };
+
+  if (!activeSessions || activeSessions.length === 0) return null;
+
+  const formatDuration = (totalMinutes) => {
+      const h = Math.floor(totalMinutes / 60);
+      const m = totalMinutes % 60;
+      if (h > 0) return `${h} h ${m} min`;
+      return `${m} min`;
+  };
+
+  return (
+    <Box sx={{ mb: 4 }}>
+      <AnimatePresence>
+        {activeSessions.map((session) => {
+            let sessionItems = [];
+            if (Array.isArray(session.itemIds) && session.itemIds.length > 0) {
+                sessionItems = session.itemIds.map(id => items.find(i => i.id === id)).filter(Boolean);
+            } else if (session.itemId) {
+                const singleItem = items.find(i => i.id === session.itemId);
+                if (singleItem) sessionItems = [singleItem];
+            }
+
+            // Gesamtdauer der Session (Relevant für ProgressBars und Locks)
+            // Startet erst, wenn die Anweisung GÄNZLICH erfüllt ist (instructionReadyTime)
+            const fallbackStartTime = session.startTime?.toDate ? session.startTime.toDate() : new Date(session.startTime);
+            let sessionComplianceStartTime = fallbackStartTime;
+            
+            if (session.type === 'instruction' && session.instructionReadyTime) {
+                const readyData = session.instructionReadyTime;
+                sessionComplianceStartTime = readyData.toDate ? readyData.toDate() : new Date(readyData);
+            } else if (session.type === 'preparation') {
+                sessionComplianceStartTime = new Date(); // Dauer bleibt faktisch 0, bis es zur instruction wird
+            }
+
+            const durationMinutes = Math.max(0, Math.floor((new Date() - sessionComplianceStartTime) / 60000));
+            
+            const minDuration = session.minDuration || 0;
+            const isPunishment = session.type === 'punishment';
+            const isTZD = session.type === 'tzd' || session.tzdExecuted; 
+            
+            const isDebtLocked = session.isDebtSession && durationMinutes < minDuration;
+            const isLocked = isDebtLocked; 
+            const remainingTime = Math.max(0, minDuration - durationMinutes);
+            
+            let typeLabel = "FREIWILLIG";
+            let borderColor = PALETTE.primary.main;
+            let chipColor = PALETTE.primary.main; 
+            let chipBg = '#000000'; 
+
+            if (session.isDebtSession) {
+                typeLabel = "SCHULDENTILGUNG";
+                borderColor = PALETTE.accents.red;
+                chipColor = PALETTE.accents.red;
+                chipBg = '#FFFFFF'; 
+            } else if (isPunishment) {
+                typeLabel = "STRAFARBEIT";
+                borderColor = PALETTE.accents.red;
+                chipColor = PALETTE.accents.red;
+                chipBg = '#FFFFFF';
+            } else if (isTZD) {
+                typeLabel = "ZEITLOSES DIKTAT";
+                borderColor = PALETTE.accents.red;
+                chipColor = PALETTE.accents.red;
+                chipBg = '#FFFFFF';
+            } else if (session.type === 'instruction') {
+                typeLabel = "INSTRUCTION";
+                borderColor = PALETTE.accents.gold;
+                chipColor = PALETTE.accents.gold;
+                chipBg = '#000000'; 
+            } else if (session.type === 'preparation') {
+                typeLabel = "UMKLEIDE (STAGING)";
+                borderColor = PALETTE.accents.blue;
+                chipColor = PALETTE.accents.blue;
+                chipBg = '#000000';
+            }
+
+            return (
+                <motion.div
+                    key={session.id}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, x: -100 }}
+                    transition={{ duration: 0.3 }}
+                >
+                    <Card sx={{ 
+                        mb: 2, 
+                        ...DESIGN_TOKENS.glassCard,
+                        borderLeft: `4px solid ${borderColor}` 
+                    }}>
+                        <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                            
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                                <Chip 
+                                    label={typeLabel} 
+                                    sx={{ 
+                                        fontWeight: 900, 
+                                        fontSize: '0.75rem', 
+                                        height: '24px',
+                                        color: chipColor,
+                                        bgcolor: chipBg,
+                                        border: `2px solid ${chipColor}`,
+                                        boxShadow: `0 0 10px ${chipColor}40`,
+                                        textShadow: chipBg === '#000000' ? `0 0 5px ${chipColor}` : 'none'
+                                    }}
+                                />
+                                {isLocked && (
+                                    <Chip 
+                                        label="LOCKED" 
+                                        size="small" 
+                                        icon={<LockIcon fontSize="small"/>} 
+                                        color="error" 
+                                        variant="outlined"
+                                        sx={{ height: '24px' }}
+                                    />
+                                )}
+                            </Box>
+
+                            {/* INDIVIDUELLE ITEM LISTE */}
+                            {sessionItems.length > 0 && (
+                                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 2 }}>
+                                    {sessionItems.map((item, idx) => {
+                                        // Individuelle Zeit aus dem Ledger holen
+                                        let itemStartTime = fallbackStartTime;
+                                        if (session.itemLedger && session.itemLedger[item.id] && session.itemLedger[item.id].joinedAt) {
+                                            const joinedData = session.itemLedger[item.id].joinedAt;
+                                            itemStartTime = joinedData.toDate ? joinedData.toDate() : new Date(joinedData);
+                                        }
+                                        const itemDurationMinutes = Math.max(0, Math.floor((new Date() - itemStartTime) / 60000));
+
+                                        return (
+                                            <Box 
+                                                key={item.id || idx} 
+                                                onClick={() => onNavigateItem(item.id)}
+                                                sx={{ 
+                                                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                                    p: 1, borderRadius: 1, 
+                                                    bgcolor: 'rgba(255,255,255,0.05)',
+                                                    cursor: 'pointer',
+                                                    transition: 'background 0.2s',
+                                                    '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' }
+                                                }}
+                                            >
+                                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                                                    <Avatar 
+                                                        src={item.imageUrl || item.image} 
+                                                        variant="rounded" 
+                                                        sx={{ width: 40, height: 40, border: `1px solid ${PALETTE.primary.main}` }}
+                                                    />
+                                                    <Box>
+                                                        <Typography variant="body2" sx={{ fontWeight: 'bold', color: 'text.primary' }}>
+                                                            {item.name}
+                                                        </Typography>
+                                                        <Typography variant="caption" color="text.secondary">
+                                                            {item.brand}
+                                                        </Typography>
+                                                    </Box>
+                                                </Box>
+
+                                                <Chip 
+                                                    label={formatDuration(itemDurationMinutes)} 
+                                                    size="small" 
+                                                    variant="outlined"
+                                                    sx={{ 
+                                                        height: '20px', 
+                                                        fontSize: '0.7rem', 
+                                                        borderColor: 'rgba(255,255,255,0.2)', 
+                                                        color: 'text.secondary' 
+                                                    }}
+                                                />
+                                            </Box>
+                                        );
+                                    })}
+                                </Box>
+                            )}
+
+                            {/* PROGRESS BAR - Versteckt für Punishment */}
+                            {session.isDebtSession && minDuration > 0 && (
+                                <Box sx={{ mt: 1, mb: 2 }}>
+                                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                                        <Typography variant="caption" color="error">
+                                            Pflicht-Tilgung
+                                        </Typography>
+                                        <Typography variant="caption" color="text.secondary">{durationMinutes} / {minDuration} min</Typography>
+                                    </Box>
+                                    <LinearProgress 
+                                        variant="determinate" 
+                                        value={Math.min(100, (durationMinutes / minDuration) * 100)} 
+                                        color="error"
+                                        sx={{ height: 6, borderRadius: 3, bgcolor: 'rgba(255,0,0,0.1)' }}
+                                    />
+                                </Box>
+                            )}
+
+                            {/* ACTIONS */}
+                            <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
+                                {session.type === 'preparation' ? (
+                                    <Button 
+                                        variant="outlined" 
+                                        size="small"
+                                        fullWidth
+                                        disabled
+                                        sx={{ borderColor: 'rgba(255,255,255,0.1)', color: 'text.disabled' }}
+                                    >
+                                        VERIFIKATION AUSSTEHEND
+                                    </Button>
+                                ) : isPunishment ? (
+                                    <Button 
+                                        variant="contained"
+                                        size="small"
+                                        fullWidth
+                                        startIcon={<VisibilityIcon />}
+                                        onClick={() => handleCheckPunishment(session, durationMinutes, minDuration)}
+                                        sx={{
+                                            bgcolor: PALETTE.accents.red,
+                                            color: '#fff',
+                                            '&:hover': { bgcolor: '#b71c1c' }
+                                        }}
+                                    >
+                                        VOLLZUG PRÜFEN
+                                    </Button>
+                                ) : (isTZD || session.isDebtSession) ? (
+                                    <Box sx={{ display: 'flex', width: '100%', gap: 1 }}>
+                                        {isLocked && session.isDebtSession && (
+                                            <Button
+                                                variant="outlined"
+                                                size="small"
+                                                color="error"
+                                                onClick={() => {
+                                                    if(window.confirm("SYSTEMWARNUNG: Ein Not-Abbruch vernichtet die bisherige Tragezeit und erhöht deine Schulden sofort um 50% (Overdraft Penalty). Fortfahren?")) {
+                                                        onStopSession(session, { emergencyBailout: true });
+                                                    }
+                                                }}
+                                                sx={{ flex: 1, borderColor: PALETTE.accents.red, color: PALETTE.accents.red, fontWeight: 'bold' }}
+                                            >
+                                                NOT-ABBRUCH
+                                            </Button>
+                                        )}
+                                        <Button 
+                                            variant={isLocked ? "outlined" : "contained"} 
+                                            size="small"
+                                            disabled={isLocked}
+                                            onClick={() => onStopSession(session)}
+                                            startIcon={isLocked ? <LockIcon /> : <StopIcon />}
+                                            sx={isLocked ? { 
+                                                flex: session.isDebtSession ? 1 : 'none',
+                                                width: session.isDebtSession ? 'auto' : '100%',
+                                                borderColor: 'rgba(255,255,255,0.1)',
+                                                color: 'text.disabled'
+                                            } : {
+                                                fullWidth: true,
+                                                bgcolor: PALETTE.primary.main,
+                                                color: '#000',
+                                                '&:hover': { bgcolor: PALETTE.primary.dark }
+                                            }}
+                                        >
+                                            {isLocked ? `GESPERRT (${remainingTime}m)` : "BEENDEN"}
+                                        </Button>
+                                    </Box>
+                                ) : (
+                                    <Button 
+                                        variant="contained" 
+                                        color="primary" 
+                                        size="small"
+                                        fullWidth
+                                        onClick={() => {
+                                            if (session.type === 'instruction') {
+                                                setTransitionDialog(session);
+                                                setKeptItems([]);
+                                            } else {
+                                                onStopSession(session);
+                                            }
+                                        }}
+                                        startIcon={<StopIcon />}
+                                    >
+                                        Beenden
+                                    </Button>
+                                )}
+                            </Box>
+                        </CardContent>
+                    </Card>
+                </motion.div>
+            );
+        })}
+      </AnimatePresence>
+
+      {/* GATEKEEPER DIALOG */}
+      <Dialog
+          open={!!gatekeeperSession}
+          onClose={() => {}} 
+          PaperProps={{
+              sx: { ...DESIGN_TOKENS.glassCard, border: `1px solid ${PALETTE.accents.red}` }
+          }}
+      >
+          <DialogTitle sx={{ color: PALETTE.accents.red, fontWeight: 'bold' }}>
+              FINALES GESTÄNDNIS
+          </DialogTitle>
+          <DialogContent>
+              <DialogContentText sx={{ color: 'text.secondary', mb: 2 }}>
+                  Die Strafzeit ist abgelaufen. Das System erfordert nun deine absolute Demut. Tippe den exakten Satz fehlerfrei und case-sensitive ab, um die Strafe zu beenden:
+              </DialogContentText>
+              <Typography variant="body1" sx={{ color: '#fff', fontWeight: 'bold', mb: 3, fontStyle: 'italic', textAlign: 'center' }}>
+                  "Ich bin eine gehorsame Sissy und danke für die Zurechtweisung"
+              </Typography>
+              <TextField
+                  autoFocus
+                  fullWidth
+                  variant="outlined"
+                  value={confessionText}
+                  onChange={(e) => setConfessionText(e.target.value)}
+                  autoComplete="off"
+                  sx={{
+                      '& .MuiOutlinedInput-root': {
+                          color: '#fff',
+                          '& fieldset': { borderColor: 'rgba(255,255,255,0.2)' },
+                          '&:hover fieldset': { borderColor: PALETTE.accents.red },
+                          '&.Mui-focused fieldset': { borderColor: PALETTE.accents.red },
+                      }
+                  }}
+              />
+          </DialogContent>
+          <DialogActions sx={{ p: 2, pt: 0 }}>
+              <Button onClick={() => setGatekeeperSession(null)} sx={{ color: 'text.secondary' }}>Abbrechen</Button>
+              <Button onClick={handleGatekeeperSubmit} variant="contained" sx={{ bgcolor: PALETTE.accents.red, color: '#fff', '&:hover': { bgcolor: '#b71c1c'} }}>
+                  Bestätigen
+              </Button>
+          </DialogActions>
+      </Dialog>
+
+      {/* SEAMLESS TRANSITION DIALOG */}
+      {transitionDialog && (
+          <Dialog
+              open={!!transitionDialog}
+              onClose={() => setTransitionDialog(null)}
+              PaperProps={{
+                  sx: { ...DESIGN_TOKENS.glassCard, border: `1px solid ${PALETTE.accents.blue}` }
+              }}
+              maxWidth="xs"
+              fullWidth
+          >
+              <DialogTitle sx={{ color: PALETTE.accents.blue, fontWeight: 'bold' }}>
+                  NAHTLOSER ÜBERGANG
+              </DialogTitle>
+              <DialogContent>
+                  <DialogContentText sx={{ color: 'text.secondary', mb: 2 }}>
+                      Die Pflicht ist erfüllt. Welche Items möchtest du freiwillig anbehalten? Nicht ausgewählte Items werden abgelegt.
+                  </DialogContentText>
+                  <List sx={{ bgcolor: 'rgba(0,0,0,0.2)', borderRadius: 2 }}>
+                      {(() => {
+                          const tIds = transitionDialog.itemIds || (transitionDialog.itemId ? [transitionDialog.itemId] : []);
+                          return tIds.map(id => {
+                              const item = items.find(i => i.id === id);
+                              if (!item) return null;
+                              return (
+                                  <ListItem key={id} divider sx={{ borderColor: 'rgba(255,255,255,0.05)' }}>
+                                      <ListItemAvatar>
+                                          <Avatar 
+                                              src={item.imageUrl || item.image} 
+                                              variant="rounded" 
+                                              sx={{ width: 40, height: 40, border: `1px solid ${PALETTE.accents.blue}` }} 
+                                          />
+                                      </ListItemAvatar>
+                                      <ListItemText 
+                                          primary={item.name} 
+                                          secondary={item.subCategory}
+                                          primaryTypographyProps={{ sx: { color: '#fff', fontWeight: 'bold', fontSize: '0.9rem' } }}
+                                          secondaryTypographyProps={{ sx: { color: 'rgba(255,255,255,0.5)', fontSize: '0.75rem' } }}
+                                      />
+                                      <Switch 
+                                          checked={keptItems.includes(id)}
+                                          onChange={() => handleToggleKeep(id)}
+                                          sx={{ 
+                                              '& .MuiSwitch-switchBase.Mui-checked': { color: PALETTE.accents.blue },
+                                              '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': { backgroundColor: PALETTE.accents.blue }
+                                          }}
+                                      />
+                                  </ListItem>
+                              );
+                          });
+                      })()}
+                  </List>
+              </DialogContent>
+              <DialogActions sx={{ p: 2, pt: 0 }}>
+                  <Button onClick={() => setTransitionDialog(null)} sx={{ color: 'text.secondary' }}>
+                      Abbrechen
+                  </Button>
+                  <Button 
+                      onClick={() => {
+                          onStopSession(transitionDialog, { keptItemIds: keptItems });
+                          setTransitionDialog(null);
+                      }} 
+                      variant="contained" 
+                      sx={{ bgcolor: PALETTE.accents.blue, color: '#000', fontWeight: 'bold', '&:hover': { bgcolor: '#fff'} }}
+                  >
+                      Session Beenden
+                  </Button>
+              </DialogActions>
+          </Dialog>
+      )}
+
+    </Box>
+  );
+}
+```
+
 ## File: src/hooks/useKPIs.js
 ```javascript
 import { useState, useEffect, useMemo } from 'react';
@@ -15492,485 +16013,6 @@ export const grantTZDAmnesty = async (userId) => {
         return false;
     }
 };
-```
-
-## File: src/components/dashboard/ActiveSessionsList.jsx
-```javascript
-import React, { useState, useEffect, useRef } from 'react';
-import { 
-    Card, CardContent, Typography, Box, Button, Chip, LinearProgress, Avatar,
-    Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, TextField,
-    List, ListItem, ListItemAvatar, ListItemText, Switch
-} from '@mui/material';
-import StopIcon from '@mui/icons-material/Stop';
-import LockIcon from '@mui/icons-material/Lock';
-import VisibilityIcon from '@mui/icons-material/Visibility';
-import { DESIGN_TOKENS, PALETTE } from '../../theme/obsidianDesign';
-import { motion, AnimatePresence } from 'framer-motion';
-
-import { useAuth } from '../../contexts/AuthContext';
-import useUIStore from '../../store/uiStore';
-import { addPenaltyToActivePunishment } from '../../services/PunishmentService';
-
-export default function ActiveSessionsList({ activeSessions, items, onStopSession, onNavigateItem, onOpenRelease }) {
-  const { currentUser } = useAuth();
-  const showToast = useUIStore(s => s.showToast);
-
-  const [gatekeeperSession, setGatekeeperSession] = useState(null);
-  const [confessionText, setConfessionText] = useState("");
-
-  // --- SEAMLESS TRANSITION STATE ---
-  const [transitionDialog, setTransitionDialog] = useState(null);
-  const [keptItems, setKeptItems] = useState([]);
-
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const timer = setInterval(() => setTick(t => t + 1), 60000);
-    return () => clearInterval(timer);
-  }, []);
-
-  // --- DIE UNGEDULDS-STEUER ---
-  const handleCheckPunishment = async (session, durationMinutes, minDuration) => {
-      if (durationMinutes >= minDuration) {
-          setGatekeeperSession(session);
-          setConfessionText('');
-      } else {
-          try {
-              if (currentUser) {
-                  await addPenaltyToActivePunishment(currentUser.uid, session.id, 10);
-              }
-              showToast("Zu früh, dein Arsch wird weiter durchgefickt.", "error");
-          } catch (e) {
-              console.error(e);
-          }
-      }
-  };
-
-  // --- DAS FINALE GESTÄNDNIS ---
-  const handleGatekeeperSubmit = async () => {
-      const requiredText = "Ich bin eine gehorsame Sissy und danke für die Zurechtweisung";
-      if (confessionText === requiredText) {
-          onStopSession(gatekeeperSession);
-          setGatekeeperSession(null);
-      } else {
-          try {
-              if (currentUser) {
-                  await addPenaltyToActivePunishment(currentUser.uid, gatekeeperSession.id, 15);
-              }
-              showToast("Tippfehler erkannt! +15 Minuten Strafaufschlag.", "error");
-              setGatekeeperSession(null);
-          } catch (e) {
-              console.error(e);
-          }
-      }
-  };
-
-  // --- SEAMLESS TRANSITION HANDLER ---
-  const handleToggleKeep = (id) => {
-      setKeptItems(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
-  };
-
-  if (!activeSessions || activeSessions.length === 0) return null;
-
-  const formatDuration = (totalMinutes) => {
-      const h = Math.floor(totalMinutes / 60);
-      const m = totalMinutes % 60;
-      if (h > 0) return `${h} h ${m} min`;
-      return `${m} min`;
-  };
-
-  return (
-    <Box sx={{ mb: 4 }}>
-      <AnimatePresence>
-        {activeSessions.map((session) => {
-            let sessionItems = [];
-            if (Array.isArray(session.itemIds) && session.itemIds.length > 0) {
-                sessionItems = session.itemIds.map(id => items.find(i => i.id === id)).filter(Boolean);
-            } else if (session.itemId) {
-                const singleItem = items.find(i => i.id === session.itemId);
-                if (singleItem) sessionItems = [singleItem];
-            }
-
-            // Gesamtdauer der Session (Relevant für ProgressBars und Locks)
-            // Startet erst, wenn die Anweisung GÄNZLICH erfüllt ist (instructionReadyTime)
-            const fallbackStartTime = session.startTime?.toDate ? session.startTime.toDate() : new Date(session.startTime);
-            let sessionComplianceStartTime = fallbackStartTime;
-            
-            if (session.type === 'instruction' && session.instructionReadyTime) {
-                const readyData = session.instructionReadyTime;
-                sessionComplianceStartTime = readyData.toDate ? readyData.toDate() : new Date(readyData);
-            } else if (session.type === 'preparation') {
-                sessionComplianceStartTime = new Date(); // Dauer bleibt faktisch 0, bis es zur instruction wird
-            }
-
-            const durationMinutes = Math.max(0, Math.floor((new Date() - sessionComplianceStartTime) / 60000));
-            
-            const minDuration = session.minDuration || 0;
-            const isPunishment = session.type === 'punishment';
-            const isTZD = session.type === 'tzd' || session.tzdExecuted; 
-            
-            const isDebtLocked = session.isDebtSession && durationMinutes < minDuration;
-            const isLocked = isDebtLocked; 
-            const remainingTime = Math.max(0, minDuration - durationMinutes);
-            
-            let typeLabel = "FREIWILLIG";
-            let borderColor = PALETTE.primary.main;
-            let chipColor = PALETTE.primary.main; 
-            let chipBg = '#000000'; 
-
-            if (session.isDebtSession) {
-                typeLabel = "SCHULDENTILGUNG";
-                borderColor = PALETTE.accents.red;
-                chipColor = PALETTE.accents.red;
-                chipBg = '#FFFFFF'; 
-            } else if (isPunishment) {
-                typeLabel = "STRAFARBEIT";
-                borderColor = PALETTE.accents.red;
-                chipColor = PALETTE.accents.red;
-                chipBg = '#FFFFFF';
-            } else if (isTZD) {
-                typeLabel = "ZEITLOSES DIKTAT";
-                borderColor = PALETTE.accents.red;
-                chipColor = PALETTE.accents.red;
-                chipBg = '#FFFFFF';
-            } else if (session.type === 'instruction') {
-                typeLabel = "INSTRUCTION";
-                borderColor = PALETTE.accents.gold;
-                chipColor = PALETTE.accents.gold;
-                chipBg = '#000000'; 
-            } else if (session.type === 'preparation') {
-                typeLabel = "UMKLEIDE (STAGING)";
-                borderColor = PALETTE.accents.blue;
-                chipColor = PALETTE.accents.blue;
-                chipBg = '#000000';
-            }
-
-            return (
-                <motion.div
-                    key={session.id}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, x: -100 }}
-                    transition={{ duration: 0.3 }}
-                >
-                    <Card sx={{ 
-                        mb: 2, 
-                        ...DESIGN_TOKENS.glassCard,
-                        borderLeft: `4px solid ${borderColor}` 
-                    }}>
-                        <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
-                            
-                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                                <Chip 
-                                    label={typeLabel} 
-                                    sx={{ 
-                                        fontWeight: 900, 
-                                        fontSize: '0.75rem', 
-                                        height: '24px',
-                                        color: chipColor,
-                                        bgcolor: chipBg,
-                                        border: `2px solid ${chipColor}`,
-                                        boxShadow: `0 0 10px ${chipColor}40`,
-                                        textShadow: chipBg === '#000000' ? `0 0 5px ${chipColor}` : 'none'
-                                    }}
-                                />
-                                {isLocked && (
-                                    <Chip 
-                                        label="LOCKED" 
-                                        size="small" 
-                                        icon={<LockIcon fontSize="small"/>} 
-                                        color="error" 
-                                        variant="outlined"
-                                        sx={{ height: '24px' }}
-                                    />
-                                )}
-                            </Box>
-
-                            {/* INDIVIDUELLE ITEM LISTE */}
-                            {sessionItems.length > 0 && (
-                                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 2 }}>
-                                    {sessionItems.map((item, idx) => {
-                                        // Individuelle Zeit aus dem Ledger holen
-                                        let itemStartTime = fallbackStartTime;
-                                        if (session.itemLedger && session.itemLedger[item.id] && session.itemLedger[item.id].joinedAt) {
-                                            const joinedData = session.itemLedger[item.id].joinedAt;
-                                            itemStartTime = joinedData.toDate ? joinedData.toDate() : new Date(joinedData);
-                                        }
-                                        const itemDurationMinutes = Math.max(0, Math.floor((new Date() - itemStartTime) / 60000));
-
-                                        return (
-                                            <Box 
-                                                key={item.id || idx} 
-                                                onClick={() => onNavigateItem(item.id)}
-                                                sx={{ 
-                                                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                                                    p: 1, borderRadius: 1, 
-                                                    bgcolor: 'rgba(255,255,255,0.05)',
-                                                    cursor: 'pointer',
-                                                    transition: 'background 0.2s',
-                                                    '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' }
-                                                }}
-                                            >
-                                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                                                    <Avatar 
-                                                        src={item.imageUrl || item.image} 
-                                                        variant="rounded" 
-                                                        sx={{ width: 40, height: 40, border: `1px solid ${PALETTE.primary.main}` }}
-                                                    />
-                                                    <Box>
-                                                        <Typography variant="body2" sx={{ fontWeight: 'bold', color: 'text.primary' }}>
-                                                            {item.name}
-                                                        </Typography>
-                                                        <Typography variant="caption" color="text.secondary">
-                                                            {item.brand}
-                                                        </Typography>
-                                                    </Box>
-                                                </Box>
-
-                                                <Chip 
-                                                    label={formatDuration(itemDurationMinutes)} 
-                                                    size="small" 
-                                                    variant="outlined"
-                                                    sx={{ 
-                                                        height: '20px', 
-                                                        fontSize: '0.7rem', 
-                                                        borderColor: 'rgba(255,255,255,0.2)', 
-                                                        color: 'text.secondary' 
-                                                    }}
-                                                />
-                                            </Box>
-                                        );
-                                    })}
-                                </Box>
-                            )}
-
-                            {/* PROGRESS BAR - Versteckt für Punishment */}
-                            {session.isDebtSession && minDuration > 0 && (
-                                <Box sx={{ mt: 1, mb: 2 }}>
-                                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                                        <Typography variant="caption" color="error">
-                                            Pflicht-Tilgung
-                                        </Typography>
-                                        <Typography variant="caption" color="text.secondary">{durationMinutes} / {minDuration} min</Typography>
-                                    </Box>
-                                    <LinearProgress 
-                                        variant="determinate" 
-                                        value={Math.min(100, (durationMinutes / minDuration) * 100)} 
-                                        color="error"
-                                        sx={{ height: 6, borderRadius: 3, bgcolor: 'rgba(255,0,0,0.1)' }}
-                                    />
-                                </Box>
-                            )}
-
-                            {/* ACTIONS */}
-                            <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
-                                {session.type === 'preparation' ? (
-                                    <Button 
-                                        variant="outlined" 
-                                        size="small"
-                                        fullWidth
-                                        disabled
-                                        sx={{ borderColor: 'rgba(255,255,255,0.1)', color: 'text.disabled' }}
-                                    >
-                                        VERIFIKATION AUSSTEHEND
-                                    </Button>
-                                ) : isPunishment ? (
-                                    <Button 
-                                        variant="contained"
-                                        size="small"
-                                        fullWidth
-                                        startIcon={<VisibilityIcon />}
-                                        onClick={() => handleCheckPunishment(session, durationMinutes, minDuration)}
-                                        sx={{
-                                            bgcolor: PALETTE.accents.red,
-                                            color: '#fff',
-                                            '&:hover': { bgcolor: '#b71c1c' }
-                                        }}
-                                    >
-                                        VOLLZUG PRÜFEN
-                                    </Button>
-                                ) : (isTZD || session.isDebtSession) ? (
-                                    <Box sx={{ display: 'flex', width: '100%', gap: 1 }}>
-                                        {isLocked && session.isDebtSession && (
-                                            <Button
-                                                variant="outlined"
-                                                size="small"
-                                                color="error"
-                                                onClick={() => {
-                                                    if(window.confirm("SYSTEMWARNUNG: Ein Not-Abbruch vernichtet die bisherige Tragezeit und erhöht deine Schulden sofort um 50% (Overdraft Penalty). Fortfahren?")) {
-                                                        onStopSession(session, { emergencyBailout: true });
-                                                    }
-                                                }}
-                                                sx={{ flex: 1, borderColor: PALETTE.accents.red, color: PALETTE.accents.red, fontWeight: 'bold' }}
-                                            >
-                                                NOT-ABBRUCH
-                                            </Button>
-                                        )}
-                                        <Button 
-                                            variant={isLocked ? "outlined" : "contained"} 
-                                            size="small"
-                                            disabled={isLocked}
-                                            onClick={() => onStopSession(session)}
-                                            startIcon={isLocked ? <LockIcon /> : <StopIcon />}
-                                            sx={isLocked ? { 
-                                                flex: session.isDebtSession ? 1 : 'none',
-                                                width: session.isDebtSession ? 'auto' : '100%',
-                                                borderColor: 'rgba(255,255,255,0.1)',
-                                                color: 'text.disabled'
-                                            } : {
-                                                fullWidth: true,
-                                                bgcolor: PALETTE.primary.main,
-                                                color: '#000',
-                                                '&:hover': { bgcolor: PALETTE.primary.dark }
-                                            }}
-                                        >
-                                            {isLocked ? `GESPERRT (${remainingTime}m)` : "BEENDEN"}
-                                        </Button>
-                                    </Box>
-                                ) : (
-                                    <Button 
-                                        variant="contained" 
-                                        color="primary" 
-                                        size="small"
-                                        fullWidth
-                                        onClick={() => {
-                                            if (session.type === 'instruction') {
-                                                setTransitionDialog(session);
-                                                setKeptItems([]);
-                                            } else {
-                                                onStopSession(session);
-                                            }
-                                        }}
-                                        startIcon={<StopIcon />}
-                                    >
-                                        Beenden
-                                    </Button>
-                                )}
-                            </Box>
-                        </CardContent>
-                    </Card>
-                </motion.div>
-            );
-        })}
-      </AnimatePresence>
-
-      {/* GATEKEEPER DIALOG */}
-      <Dialog
-          open={!!gatekeeperSession}
-          onClose={() => {}} 
-          PaperProps={{
-              sx: { ...DESIGN_TOKENS.glassCard, border: `1px solid ${PALETTE.accents.red}` }
-          }}
-      >
-          <DialogTitle sx={{ color: PALETTE.accents.red, fontWeight: 'bold' }}>
-              FINALES GESTÄNDNIS
-          </DialogTitle>
-          <DialogContent>
-              <DialogContentText sx={{ color: 'text.secondary', mb: 2 }}>
-                  Die Strafzeit ist abgelaufen. Das System erfordert nun deine absolute Demut. Tippe den exakten Satz fehlerfrei und case-sensitive ab, um die Strafe zu beenden:
-              </DialogContentText>
-              <Typography variant="body1" sx={{ color: '#fff', fontWeight: 'bold', mb: 3, fontStyle: 'italic', textAlign: 'center' }}>
-                  "Ich bin eine gehorsame Sissy und danke für die Zurechtweisung"
-              </Typography>
-              <TextField
-                  autoFocus
-                  fullWidth
-                  variant="outlined"
-                  value={confessionText}
-                  onChange={(e) => setConfessionText(e.target.value)}
-                  autoComplete="off"
-                  sx={{
-                      '& .MuiOutlinedInput-root': {
-                          color: '#fff',
-                          '& fieldset': { borderColor: 'rgba(255,255,255,0.2)' },
-                          '&:hover fieldset': { borderColor: PALETTE.accents.red },
-                          '&.Mui-focused fieldset': { borderColor: PALETTE.accents.red },
-                      }
-                  }}
-              />
-          </DialogContent>
-          <DialogActions sx={{ p: 2, pt: 0 }}>
-              <Button onClick={() => setGatekeeperSession(null)} sx={{ color: 'text.secondary' }}>Abbrechen</Button>
-              <Button onClick={handleGatekeeperSubmit} variant="contained" sx={{ bgcolor: PALETTE.accents.red, color: '#fff', '&:hover': { bgcolor: '#b71c1c'} }}>
-                  Bestätigen
-              </Button>
-          </DialogActions>
-      </Dialog>
-
-      {/* SEAMLESS TRANSITION DIALOG */}
-      {transitionDialog && (
-          <Dialog
-              open={!!transitionDialog}
-              onClose={() => setTransitionDialog(null)}
-              PaperProps={{
-                  sx: { ...DESIGN_TOKENS.glassCard, border: `1px solid ${PALETTE.accents.blue}` }
-              }}
-              maxWidth="xs"
-              fullWidth
-          >
-              <DialogTitle sx={{ color: PALETTE.accents.blue, fontWeight: 'bold' }}>
-                  NAHTLOSER ÜBERGANG
-              </DialogTitle>
-              <DialogContent>
-                  <DialogContentText sx={{ color: 'text.secondary', mb: 2 }}>
-                      Die Pflicht ist erfüllt. Welche Items möchtest du freiwillig anbehalten? Nicht ausgewählte Items werden abgelegt.
-                  </DialogContentText>
-                  <List sx={{ bgcolor: 'rgba(0,0,0,0.2)', borderRadius: 2 }}>
-                      {(() => {
-                          const tIds = transitionDialog.itemIds || (transitionDialog.itemId ? [transitionDialog.itemId] : []);
-                          return tIds.map(id => {
-                              const item = items.find(i => i.id === id);
-                              if (!item) return null;
-                              return (
-                                  <ListItem key={id} divider sx={{ borderColor: 'rgba(255,255,255,0.05)' }}>
-                                      <ListItemAvatar>
-                                          <Avatar 
-                                              src={item.imageUrl || item.image} 
-                                              variant="rounded" 
-                                              sx={{ width: 40, height: 40, border: `1px solid ${PALETTE.accents.blue}` }} 
-                                          />
-                                      </ListItemAvatar>
-                                      <ListItemText 
-                                          primary={item.name} 
-                                          secondary={item.subCategory}
-                                          primaryTypographyProps={{ sx: { color: '#fff', fontWeight: 'bold', fontSize: '0.9rem' } }}
-                                          secondaryTypographyProps={{ sx: { color: 'rgba(255,255,255,0.5)', fontSize: '0.75rem' } }}
-                                      />
-                                      <Switch 
-                                          checked={keptItems.includes(id)}
-                                          onChange={() => handleToggleKeep(id)}
-                                          sx={{ 
-                                              '& .MuiSwitch-switchBase.Mui-checked': { color: PALETTE.accents.blue },
-                                              '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': { backgroundColor: PALETTE.accents.blue }
-                                          }}
-                                      />
-                                  </ListItem>
-                              );
-                          });
-                      })()}
-                  </List>
-              </DialogContent>
-              <DialogActions sx={{ p: 2, pt: 0 }}>
-                  <Button onClick={() => setTransitionDialog(null)} sx={{ color: 'text.secondary' }}>
-                      Abbrechen
-                  </Button>
-                  <Button 
-                      onClick={() => {
-                          onStopSession(transitionDialog, { keptItemIds: keptItems });
-                          setTransitionDialog(null);
-                      }} 
-                      variant="contained" 
-                      sx={{ bgcolor: PALETTE.accents.blue, color: '#000', fontWeight: 'bold', '&:hover': { bgcolor: '#fff'} }}
-                  >
-                      Session Beenden
-                  </Button>
-              </DialogActions>
-          </Dialog>
-      )}
-
-    </Box>
-  );
-}
 ```
 
 ## File: src/hooks/dashboard/useInstructionManager.js
@@ -18712,8 +18754,9 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
             noteSuffix = 'ABBRUCH (Freiwillig)';
         } else {
             if (newNc < 0 || newLc < 0) {
-                const penaltyNc = newNc < 0 ? Math.floor(Math.abs(newNc) * 0.5) : 0;
-                const penaltyLc = newLc < 0 ? Math.floor(Math.abs(newLc) * 0.5) : 0;
+                // KORREKTUR: Math.ceil verhindert, dass kleine Schulden durch Abrunden ungestraft bleiben
+                const penaltyNc = newNc < 0 ? Math.ceil(Math.abs(newNc) * 0.5) : 0;
+                const penaltyLc = newLc < 0 ? Math.ceil(Math.abs(newLc) * 0.5) : 0;
                 newNc -= penaltyNc;
                 newLc -= penaltyLc;
                 bailoutMessage = `Not-Abbruch! 50% Strafaufschlag auf bestehende Sissy-Schulden.`;
@@ -19086,26 +19129,12 @@ export const acceptExtortion = async (userId) => {
 
         const batch = writeBatch(db);
 
-        // Dynamische Ziel-Ankerung berechnen
-        let totalMinutes = 0;
+        // Dynamische Ziel-Ankerung korrigiert: Ursprüngliches Tagesziel + 60 Minuten Zwang
+        const instrData = instrSnap.data();
+        const currentTarget = instrData.durationMinutes || 240; // Fallback auf 4h, falls nicht gesetzt
         
-        // Vergangene Sessions von heute summieren
-        const qPast = query(
-            collection(db, `users/${userId}/sessions`),
-            where('periodId', '==', extData.periodId),
-            where('isActive', '==', false)
-        );
-        const pastSnap = await getDocs(qPast);
-        pastSnap.forEach(d => { totalMinutes += (d.data().durationMinutes || 0); });
-
-        // Laufende Session berechnen
-        const sData = sessionSnap.data();
-        const startTime = sData.startTime?.toDate ? sData.startTime.toDate() : new Date();
-        const currentSessionMinutes = Math.round((Date.now() - startTime.getTime()) / 60000);
-        totalMinutes += currentSessionMinutes;
-
-        // Neues Ziel: Jetzt + 60 Minuten Zwang
-        const newTarget = totalMinutes + 60;
+        // Neues Ziel: Ursprüngliches Ziel + 60 Minuten Zwang
+        const newTarget = currentTarget + 60;
 
         // Rollback & Zwang etablieren
         batch.update(instrRef, {

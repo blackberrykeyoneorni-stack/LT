@@ -305,14 +305,54 @@ function useItemActions(config) {
                 imageUrl: finalImages.length > 0 ? finalImages[0] : null
             };
 
+            // --- DIFFING ALGORITHMUS FÜR HISTORIE ---
+            const changes = [];
+            const safeString = (val) => (val === null || val === undefined ? '' : String(val).trim());
+
+            if (safeString(item.location || item.storageLocation) !== safeString(formData.location)) {
+                changes.push(`Lagerort (${safeString(item.location || item.storageLocation) || 'N/A'} ➔ ${safeString(formData.location) || 'N/A'})`);
+            }
+            if (safeString(item.condition) !== safeString(formData.condition)) {
+                changes.push(`Zustand (${safeString(item.condition)} ➔ ${safeString(formData.condition)})`);
+            }
+            if (safeString(item.suitablePeriod) !== safeString(formData.suitablePeriod)) {
+                changes.push(`Tragezeit (${safeString(item.suitablePeriod)} ➔ ${safeString(formData.suitablePeriod)})`);
+            }
+            if (safeString(item.cost) !== safeString(formData.cost)) {
+                changes.push(`Preis (${safeString(item.cost)}€ ➔ ${safeString(formData.cost)}€)`);
+            }
+            if (safeString(item.notes) !== safeString(formData.notes)) {
+                changes.push(`Notizen bearbeitet`);
+            }
+
+            // --- DATENBANK & STATE UPDATE ---
             // Gatekeeper ULP Update nutzen
             await updateItem(currentUser.uid, id, updatedData);
             
             const timestamp = new Date().toISOString();
+            
+            let newHistoryLog = [...(item.historyLog || [])];
+            
+            // Nur loggen, wenn sich wirklich relevante Felder geändert haben
+            if (changes.length > 0) {
+                const diffMessage = `Eigenschaften modifiziert: ${changes.join(', ')}`;
+                newHistoryLog.push({ 
+                    type: 'METADATA_UPDATED', 
+                    date: timestamp, 
+                    data: { message: diffMessage } 
+                });
+                
+                // Wir pushen den Eintrag auch hard in die Firebase, da updateItem dies nicht von sich aus tut
+                const { arrayUnion } = await import('firebase/firestore');
+                await updateItem(currentUser.uid, id, {
+                    historyLog: arrayUnion({ type: 'METADATA_UPDATED', date: timestamp, data: { message: diffMessage } })
+                });
+            }
+
             setItem(prev => ({ 
                 ...prev, 
                 ...updatedData,
-                historyLog: [...(prev.historyLog || []), { type: 'METADATA_UPDATED', date: timestamp, data: { message: 'Eigenschaften modifiziert' } }]
+                historyLog: newHistoryLog
             }));
             
             setPendingFiles([]); 
