@@ -1,0 +1,33 @@
+# Statische Assets und Bilder
+public/
+src/assets/
+*.svg
+*.png
+*.jpg
+*.jpeg
+*.ico
+*.webp
+*.gif
+
+# Stylesheets
+*.css
+*.scss
+
+# Theme und reines Design (für Logik-Audits irrelevant)
+src/theme/
+
+# Paket-Lockfiles (blähen den Output extrem auf)
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Konfigurationsdateien (nur bei Bedarf temporär auskommentieren)
+firebase.json
+.firebaserc
+vite.config.js
+package.json
+
+# Eigene Packer-Skripte und vorherige Outputs
+pack.cjs
+repomix-output*.txt
+src_complete.txt
