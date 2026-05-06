@@ -95,7 +95,6 @@ export default function ConditioningOverlay({ onAcknowledge }) {
                         fontWeight: '900',
                         lineHeight: 1.3,
                         letterSpacing: 1.5,
-                        textTransform: 'uppercase',
                         textShadow: '0 0 10px #FF1493, 0 0 20px #FF1493, 0 0 30px #FF1493' // Starker Neon Glow
                     }}
                 >

@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getTZDStatus, checkForTZDTrigger, performCheckIn, startTZD, getTZDSettings } from '../../services/TZDService';
-import { checkGambleTrigger, determineGambleStake, rollTheDice, recordGambleAction, setImmunity } from '../../services/OfferService';
+import { checkGambleTrigger, rollTheDice, recordGambleAction, setImmunity } from '../../services/OfferService';
 import { stopSession as stopSessionService } from '../../services/SessionService';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { db } from '../../firebase';
 
 export default function useTZDAndGamble({
     currentUser,
@@ -19,13 +21,32 @@ export default function useTZDAndGamble({
     const [isCheckingProtocol, setIsCheckingProtocol] = useState(true);
     
     const [gambleOffer, setGambleOffer] = useState(null);
-    const [hasGambledThisSession, setHasGambledThisSession] = useState(false);
     const [immunityActive, setImmunityActive] = useState(false);
 
     // --- ABGELEITETE STATES ---
     const isInstructionActive = activeSessions.some(s => s.type === 'instruction' && s.instructionReadyTime);
 
-    // --- EFFECT: TZD Check + GAMBLE TRIGGER (5-Minuten-Auditor) ---
+    // --- EFFECT 1: PERSISTENT GAMBLE LISTENER ---
+    // Zwingt den Dialog unerbittlich auf den Bildschirm, solange ein aktives Gamble in der Datenbank liegt
+    useEffect(() => {
+        if (!currentUser) return;
+        const statsRef = doc(db, `users/${currentUser.uid}/status/gambleStats`);
+        
+        const unsubscribe = onSnapshot(statsRef, (snap) => {
+            if (snap.exists()) {
+                const data = snap.data();
+                if (data.activeGamble) {
+                    setGambleOffer(data.activeGamble);
+                } else {
+                    setGambleOffer(null);
+                }
+            }
+        });
+        return () => unsubscribe();
+    }, [currentUser]);
+
+
+    // --- EFFECT 2: TZD Check + GAMBLE TRIGGER (5-Minuten-Auditor) ---
     useEffect(() => {
         let interval;
         const checkTZD = async () => {
@@ -58,18 +79,12 @@ export default function useTZDAndGamble({
                         setTzdStartTime(null);
                     }
                     
-                    if (!hasGambledThisSession && items.length > 0 && !isStealthActive) {
+                    // Trigger-Logik: Nur versuchen, wenn KEIN Gamble offen ist
+                    if (!gambleOffer && items.length > 0 && !isStealthActive) {
                         const activePunishItem = punishmentStatus.active ? punishmentItem : null;
-                        const gambleResult = await checkGambleTrigger(currentUser.uid, false, isInstructionActive, activePunishItem);
-                        if (gambleResult.trigger) {
-                            const stake = determineGambleStake(items);
-                            if (stake.length > 0) {
-                                setGambleOffer({ stake, isForced: gambleResult.isForced });
-                                setHasGambledThisSession(true);
-                            }
-                        } else {
-                            setHasGambledThisSession(true);
-                        }
+                        // Übergebe items an checkGambleTrigger für die Backend-Verankerung
+                        await checkGambleTrigger(currentUser.uid, false, isInstructionActive, activePunishItem, items);
+                        // Der State-Update von gambleOffer geschieht vollautomatisch durch EFFECT 1
                     }
 
                     if (isInstructionActive && !isStealthActive) { 
@@ -92,19 +107,20 @@ export default function useTZDAndGamble({
             interval = setInterval(checkTZD, 300000); 
         }
         return () => clearInterval(interval);
-    }, [currentUser, items, activeSessions, itemsLoading, tzdActive, isInstructionActive, hasGambledThisSession, punishmentStatus, punishmentItem, isStealthActive, showToast]);
+    }, [currentUser, items, activeSessions, itemsLoading, tzdActive, isInstructionActive, gambleOffer, punishmentStatus, punishmentItem, isStealthActive, showToast]);
 
     // --- HANDLERS: GAMBLE ---
     const handleGambleAccept = useCallback(async () => {
-        if (!currentUser) return;
-        await recordGambleAction(currentUser.uid, 'accept');
-        const currentStake = gambleOffer?.stake || [];
+        if (!currentUser || !gambleOffer) return;
+        
+        // Lokale Sperre, Backend Update
+        const currentStake = gambleOffer.stake || [];
+        await recordGambleAction(currentUser.uid, 'accept'); 
+        
         const result = await rollTheDice(currentUser.uid, currentStake);
         
-        setGambleOffer(null); 
-        
         if (result.win) {
-            // NEU: Gewinn ist das doppelte der in den Settings definierten maxHours des TZD
+            // GEWINN: Immunität vergeben
             const { maxHours } = await getTZDSettings(currentUser.uid);
             const immunityHours = maxHours * 2;
             
@@ -112,6 +128,7 @@ export default function useTZDAndGamble({
             if (showToast) showToast(`GEWINN! ${immunityHours}h Immunität aktiviert.`, "success");
             setImmunityActive(true);
         } else {
+            // VERLUST: Optionale Voluntary Sessions hart beenden
             const voluntarySessions = activeSessions.filter(s => s.type === 'voluntary' && !s.endTime);
             
             if (voluntarySessions.length > 0) {
@@ -127,9 +144,7 @@ export default function useTZDAndGamble({
                 } catch (e) { console.error(e); }
             }
 
-            // NEU: Das universelle, absolut unberechenbare TZD wird gestartet (Option A)
-            await startTZD(currentUser.uid, currentStake);
-            
+            // Das TZD wurde von rollTheDice bereits in die Datenbank geschrieben
             if (showToast) showToast("VERLOREN. Zeitloses Diktat aktiviert.", "error");
             setTzdActive(true);
             setTzdStartTime(new Date());
@@ -138,8 +153,7 @@ export default function useTZDAndGamble({
 
     const handleGambleDecline = useCallback(async () => {
         if (!currentUser) return;
-        await recordGambleAction(currentUser.uid, 'decline');
-        setGambleOffer(null);
+        await recordGambleAction(currentUser.uid, 'decline'); // Backend räumt auf
         if (showToast) showToast("Sicher ist sicher...", "info");
     }, [currentUser, showToast]);
 

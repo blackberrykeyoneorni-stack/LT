@@ -1013,116 +1013,6 @@ class ErrorBoundary extends React.Component {
 export default ErrorBoundary;
 ```
 
-## File: src/components/LockScreen.jsx
-```javascript
-import React from 'react';
-import { Box, Typography, Button, Container, Avatar } from '@mui/material';
-import { useSecurity } from '../contexts/SecurityContext';
-import { useAuth } from '../contexts/AuthContext';
-import { Icons } from '../theme/appIcons';
-
-export default function LockScreen() {
-  const { unlock, forceUnlock, authError } = useSecurity();
-  const { login } = useAuth(); 
-
-  // Fallback: Wenn Biometrie kaputt ist, kann man sich über Google neu einloggen
-  const handleFallback = async () => {
-    try {
-      await login(); 
-      forceUnlock(); // Wenn Login erfolgreich, sperre auf
-    } catch (e) {
-      console.error("Fallback fehlgeschlagen", e);
-    }
-  };
-
-  return (
-    <Box sx={{ 
-      position: 'fixed', 
-      top: 0, 
-      left: 0, 
-      right: 0, 
-      bottom: 0, 
-      bgcolor: 'background.default', // Bezieht sich auf das sterile Camouflage-Theme
-      zIndex: 99999, // Muss über allem liegen
-      display: 'flex', 
-      alignItems: 'center', 
-      justifyContent: 'center',
-      touchAction: 'none' // Verhindert Scrollen
-    }}>
-      <Container maxWidth="xs" sx={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-        
-        {/* Langweiliges System-Icon statt aufreizendem Glow-Effekt */}
-        <Box sx={{ 
-          position: 'relative', 
-          mb: 4, 
-          display: 'flex', 
-          justifyContent: 'center' 
-        }}>
-          <Avatar sx={{ 
-            width: 80, 
-            height: 80, 
-            bgcolor: '#E5E7EB', // Steriles helles Grau
-            color: '#607D8B'    // Neutrales System-Blau-Grau
-          }}>
-            <Icons.Lock sx={{ fontSize: 40 }} />
-          </Avatar>
-        </Box>
-        
-        <Typography variant="h5" gutterBottom sx={{ color: 'text.primary', fontWeight: 500, letterSpacing: 0.5 }}>
-          LT System Data
-        </Typography>
-        
-        <Typography variant="body2" sx={{ mb: 6, color: 'text.secondary' }}>
-          Authentifizierung erforderlich
-        </Typography>
-
-        {/* Fehlermeldung falls vorhanden */}
-        {authError && (
-            <Typography variant="caption" color="error" sx={{ mb: 2, display: 'block' }}>
-                {authError}
-            </Typography>
-        )}
-
-        {/* Haupt-Button: Steril und technisch */}
-        <Button 
-          variant="contained" 
-          size="large" 
-          color="primary"
-          startIcon={<Icons.Fingerprint />} 
-          onClick={unlock}
-          sx={{ 
-            width: '100%',
-            py: 1.5,
-            mb: 3,
-            fontSize: '1rem',
-            borderRadius: 1, 
-            textTransform: 'none', 
-            boxShadow: 'none'
-          }}
-        >
-          Systemzugriff freigeben
-        </Button>
-        
-        <Typography variant="caption" sx={{ color: 'text.disabled', mb: 1 }}>
-            Biometrische Verifizierung oder System-PIN
-        </Typography>
-
-        {/* Notfall Login */}
-        <Button 
-          variant="text" 
-          size="small" 
-          onClick={handleFallback}
-          sx={{ color: 'text.secondary', mt: 4, textTransform: 'none' }}
-        >
-          Admin-Fallback: Google Login
-        </Button>
-        
-      </Container>
-    </Box>
-  );
-}
-```
-
 ## File: src/components/SecurityLock.jsx
 ```javascript
 import React, { useEffect } from 'react';
@@ -4349,6 +4239,96 @@ export default function TrendDialog({ selectedMetric, trendData, onClose }) {
 }
 ```
 
+## File: src/components/LockScreen.jsx
+```javascript
+import React from 'react';
+import { Box, Typography, Button, Container, Avatar } from '@mui/material';
+import { useSecurity } from '../contexts/SecurityContext';
+import { useAuth } from '../contexts/AuthContext';
+import { Icons } from '../theme/appIcons';
+
+export default function LockScreen() {
+  const { unlock, forceUnlock, authError } = useSecurity();
+  const { currentUser } = useAuth(); 
+
+  return (
+    <Box sx={{ 
+      position: 'fixed', 
+      top: 0, 
+      left: 0, 
+      right: 0, 
+      bottom: 0, 
+      bgcolor: 'background.default', // Bezieht sich auf das sterile Camouflage-Theme
+      zIndex: 99999, // Muss über allem liegen
+      display: 'flex', 
+      alignItems: 'center', 
+      justifyContent: 'center',
+      touchAction: 'none' // Verhindert Scrollen
+    }}>
+      <Container maxWidth="xs" sx={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+        
+        {/* Langweiliges System-Icon statt aufreizendem Glow-Effekt */}
+        <Box sx={{ 
+          position: 'relative', 
+          mb: 4, 
+          display: 'flex', 
+          justifyContent: 'center' 
+        }}>
+          <Avatar sx={{ 
+            width: 80, 
+            height: 80, 
+            bgcolor: '#E5E7EB', // Steriles helles Grau
+            color: '#607D8B'    // Neutrales System-Blau-Grau
+          }}>
+            <Icons.Lock sx={{ fontSize: 40 }} />
+          </Avatar>
+        </Box>
+        
+        <Typography variant="h5" gutterBottom sx={{ color: 'text.primary', fontWeight: 500, letterSpacing: 0.5 }}>
+          LT System Data
+        </Typography>
+        
+        <Typography variant="body2" sx={{ mb: 6, color: 'text.secondary' }}>
+          Authentifizierung erforderlich
+        </Typography>
+
+        {/* Fehlermeldung falls vorhanden */}
+        {authError && (
+            <Typography variant="caption" color="error" sx={{ mb: 2, display: 'block' }}>
+                {authError}
+            </Typography>
+        )}
+
+        {/* Haupt-Button: Steril und technisch */}
+        <Button 
+          variant="contained" 
+          size="large" 
+          color="primary"
+          startIcon={<Icons.Fingerprint />} 
+          onClick={unlock}
+          sx={{ 
+            width: '100%',
+            py: 1.5,
+            mb: 3,
+            fontSize: '1rem',
+            borderRadius: 1, 
+            textTransform: 'none', 
+            boxShadow: 'none'
+          }}
+        >
+          Systemzugriff freigeben
+        </Button>
+        
+        <Typography variant="caption" sx={{ color: 'text.disabled', mb: 1 }}>
+            Biometrische Verifizierung oder System-PIN
+        </Typography>
+        
+      </Container>
+    </Box>
+  );
+}
+```
+
 ## File: src/contexts/NFCContext.jsx
 ```javascript
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
@@ -7417,6 +7397,170 @@ export default function PunishmentDialog({ open, onClose, pendingPunishments, it
 }
 ```
 
+## File: src/components/item-detail/ItemHistory.jsx
+```javascript
+import React from 'react';
+import { Box, Typography, Stack, Paper, Chip } from '@mui/material';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import WaterDropIcon from '@mui/icons-material/WaterDrop';
+import LocalLaundryServiceIcon from '@mui/icons-material/LocalLaundryService';
+import DeleteIcon from '@mui/icons-material/Delete';
+import GavelIcon from '@mui/icons-material/Gavel'; 
+import InfoIcon from '@mui/icons-material/Info'; 
+import { formatDuration } from '../../utils/formatters';
+import { PALETTE, DESIGN_TOKENS } from '../../theme/obsidianDesign';
+
+export default function ItemHistory({ historyEvents }) {
+    if (!historyEvents || historyEvents.length === 0) return null;
+
+    return (
+        <Box sx={{ mb: 10 }}>
+            <Typography variant="h6" gutterBottom sx={{ borderBottom: `1px solid ${PALETTE.background.glassBorder}`, pb: 1, color: PALETTE.primary.main, textTransform: 'uppercase', fontWeight: 800 }}>Historie</Typography>
+            <Stack spacing={1}>
+                {historyEvents.map((event, idx) => {
+                    let label = '';
+                    let sub = '';
+                    let color = 'default';
+                    let icon = null;
+                    let durationLabel = '';
+
+                    // Robuste Timestamp-Decodierung für IndexedDB Cache-Objekte
+                    const parseFirebaseDate = (val) => {
+                        if (!val) return null;
+                        if (val instanceof Date && !isNaN(val)) return val;
+                        if (typeof val.toDate === 'function') {
+                            const d = val.toDate();
+                            return isNaN(d) ? null : d;
+                        }
+                        if (val.seconds) return new Date(val.seconds * 1000);
+                        const parsed = new Date(val);
+                        return isNaN(parsed) ? null : parsed;
+                    };
+
+                    const safeEventDate = parseFirebaseDate(event.date);
+                    const dateStr = safeEventDate ? safeEventDate.toLocaleDateString() : 'Unbekannt';
+
+                    if (event.type === 'session') {
+                        const s = event.data;
+                        
+                        // Präzise Aufschlüsselung der Session-Kategorien (Tag/Nacht, TZD Subtypen)
+                        let typeLabel = 'Session';
+                        if (s.type === 'instruction') {
+                            typeLabel = s.periodId === 'night' ? 'Anweisung (Nacht)' : 'Anweisung (Tag)';
+                        }
+                        else if (s.type === 'voluntary') typeLabel = 'Freiwillig';
+                        else if (s.type === 'punishment') typeLabel = 'Strafarbeit';
+                        else if (s.type === 'tzd') {
+                            typeLabel = 'Zeitloses Diktat';
+                            if (s.subtype) {
+                                typeLabel += ` (${s.subtype.charAt(0).toUpperCase() + s.subtype.slice(1)})`;
+                            }
+                        }
+                        else if (s.isDebtSession || s.type === 'debt') typeLabel = 'Schuldenabbau';
+
+                        label = typeLabel;
+                        color = s.type === 'instruction' ? 'secondary' : (s.type === 'punishment' ? 'error' : 'default');
+                        icon = <AccessTimeIcon style={{ fontSize: 16 }} />;
+                        
+                        const startTime = safeEventDate || parseFirebaseDate(s.startTime);
+                        const endTime = parseFirebaseDate(s.endTime);
+
+                        if (endTime && startTime) {
+                            sub = `${startTime.toLocaleDateString()}, ${startTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} - ${endTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`;
+                            const diffMs = endTime.getTime() - startTime.getTime();
+                            const diffMins = Math.floor(diffMs / 60000);
+                            durationLabel = formatDuration(diffMins);
+                        } else if (startTime) {
+                            sub = `${startTime.toLocaleDateString()} - Laufend`;
+                            durationLabel = 'Laufend';
+                        } else {
+                            sub = 'Datum unlesbar';
+                            durationLabel = '-';
+                        }
+                    } else if (event.type === 'release') {
+                        const r = event.data;
+                        label = "Release Protocol";
+                        sub = `${dateStr} • Intensität ${r.intensity || '?'}`;
+                        color = "info";
+                        icon = <WaterDropIcon style={{ fontSize: 16 }} />;
+                        durationLabel = r.outcome === 'maintained' ? 'Maintained' : 'Removed';
+                        
+                    // ULP: Unified Lifecycle Protocol Integration
+                    } else if (event.type === 'wash_pending' || event.type === 'WASH_PENDING') {
+                        label = "Wäschekorb";
+                        sub = event.data?.message || `${dateStr} • Zur Reinigung hinzugefügt`;
+                        color = "warning";
+                        icon = <LocalLaundryServiceIcon style={{ fontSize: 16 }} />;
+                        durationLabel = 'Wartend';
+                    } else if (event.type === 'wash' || event.type === 'WASHED') {
+                        label = "Reinigung abgeschlossen";
+                        sub = event.data?.message || `${dateStr} • Gewaschen und verfügbar`;
+                        color = "success";
+                        icon = <LocalLaundryServiceIcon style={{ fontSize: 16 }} />;
+                        durationLabel = 'Sauber';
+                    } else if (event.type === 'archived' || event.type === 'ARCHIVED') {
+                        label = "Archiviert";
+                        const reasonStr = event.data?.reason || event.reason || 'Kein Grund';
+                        sub = event.data?.message ? `${event.data.message} (${reasonStr})` : `${dateStr} • ${reasonStr}`;
+                        color = "error";
+                        icon = <DeleteIcon style={{ fontSize: 16 }} />;
+                        durationLabel = 'End of Life';
+                    } else if (event.type === 'CREATED') {
+                        label = "Inventarisierung";
+                        sub = event.data?.message || `${dateStr} • Ins System aufgenommen`;
+                        color = "primary";
+                        icon = <InfoIcon style={{ fontSize: 16 }} />;
+                        durationLabel = 'Neu';
+                    } else if (event.type === 'METADATA_UPDATED') {
+                        label = "Daten-Update";
+                        sub = event.data?.message || `${dateStr} • Eigenschaften modifiziert`;
+                        color = "default";
+                        icon = <InfoIcon style={{ fontSize: 16 }} />;
+                        durationLabel = 'Edit';
+                    } else if (event.type === 'AUDITED') {
+                        label = "System-Audit";
+                        sub = event.data?.message || `${dateStr} • Zustand geprüft`;
+                        color = "secondary";
+                        icon = <GavelIcon style={{ fontSize: 16 }} />;
+                        durationLabel = 'Geprüft';
+                    } 
+                    else if (event.type && event.type.startsWith('tzd_')) {
+                        label = "Zeitloses Diktat";
+                        sub = event.data?.message || `${dateStr} • Systemeingriff`;
+                        color = event.data?.isPenalty ? "error" : "warning";
+                        icon = <GavelIcon style={{ fontSize: 16 }} />;
+                        durationLabel = 'TZD';
+                    } 
+                    else {
+                        label = event.type ? event.type.toUpperCase() : "Protokoll-Ereignis";
+                        sub = event.data?.message || `${dateStr} • Status Update`;
+                        color = "default";
+                        icon = <InfoIcon style={{ fontSize: 16 }} />;
+                        durationLabel = 'Info';
+                    }
+
+                    // Sissy Color Mapping for Chips
+                    const mappedColor = color === 'secondary' ? 'primary' : (color === 'info' ? 'secondary' : color);
+                    const iconColor = color === 'success' ? PALETTE.accents.green : (color === 'info' ? PALETTE.accents.blue : (color === 'error' ? PALETTE.accents.red : PALETTE.primary.main));
+
+                    return (
+                        <Paper key={idx} sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', ...DESIGN_TOKENS.glassCard }}>
+                            <Box>
+                                <Typography variant="body2" sx={{ fontWeight: 800, color: '#FFF', display: 'flex', alignItems: 'center', gap: 1 }}>
+                                    <span style={{ color: iconColor, display: 'flex', alignItems: 'center' }}>{icon}</span> {label}
+                                </Typography>
+                                <Typography variant="caption" sx={{ color: PALETTE.text.secondary }}>{sub}</Typography>
+                            </Box>
+                            <Chip label={durationLabel} color={mappedColor} size="small" sx={{ fontWeight: 'bold', borderRadius: '6px' }} />
+                        </Paper>
+                    );
+                })}
+            </Stack>
+        </Box>
+    );
+}
+```
+
 ## File: src/hooks/dashboard/useFemIndex.js
 ```javascript
 import { useEffect, useState } from 'react';
@@ -7921,170 +8065,6 @@ export default function ItemGallery({ item, isEditing, onToggleEdit, onSave, onW
                     )}
                 </Box>
             </Dialog>
-        </Box>
-    );
-}
-```
-
-## File: src/components/item-detail/ItemHistory.jsx
-```javascript
-import React from 'react';
-import { Box, Typography, Stack, Paper, Chip } from '@mui/material';
-import AccessTimeIcon from '@mui/icons-material/AccessTime';
-import WaterDropIcon from '@mui/icons-material/WaterDrop';
-import LocalLaundryServiceIcon from '@mui/icons-material/LocalLaundryService';
-import DeleteIcon from '@mui/icons-material/Delete';
-import GavelIcon from '@mui/icons-material/Gavel'; 
-import InfoIcon from '@mui/icons-material/Info'; 
-import { formatDuration } from '../../utils/formatters';
-import { PALETTE, DESIGN_TOKENS } from '../../theme/obsidianDesign';
-
-export default function ItemHistory({ historyEvents }) {
-    if (!historyEvents || historyEvents.length === 0) return null;
-
-    return (
-        <Box sx={{ mb: 10 }}>
-            <Typography variant="h6" gutterBottom sx={{ borderBottom: `1px solid ${PALETTE.background.glassBorder}`, pb: 1, color: PALETTE.primary.main, textTransform: 'uppercase', fontWeight: 800 }}>Historie</Typography>
-            <Stack spacing={1}>
-                {historyEvents.map((event, idx) => {
-                    let label = '';
-                    let sub = '';
-                    let color = 'default';
-                    let icon = null;
-                    let durationLabel = '';
-
-                    // Robuste Timestamp-Decodierung für IndexedDB Cache-Objekte
-                    const parseFirebaseDate = (val) => {
-                        if (!val) return null;
-                        if (val instanceof Date && !isNaN(val)) return val;
-                        if (typeof val.toDate === 'function') {
-                            const d = val.toDate();
-                            return isNaN(d) ? null : d;
-                        }
-                        if (val.seconds) return new Date(val.seconds * 1000);
-                        const parsed = new Date(val);
-                        return isNaN(parsed) ? null : parsed;
-                    };
-
-                    const safeEventDate = parseFirebaseDate(event.date);
-                    const dateStr = safeEventDate ? safeEventDate.toLocaleDateString() : 'Unbekannt';
-
-                    if (event.type === 'session') {
-                        const s = event.data;
-                        
-                        // Präzise Aufschlüsselung der Session-Kategorien (Tag/Nacht, TZD Subtypen)
-                        let typeLabel = 'Session';
-                        if (s.type === 'instruction') {
-                            typeLabel = s.periodId === 'night' ? 'Anweisung (Nacht)' : 'Anweisung (Tag)';
-                        }
-                        else if (s.type === 'voluntary') typeLabel = 'Freiwillig';
-                        else if (s.type === 'punishment') typeLabel = 'Strafarbeit';
-                        else if (s.type === 'tzd') {
-                            typeLabel = 'Zeitloses Diktat';
-                            if (s.subtype) {
-                                typeLabel += ` (${s.subtype.charAt(0).toUpperCase() + s.subtype.slice(1)})`;
-                            }
-                        }
-                        else if (s.isDebtSession || s.type === 'debt') typeLabel = 'Schuldenabbau';
-
-                        label = typeLabel;
-                        color = s.type === 'instruction' ? 'secondary' : (s.type === 'punishment' ? 'error' : 'default');
-                        icon = <AccessTimeIcon style={{ fontSize: 16 }} />;
-                        
-                        const startTime = safeEventDate || parseFirebaseDate(s.startTime);
-                        const endTime = parseFirebaseDate(s.endTime);
-
-                        if (endTime && startTime) {
-                            sub = `${startTime.toLocaleDateString()}, ${startTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} - ${endTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`;
-                            const diffMs = endTime.getTime() - startTime.getTime();
-                            const diffMins = Math.floor(diffMs / 60000);
-                            durationLabel = formatDuration(diffMins);
-                        } else if (startTime) {
-                            sub = `${startTime.toLocaleDateString()} - Laufend`;
-                            durationLabel = 'Laufend';
-                        } else {
-                            sub = 'Datum unlesbar';
-                            durationLabel = '-';
-                        }
-                    } else if (event.type === 'release') {
-                        const r = event.data;
-                        label = "Release Protocol";
-                        sub = `${dateStr} • Intensität ${r.intensity || '?'}`;
-                        color = "info";
-                        icon = <WaterDropIcon style={{ fontSize: 16 }} />;
-                        durationLabel = r.outcome === 'maintained' ? 'Maintained' : 'Removed';
-                        
-                    // ULP: Unified Lifecycle Protocol Integration
-                    } else if (event.type === 'wash_pending' || event.type === 'WASH_PENDING') {
-                        label = "Wäschekorb";
-                        sub = event.data?.message || `${dateStr} • Zur Reinigung hinzugefügt`;
-                        color = "warning";
-                        icon = <LocalLaundryServiceIcon style={{ fontSize: 16 }} />;
-                        durationLabel = 'Wartend';
-                    } else if (event.type === 'wash' || event.type === 'WASHED') {
-                        label = "Reinigung abgeschlossen";
-                        sub = event.data?.message || `${dateStr} • Gewaschen und verfügbar`;
-                        color = "success";
-                        icon = <LocalLaundryServiceIcon style={{ fontSize: 16 }} />;
-                        durationLabel = 'Sauber';
-                    } else if (event.type === 'archived' || event.type === 'ARCHIVED') {
-                        label = "Archiviert";
-                        const reasonStr = event.data?.reason || event.reason || 'Kein Grund';
-                        sub = event.data?.message ? `${event.data.message} (${reasonStr})` : `${dateStr} • ${reasonStr}`;
-                        color = "error";
-                        icon = <DeleteIcon style={{ fontSize: 16 }} />;
-                        durationLabel = 'End of Life';
-                    } else if (event.type === 'CREATED') {
-                        label = "Inventarisierung";
-                        sub = event.data?.message || `${dateStr} • Ins System aufgenommen`;
-                        color = "primary";
-                        icon = <InfoIcon style={{ fontSize: 16 }} />;
-                        durationLabel = 'Neu';
-                    } else if (event.type === 'METADATA_UPDATED') {
-                        label = "Daten-Update";
-                        sub = event.data?.message || `${dateStr} • Eigenschaften modifiziert`;
-                        color = "default";
-                        icon = <InfoIcon style={{ fontSize: 16 }} />;
-                        durationLabel = 'Edit';
-                    } else if (event.type === 'AUDITED') {
-                        label = "System-Audit";
-                        sub = event.data?.message || `${dateStr} • Zustand geprüft`;
-                        color = "secondary";
-                        icon = <GavelIcon style={{ fontSize: 16 }} />;
-                        durationLabel = 'Geprüft';
-                    } 
-                    else if (event.type && event.type.startsWith('tzd_')) {
-                        label = "Zeitloses Diktat";
-                        sub = event.data?.message || `${dateStr} • Systemeingriff`;
-                        color = event.data?.isPenalty ? "error" : "warning";
-                        icon = <GavelIcon style={{ fontSize: 16 }} />;
-                        durationLabel = 'TZD';
-                    } 
-                    else {
-                        label = event.type ? event.type.toUpperCase() : "Protokoll-Ereignis";
-                        sub = event.data?.message || `${dateStr} • Status Update`;
-                        color = "default";
-                        icon = <InfoIcon style={{ fontSize: 16 }} />;
-                        durationLabel = 'Info';
-                    }
-
-                    // Sissy Color Mapping for Chips
-                    const mappedColor = color === 'secondary' ? 'primary' : (color === 'info' ? 'secondary' : color);
-                    const iconColor = color === 'success' ? PALETTE.accents.green : (color === 'info' ? PALETTE.accents.blue : (color === 'error' ? PALETTE.accents.red : PALETTE.primary.main));
-
-                    return (
-                        <Paper key={idx} sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', ...DESIGN_TOKENS.glassCard }}>
-                            <Box>
-                                <Typography variant="body2" sx={{ fontWeight: 800, color: '#FFF', display: 'flex', alignItems: 'center', gap: 1 }}>
-                                    <span style={{ color: iconColor, display: 'flex', alignItems: 'center' }}>{icon}</span> {label}
-                                </Typography>
-                                <Typography variant="caption" sx={{ color: PALETTE.text.secondary }}>{sub}</Typography>
-                            </Box>
-                            <Chip label={durationLabel} color={mappedColor} size="small" sx={{ fontWeight: 'bold', borderRadius: '6px' }} />
-                        </Paper>
-                    );
-                })}
-            </Stack>
         </Box>
     );
 }
@@ -9866,217 +9846,6 @@ export const getLatestReport = async (userId) => {
 };
 ```
 
-## File: src/services/SuspensionService.js
-```javascript
-// src/services/SuspensionService.js
-import { db } from '../firebase';
-import { collection, addDoc, query, where, getDocs, updateDoc, doc, Timestamp, orderBy, deleteDoc, getDoc, writeBatch } from 'firebase/firestore';
-import { DEFAULT_PROTOCOL_RULES } from '../config/defaultRules';
-
-const COLLECTION = 'suspensions';
-
-export const addSuspension = async (userId, data) => {
-    const start = new Date(data.startDate);
-    const todayEnd = new Date();
-    todayEnd.setHours(23, 59, 59, 999);
-
-    if (start <= todayEnd) {
-        throw new Error("Unzulässig: Aussetzungen müssen mindestens für den Folgetag geplant werden.");
-    }
-
-    await addDoc(collection(db, `users/${userId}/${COLLECTION}`), {
-        type: data.type,
-        reason: data.reason,
-        startDate: Timestamp.fromDate(new Date(data.startDate)),
-        endDate: Timestamp.fromDate(new Date(data.endDate)),
-        packedItemIds: data.packedItemIds || [], 
-        packedItemsDay: data.packedItemsDay || [], 
-        packedItemsNight: data.packedItemsNight || [],
-        createdAt: Timestamp.now(),
-        status: 'scheduled'
-    });
-};
-
-export const deleteScheduledSuspension = async (userId, suspensionId) => {
-    await deleteDoc(doc(db, `users/${userId}/${COLLECTION}`, suspensionId));
-};
-
-export const getSuspensions = async (userId) => {
-    const q = query(
-        collection(db, `users/${userId}/${COLLECTION}`),
-        where('status', 'in', ['scheduled', 'active']),
-        orderBy('startDate', 'asc')
-    );
-    const snap = await getDocs(q);
-    
-    return snap.docs.map(d => ({ 
-        id: d.id, 
-        ...d.data(),
-        startDate: d.data().startDate.toDate(),
-        endDate: d.data().endDate.toDate()
-    }));
-};
-
-export const getAllSuspensions = async (userId) => {
-    try {
-        const q = query(
-            collection(db, `users/${userId}/${COLLECTION}`),
-            orderBy('startDate', 'desc')
-        );
-        const snap = await getDocs(q);
-        
-        return snap.docs.map(d => ({ 
-            id: d.id, 
-            ...d.data(),
-            startDate: d.data().startDate?.toDate ? d.data().startDate.toDate() : new Date(d.data().startDate),
-            endDate: d.data().endDate?.toDate ? d.data().endDate.toDate() : new Date(d.data().endDate)
-        }));
-    } catch (e) {
-        return [];
-    }
-};
-
-export const checkActiveSuspension = async (userId) => {
-    const now = new Date();
-    
-    const timeRules = DEFAULT_PROTOCOL_RULES?.time || { 
-        dayStartHour: 7, 
-        dayStartMinute: 30, 
-        nightStartHour: 23, 
-        nightStartMinute: 0 
-    };
-
-    const qActive = query(
-        collection(db, `users/${userId}/${COLLECTION}`),
-        where('status', '==', 'active')
-    );
-    const snapActive = await getDocs(qActive);
-    
-    if (!snapActive.empty) {
-        const docSnap = snapActive.docs[0];
-        const data = docSnap.data();
-        const end = data.endDate.toDate();
-
-        const endOfSuspension = new Date(end);
-        endOfSuspension.setHours(timeRules.nightStartHour, timeRules.nightStartMinute, 0, 0);
-
-        if (endOfSuspension < now) {
-            await updateDoc(doc(db, `users/${userId}/${COLLECTION}`, docSnap.id), { status: 'completed' });
-            
-            if (data.type === 'stealth_travel') {
-                const qLedger = query(collection(db, `users/${userId}/punishmentLedger`), where('status', '==', 'pending'), where('isStealthAkkumulation', '==', true));
-                const ledgerSnap = await getDocs(qLedger);
-                if (!ledgerSnap.empty) {
-                    const batch = writeBatch(db);
-                    ledgerSnap.forEach(ticket => batch.update(ticket.ref, { isStealthAkkumulation: false }));
-                    await batch.commit();
-                }
-            }
-            
-            await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), { 
-                activeSuspension: false,
-                suspensionReason: null,
-                stealthModeActive: false 
-            });
-            
-            return null;
-        }
-        return { id: docSnap.id, ...data, startDate: data.startDate.toDate(), endDate: end };
-    }
-
-    const qScheduled = query(
-        collection(db, `users/${userId}/${COLLECTION}`),
-        where('status', '==', 'scheduled')
-    );
-    const snapScheduled = await getDocs(qScheduled);
-    
-    for (const d of snapScheduled.docs) {
-        const data = d.data();
-        const start = data.startDate.toDate();
-        const end = data.endDate.toDate();
-        
-        const startOfSuspension = new Date(start);
-        startOfSuspension.setHours(timeRules.dayStartHour, timeRules.dayStartMinute, 0, 0);
-
-        if (startOfSuspension <= now) {
-            await updateDoc(doc(db, `users/${userId}/${COLLECTION}`, d.id), { status: 'active' });
-            
-            await updateDoc(doc(db, `users/${userId}/status/tzd`), {
-                isActive: false,
-                result: 'terminated_by_suspension',
-                endTime: Timestamp.now()
-            });
-
-            if (data.type === 'stealth_travel') {
-                
-                // NEU: Alle offenen Strafen beim Start der Stealth-Phase in den Akkumulations-Modus zwingen
-                try {
-                    const qLedgerPending = query(
-                        collection(db, `users/${userId}/punishmentLedger`), 
-                        where('status', '==', 'pending'), 
-                        where('isStealthAkkumulation', '==', false)
-                    );
-                    const ledgerPendingSnap = await getDocs(qLedgerPending);
-                    if (!ledgerPendingSnap.empty) {
-                        const batch = writeBatch(db);
-                        ledgerPendingSnap.forEach(ticket => {
-                            batch.update(ticket.ref, { isStealthAkkumulation: true });
-                        });
-                        await batch.commit();
-                        console.log("Stealth Mode: Altlasten ins Zins-Ledger überführt.");
-                    }
-                } catch (e) {
-                    console.error("Fehler beim Transfer der Altlasten in den Stealth-Modus:", e);
-                }
-
-                await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), {
-                    evasionPenaltyTriggered: false, 
-                    tzdDurationMinutes: 0,
-                    stealthModeActive: true 
-                });
-            } else {
-                await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), {
-                    evasionPenaltyTriggered: false, 
-                    tzdDurationMinutes: 0,
-                    activeSuspension: true, 
-                    suspensionReason: data.reason
-                });
-            }
-            
-            return { id: d.id, ...data, status: 'active', startDate: start, endDate: end };
-        }
-    }
-
-    return null;
-};
-
-export const terminateSuspension = async (userId, suspensionId) => {
-    const suspRef = doc(db, `users/${userId}/${COLLECTION}`, suspensionId);
-    
-    const suspSnap = await getDoc(suspRef);
-    if (suspSnap.exists() && suspSnap.data().type === 'stealth_travel') {
-        const qLedger = query(collection(db, `users/${userId}/punishmentLedger`), where('status', '==', 'pending'), where('isStealthAkkumulation', '==', true));
-        const ledgerSnap = await getDocs(qLedger);
-        if (!ledgerSnap.empty) {
-            const batch = writeBatch(db);
-            ledgerSnap.forEach(ticket => batch.update(ticket.ref, { isStealthAkkumulation: false }));
-            await batch.commit();
-        }
-    }
-    
-    await updateDoc(suspRef, {
-        status: 'terminated',
-        terminatedAt: Timestamp.now()
-    });
-    
-    await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), { 
-        activeSuspension: false,
-        suspensionReason: null,
-        stealthModeActive: false 
-    });
-};
-```
-
 ## File: src/utils/statsCalculator.js
 ```javascript
 import { CHART_THEME } from '../theme/obsidianDesign';
@@ -10566,146 +10335,6 @@ export default function PlanSessionDialog({ open, onClose, date, items, onSave }
 }
 ```
 
-## File: src/components/conditioning/ConditioningOverlay.jsx
-```javascript
-// src/components/conditioning/ConditioningOverlay.jsx
-import React from 'react';
-import { Box, Typography, Button, Paper } from '@mui/material';
-import { keyframes } from '@mui/system';
-
-// Aggressive Neon-Puls-Animation für den Button
-const pulseNeon = keyframes`
-  0% { box-shadow: 0 0 10px #FF1493, 0 0 5px #FF1493 inset; transform: scale(1); }
-  50% { box-shadow: 0 0 30px #FF1493, 0 0 15px #FF1493 inset; transform: scale(1.02); }
-  100% { box-shadow: 0 0 10px #FF1493, 0 0 5px #FF1493 inset; transform: scale(1); }
-`;
-
-export default function ConditioningOverlay({ onAcknowledge }) {
-    return (
-        <Box sx={{
-            position: 'fixed',
-            top: 0, left: 0, right: 0, bottom: 0,
-            // Dunkler, schmutziger Rotlicht-Verlauf im Hintergrund
-            background: 'radial-gradient(circle at center, #4A0024 0%, #000000 85%)',
-            zIndex: 99999, // Über allem
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'center',
-            alignItems: 'center',
-            p: 3,
-            
-            // NYLON: Gepunktete Strumpfhose (Point d'esprit / Polka Dots)
-            '&::before': {
-                content: '""',
-                position: 'absolute',
-                top: 0, left: 0, right: 0, bottom: 0,
-                backgroundImage: `
-                  radial-gradient(rgba(0,0,0,0.85) 15%, transparent 16%),
-                  radial-gradient(rgba(0,0,0,0.85) 15%, transparent 16%)
-                `,
-                backgroundSize: '30px 30px',
-                backgroundPosition: '0 0, 15px 15px',
-                zIndex: -1,
-                pointerEvents: 'none',
-                opacity: 0.8
-            }
-        }}>
-            <Paper sx={{
-                position: 'relative',
-                p: { xs: 4, sm: 5 },
-                maxWidth: '450px',
-                textAlign: 'center',
-                
-                // LATEX-GLANZ: Diagonaler Reflexions-Effekt über tiefem Schwarz-Pink
-                background: 'linear-gradient(135deg, rgba(20, 0, 10, 0.95) 0%, rgba(20, 0, 10, 0.95) 45%, rgba(255, 105, 180, 0.15) 50%, rgba(20, 0, 10, 0.95) 55%, rgba(20, 0, 10, 0.95) 100%)',
-                backdropFilter: 'blur(10px)',
-                border: '2px solid #FF1493',
-                boxShadow: '0 0 40px rgba(255, 20, 147, 0.5)',
-                borderRadius: '16px',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: 4,
-                // overflow: visible erlaubt das Herausragen der Spitzen-Ränder
-                overflow: 'visible', 
-                
-                // SPITZE: CSS-Applikation am oberen Rand
-                '&::before': {
-                    content: '""',
-                    position: 'absolute',
-                    top: '-15px',
-                    left: '10px',
-                    right: '10px',
-                    height: '30px',
-                    background: 'radial-gradient(circle, transparent 40%, #FF1493 41%, #FF1493 46%, transparent 47%)',
-                    backgroundSize: '30px 30px',
-                    backgroundPosition: 'center',
-                    zIndex: -1,
-                    opacity: 0.9
-                },
-                // SPITZE: CSS-Applikation am unteren Rand
-                '&::after': {
-                    content: '""',
-                    position: 'absolute',
-                    bottom: '-15px',
-                    left: '10px',
-                    right: '10px',
-                    height: '30px',
-                    background: 'radial-gradient(circle, transparent 40%, #FF1493 41%, #FF1493 46%, transparent 47%)',
-                    backgroundSize: '30px 30px',
-                    backgroundPosition: 'center',
-                    zIndex: -1,
-                    opacity: 0.9
-                }
-            }}>
-                <Typography 
-                    variant="h5" 
-                    sx={{ 
-                        color: '#FF69B4', // Hot Pink
-                        fontWeight: '900',
-                        lineHeight: 1.3,
-                        letterSpacing: 1.5,
-                        textTransform: 'uppercase',
-                        textShadow: '0 0 10px #FF1493, 0 0 20px #FF1493, 0 0 30px #FF1493' // Starker Neon Glow
-                    }}
-                >
-                    Da du ja gerne Dessous und Nylons trägst, wirst du das ab jetzt für den Rest deines Lebens immer tun, egal ob es dir passt oder nicht.
-                </Typography>
-                
-                <Button 
-                    variant="contained" 
-                    onClick={onAcknowledge}
-                    sx={{ 
-                        width: '100%',
-                        bgcolor: '#FF1493', // Schreiendes Pink
-                        color: '#FFFFFF',
-                        border: '1px solid #FF69B4',
-                        py: 2.5,
-                        px: 3,
-                        fontWeight: '900',
-                        fontSize: '1rem',
-                        letterSpacing: '1px',
-                        textTransform: 'uppercase',
-                        borderRadius: '30px', 
-                        animation: `${pulseNeon} 2s infinite`, // Pulsierender Zwang
-                        transition: 'all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1)',
-                        '&:hover': {
-                            bgcolor: '#C71585',
-                            transform: 'scale(1.05)'
-                        },
-                        '&:active': {
-                            transform: 'scale(0.95)'
-                        }
-                    }}
-                >
-                    Ich bin eine Nylon-Fotze und schwöre, dass ich dies ewig tun werde.
-                </Button>
-            </Paper>
-        </Box>
-    );
-}
-```
-
 ## File: src/components/dialogs/WeeklyReportDialog.jsx
 ```javascript
 import React from 'react';
@@ -10943,6 +10572,335 @@ export const useDashboardActions = () => {
     handleAcknowledgeReport
   };
 };
+```
+
+## File: src/services/SuspensionService.js
+```javascript
+// src/services/SuspensionService.js
+import { db } from '../firebase';
+import { collection, addDoc, query, where, getDocs, updateDoc, doc, Timestamp, orderBy, deleteDoc, getDoc, writeBatch } from 'firebase/firestore';
+import { DEFAULT_PROTOCOL_RULES } from '../config/defaultRules';
+
+const COLLECTION = 'suspensions';
+
+export const addSuspension = async (userId, data) => {
+    const start = new Date(data.startDate);
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
+
+    if (start <= todayEnd) {
+        throw new Error("Unzulässig: Aussetzungen müssen mindestens für den Folgetag geplant werden.");
+    }
+
+    await addDoc(collection(db, `users/${userId}/${COLLECTION}`), {
+        type: data.type,
+        reason: data.reason,
+        startDate: Timestamp.fromDate(new Date(data.startDate)),
+        endDate: Timestamp.fromDate(new Date(data.endDate)),
+        packedItemIds: data.packedItemIds || [], 
+        packedItemsDay: data.packedItemsDay || [], 
+        packedItemsNight: data.packedItemsNight || [],
+        createdAt: Timestamp.now(),
+        status: 'scheduled'
+    });
+};
+
+export const deleteScheduledSuspension = async (userId, suspensionId) => {
+    await deleteDoc(doc(db, `users/${userId}/${COLLECTION}`, suspensionId));
+};
+
+export const getSuspensions = async (userId) => {
+    const q = query(
+        collection(db, `users/${userId}/${COLLECTION}`),
+        where('status', 'in', ['scheduled', 'active']),
+        orderBy('startDate', 'asc')
+    );
+    const snap = await getDocs(q);
+    
+    return snap.docs.map(d => ({ 
+        id: d.id, 
+        ...d.data(),
+        startDate: d.data().startDate.toDate(),
+        endDate: d.data().endDate.toDate()
+    }));
+};
+
+export const getAllSuspensions = async (userId) => {
+    try {
+        const q = query(
+            collection(db, `users/${userId}/${COLLECTION}`),
+            orderBy('startDate', 'desc')
+        );
+        const snap = await getDocs(q);
+        
+        return snap.docs.map(d => ({ 
+            id: d.id, 
+            ...d.data(),
+            startDate: d.data().startDate?.toDate ? d.data().startDate.toDate() : new Date(d.data().startDate),
+            endDate: d.data().endDate?.toDate ? d.data().endDate.toDate() : new Date(d.data().endDate)
+        }));
+    } catch (e) {
+        return [];
+    }
+};
+
+export const checkActiveSuspension = async (userId) => {
+    const now = new Date();
+    
+    const timeRules = DEFAULT_PROTOCOL_RULES?.time || { 
+        dayStartHour: 7, 
+        dayStartMinute: 30, 
+        nightStartHour: 23, 
+        nightStartMinute: 0 
+    };
+
+    const qActive = query(
+        collection(db, `users/${userId}/${COLLECTION}`),
+        where('status', '==', 'active')
+    );
+    const snapActive = await getDocs(qActive);
+    
+    if (!snapActive.empty) {
+        const docSnap = snapActive.docs[0];
+        const data = docSnap.data();
+        const end = data.endDate.toDate();
+
+        const endOfSuspension = new Date(end);
+        endOfSuspension.setHours(timeRules.nightStartHour, timeRules.nightStartMinute, 0, 0);
+
+        if (endOfSuspension < now) {
+            await updateDoc(doc(db, `users/${userId}/${COLLECTION}`, docSnap.id), { status: 'completed' });
+            
+            if (data.type === 'stealth_travel') {
+                const qLedger = query(collection(db, `users/${userId}/punishmentLedger`), where('status', '==', 'pending'), where('isStealthAkkumulation', '==', true));
+                const ledgerSnap = await getDocs(qLedger);
+                if (!ledgerSnap.empty) {
+                    const batch = writeBatch(db);
+                    ledgerSnap.forEach(ticket => batch.update(ticket.ref, { isStealthAkkumulation: false }));
+                    await batch.commit();
+                }
+            }
+            
+            await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), { 
+                activeSuspension: false,
+                suspensionReason: null,
+                stealthModeActive: false 
+            });
+            
+            return null;
+        }
+        return { id: docSnap.id, ...data, startDate: data.startDate.toDate(), endDate: end };
+    }
+
+    const qScheduled = query(
+        collection(db, `users/${userId}/${COLLECTION}`),
+        where('status', '==', 'scheduled')
+    );
+    const snapScheduled = await getDocs(qScheduled);
+    
+    for (const d of snapScheduled.docs) {
+        const data = d.data();
+        const start = data.startDate.toDate();
+        const end = data.endDate.toDate();
+        
+        const startOfSuspension = new Date(start);
+        startOfSuspension.setHours(timeRules.dayStartHour, timeRules.dayStartMinute, 0, 0);
+
+        if (startOfSuspension <= now) {
+            await updateDoc(doc(db, `users/${userId}/${COLLECTION}`, d.id), { status: 'active' });
+            
+            await updateDoc(doc(db, `users/${userId}/status/tzd`), {
+                isActive: false,
+                result: 'terminated_by_suspension',
+                endTime: Timestamp.now()
+            });
+
+            if (data.type === 'stealth_travel') {
+                
+                // NEU: Alle offenen Strafen beim Start der Stealth-Phase in den Akkumulations-Modus zwingen
+                try {
+                    const qLedgerPending = query(
+                        collection(db, `users/${userId}/punishmentLedger`), 
+                        where('status', '==', 'pending'), 
+                        where('isStealthAkkumulation', '==', false)
+                    );
+                    const ledgerPendingSnap = await getDocs(qLedgerPending);
+                    if (!ledgerPendingSnap.empty) {
+                        const batch = writeBatch(db);
+                        ledgerPendingSnap.forEach(ticket => {
+                            batch.update(ticket.ref, { isStealthAkkumulation: true });
+                        });
+                        await batch.commit();
+                        console.log("Stealth Mode: Altlasten ins Zins-Ledger überführt.");
+                    }
+                } catch (e) {
+                    console.error("Fehler beim Transfer der Altlasten in den Stealth-Modus:", e);
+                }
+
+                await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), {
+                    evasionPenaltyTriggered: false, 
+                    tzdDurationMinutes: 0,
+                    stealthModeActive: true 
+                });
+            } else {
+                await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), {
+                    evasionPenaltyTriggered: false, 
+                    tzdDurationMinutes: 0,
+                    activeSuspension: true, 
+                    suspensionReason: data.reason
+                });
+            }
+            
+            return { id: d.id, ...data, status: 'active', startDate: start, endDate: end };
+        }
+    }
+
+    return null;
+};
+
+// --- IRON CONTRACT PROTOCOL ---
+export const terminateSuspension = async (userId, suspensionId) => {
+    throw new Error("SYSTEM SPERRE: Ein vorzeitiger Abbruch einer geplanten Ausfallzeit ist systemseitig gesperrt (Iron Contract). Die Zeit muss zwingend abgesessen werden.");
+};
+```
+
+## File: src/components/conditioning/ConditioningOverlay.jsx
+```javascript
+// src/components/conditioning/ConditioningOverlay.jsx
+import React from 'react';
+import { Box, Typography, Button, Paper } from '@mui/material';
+import { keyframes } from '@mui/system';
+
+// Aggressive Neon-Puls-Animation für den Button
+const pulseNeon = keyframes`
+  0% { box-shadow: 0 0 10px #FF1493, 0 0 5px #FF1493 inset; transform: scale(1); }
+  50% { box-shadow: 0 0 30px #FF1493, 0 0 15px #FF1493 inset; transform: scale(1.02); }
+  100% { box-shadow: 0 0 10px #FF1493, 0 0 5px #FF1493 inset; transform: scale(1); }
+`;
+
+export default function ConditioningOverlay({ onAcknowledge }) {
+    return (
+        <Box sx={{
+            position: 'fixed',
+            top: 0, left: 0, right: 0, bottom: 0,
+            // Dunkler, schmutziger Rotlicht-Verlauf im Hintergrund
+            background: 'radial-gradient(circle at center, #4A0024 0%, #000000 85%)',
+            zIndex: 99999, // Über allem
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center',
+            alignItems: 'center',
+            p: 3,
+            
+            // NYLON: Gepunktete Strumpfhose (Point d'esprit / Polka Dots)
+            '&::before': {
+                content: '""',
+                position: 'absolute',
+                top: 0, left: 0, right: 0, bottom: 0,
+                backgroundImage: `
+                  radial-gradient(rgba(0,0,0,0.85) 15%, transparent 16%),
+                  radial-gradient(rgba(0,0,0,0.85) 15%, transparent 16%)
+                `,
+                backgroundSize: '30px 30px',
+                backgroundPosition: '0 0, 15px 15px',
+                zIndex: -1,
+                pointerEvents: 'none',
+                opacity: 0.8
+            }
+        }}>
+            <Paper sx={{
+                position: 'relative',
+                p: { xs: 4, sm: 5 },
+                maxWidth: '450px',
+                textAlign: 'center',
+                
+                // LATEX-GLANZ: Diagonaler Reflexions-Effekt über tiefem Schwarz-Pink
+                background: 'linear-gradient(135deg, rgba(20, 0, 10, 0.95) 0%, rgba(20, 0, 10, 0.95) 45%, rgba(255, 105, 180, 0.15) 50%, rgba(20, 0, 10, 0.95) 55%, rgba(20, 0, 10, 0.95) 100%)',
+                backdropFilter: 'blur(10px)',
+                border: '2px solid #FF1493',
+                boxShadow: '0 0 40px rgba(255, 20, 147, 0.5)',
+                borderRadius: '16px',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 4,
+                // overflow: visible erlaubt das Herausragen der Spitzen-Ränder
+                overflow: 'visible', 
+                
+                // SPITZE: CSS-Applikation am oberen Rand
+                '&::before': {
+                    content: '""',
+                    position: 'absolute',
+                    top: '-15px',
+                    left: '10px',
+                    right: '10px',
+                    height: '30px',
+                    background: 'radial-gradient(circle, transparent 40%, #FF1493 41%, #FF1493 46%, transparent 47%)',
+                    backgroundSize: '30px 30px',
+                    backgroundPosition: 'center',
+                    zIndex: -1,
+                    opacity: 0.9
+                },
+                // SPITZE: CSS-Applikation am unteren Rand
+                '&::after': {
+                    content: '""',
+                    position: 'absolute',
+                    bottom: '-15px',
+                    left: '10px',
+                    right: '10px',
+                    height: '30px',
+                    background: 'radial-gradient(circle, transparent 40%, #FF1493 41%, #FF1493 46%, transparent 47%)',
+                    backgroundSize: '30px 30px',
+                    backgroundPosition: 'center',
+                    zIndex: -1,
+                    opacity: 0.9
+                }
+            }}>
+                <Typography 
+                    variant="h5" 
+                    sx={{ 
+                        color: '#FF69B4', // Hot Pink
+                        fontWeight: '900',
+                        lineHeight: 1.3,
+                        letterSpacing: 1.5,
+                        textShadow: '0 0 10px #FF1493, 0 0 20px #FF1493, 0 0 30px #FF1493' // Starker Neon Glow
+                    }}
+                >
+                    Da du ja so gerne Dessous und Nylons trägst, wirst du das ab jetzt für den Rest deines Lebens immer tun, egal ob es dir passt oder nicht.
+                </Typography>
+                
+                <Button 
+                    variant="contained" 
+                    onClick={onAcknowledge}
+                    sx={{ 
+                        width: '100%',
+                        bgcolor: '#FF1493', // Schreiendes Pink
+                        color: '#FFFFFF',
+                        border: '1px solid #FF69B4',
+                        py: 2.5,
+                        px: 3,
+                        fontWeight: '900',
+                        fontSize: '1rem',
+                        letterSpacing: '1px',
+                        textTransform: 'uppercase',
+                        borderRadius: '30px', 
+                        animation: `${pulseNeon} 2s infinite`, // Pulsierender Zwang
+                        transition: 'all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1)',
+                        '&:hover': {
+                            bgcolor: '#C71585',
+                            transform: 'scale(1.05)'
+                        },
+                        '&:active': {
+                            transform: 'scale(0.95)'
+                        }
+                    }}
+                >
+                    Ich schwöre, dass ich für den Rest meines Lebens nur noch Dessous und Nylons tragen werde.
+                </Button>
+            </Paper>
+        </Box>
+    );
+}
 ```
 
 ## File: src/hooks/useItemDetailLogic.js
@@ -11254,14 +11212,54 @@ function useItemActions(config) {
                 imageUrl: finalImages.length > 0 ? finalImages[0] : null
             };
 
+            // --- DIFFING ALGORITHMUS FÜR HISTORIE ---
+            const changes = [];
+            const safeString = (val) => (val === null || val === undefined ? '' : String(val).trim());
+
+            if (safeString(item.location || item.storageLocation) !== safeString(formData.location)) {
+                changes.push(`Lagerort (${safeString(item.location || item.storageLocation) || 'N/A'} ➔ ${safeString(formData.location) || 'N/A'})`);
+            }
+            if (safeString(item.condition) !== safeString(formData.condition)) {
+                changes.push(`Zustand (${safeString(item.condition)} ➔ ${safeString(formData.condition)})`);
+            }
+            if (safeString(item.suitablePeriod) !== safeString(formData.suitablePeriod)) {
+                changes.push(`Tragezeit (${safeString(item.suitablePeriod)} ➔ ${safeString(formData.suitablePeriod)})`);
+            }
+            if (safeString(item.cost) !== safeString(formData.cost)) {
+                changes.push(`Preis (${safeString(item.cost)}€ ➔ ${safeString(formData.cost)}€)`);
+            }
+            if (safeString(item.notes) !== safeString(formData.notes)) {
+                changes.push(`Notizen bearbeitet`);
+            }
+
+            // --- DATENBANK & STATE UPDATE ---
             // Gatekeeper ULP Update nutzen
             await updateItem(currentUser.uid, id, updatedData);
             
             const timestamp = new Date().toISOString();
+            
+            let newHistoryLog = [...(item.historyLog || [])];
+            
+            // Nur loggen, wenn sich wirklich relevante Felder geändert haben
+            if (changes.length > 0) {
+                const diffMessage = `Eigenschaften modifiziert: ${changes.join(', ')}`;
+                newHistoryLog.push({ 
+                    type: 'METADATA_UPDATED', 
+                    date: timestamp, 
+                    data: { message: diffMessage } 
+                });
+                
+                // Wir pushen den Eintrag auch hard in die Firebase, da updateItem dies nicht von sich aus tut
+                const { arrayUnion } = await import('firebase/firestore');
+                await updateItem(currentUser.uid, id, {
+                    historyLog: arrayUnion({ type: 'METADATA_UPDATED', date: timestamp, data: { message: diffMessage } })
+                });
+            }
+
             setItem(prev => ({ 
                 ...prev, 
                 ...updatedData,
-                historyLog: [...(prev.historyLog || []), { type: 'METADATA_UPDATED', date: timestamp, data: { message: 'Eigenschaften modifiziert' } }]
+                historyLog: newHistoryLog
             }));
             
             setPendingFiles([]); 
@@ -12275,262 +12273,6 @@ export default function InstructionDialog({
       </Dialog>
     </>
   );
-}
-```
-
-## File: src/hooks/dashboard/useSessionProgress.js
-```javascript
-// src/hooks/dashboard/useSessionProgress.js
-import { useState, useEffect } from 'react';
-import { collection, query, where, onSnapshot, doc, getDoc } from 'firebase/firestore';
-import { db } from '../../firebase';
-import { DEFAULT_PROTOCOL_RULES } from '../../config/defaultRules';
-import { checkAndRunWeeklyUpdate } from '../../services/ProtocolService';
-import { verifyNightCompliance } from '../../services/InstructionService'; 
-
-export default function useSessionProgress(currentUser, items) {
-    const [activeSessions, setActiveSessions] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [nightCompliance, setNightCompliance] = useState(null);
-    const [discountMinutes, setDiscountMinutes] = useState(0); 
-    
-    const [dailyTargetHours, setDailyTargetHours] = useState(DEFAULT_PROTOCOL_RULES.currentDailyGoal || 4); 
-    const [nightStartHour, setNightStartHour] = useState(23); 
-    const [completedTodayMinutes, setCompletedTodayMinutes] = useState(0);
-
-    // 0. AUTOMATISCHER WOCHEN-CHECK
-    useEffect(() => {
-        if (!currentUser) return;
-        const runUpdate = async () => {
-            await checkAndRunWeeklyUpdate(currentUser.uid);
-        };
-        runUpdate();
-    }, [currentUser]);
-
-    // 1. ZIEL & ZEITEN LADEN
-    useEffect(() => {
-        if (!currentUser) return;
-        
-        const settingsRef = doc(db, `users/${currentUser.uid}/settings/protocol`);
-        
-        const unsub = onSnapshot(settingsRef, async (docSnap) => {
-            if (docSnap.exists()) {
-                const data = docSnap.data();
-                
-                if (data.currentDailyGoal !== undefined) {
-                    setDailyTargetHours(data.currentDailyGoal);
-                } else {
-                    try {
-                        const prefSnap = await getDoc(doc(db, `users/${currentUser.uid}/settings/preferences`));
-                        if (prefSnap.exists() && prefSnap.data().dailyTargetHours) {
-                            setDailyTargetHours(prefSnap.data().dailyTargetHours);
-                        } else {
-                            setDailyTargetHours(4);
-                        }
-                    } catch (e) {
-                        setDailyTargetHours(4);
-                    }
-                }
-
-                if (data.time && data.time.nightStartHour !== undefined) {
-                    setNightStartHour(data.time.nightStartHour);
-                }
-
-            } else {
-                setDailyTargetHours(4);
-                setNightStartHour(23);
-            }
-        }, (error) => {
-            console.error("Fehler beim Laden der Protokoll-Daten:", error);
-        });
-
-        return () => unsub();
-    }, [currentUser]);
-
-    // 2. NACHT-COMPLIANCE LADEN & AUTOMATISCH VERIFIZIEREN
-    useEffect(() => {
-        if (!currentUser) return;
-
-        const getLocalISODate = (date) => {
-            const offset = date.getTimezoneOffset() * 60000;
-            return new Date(date.getTime() - offset).toISOString().split('T')[0];
-        };
-
-        const todayStr = getLocalISODate(new Date());
-        const statusRef = doc(db, `users/${currentUser.uid}/status/nightCompliance`);
-        
-        let intervalId;
-
-        const unsub = onSnapshot(statusRef, (snap) => {
-           let needsVerification = false;
-           if(snap.exists()) {
-               const data = snap.data();
-               if (data.date === todayStr) {
-                   setNightCompliance(data.success);
-               } else {
-                   setNightCompliance(null); 
-                   needsVerification = true;
-               }
-           } else {
-               setNightCompliance(null);
-               needsVerification = true;
-           }
-
-           if (needsVerification) {
-               const checkAndVerify = async () => {
-                   const d = new Date();
-                   // NEU: Watcher löst exakt ab 07:30 Uhr aus
-                   if (d.getHours() > 7 || (d.getHours() === 7 && d.getMinutes() >= 30)) {
-                       if (intervalId) clearInterval(intervalId);
-                       await verifyNightCompliance(currentUser.uid);
-                   }
-               };
-               
-               checkAndVerify(); 
-               
-               const d = new Date();
-               // NEU: Intervall bleibt bestehen, bis es 07:30 Uhr ist
-               if (!(d.getHours() > 7 || (d.getHours() === 7 && d.getMinutes() >= 30)) && !intervalId) {
-                   intervalId = setInterval(checkAndVerify, 60000);
-               }
-           } else {
-               if (intervalId) clearInterval(intervalId);
-           }
-        });
-
-        return () => {
-            unsub();
-            if (intervalId) clearInterval(intervalId);
-        };
-    }, [currentUser]);
-
-    // 2b. DISCOUNT LISTENER
-    useEffect(() => {
-        if (!currentUser) return;
-        const instrRef = doc(db, `users/${currentUser.uid}/status/dailyInstruction`);
-        const unsub = onSnapshot(instrRef, (snap) => {
-            if (snap.exists() && snap.data().discountMinutes) {
-                setDiscountMinutes(snap.data().discountMinutes);
-            } else {
-                setDiscountMinutes(0);
-            }
-        });
-        return () => unsub();
-    }, [currentUser]);
-
-    // 3. Aktive Sessions & Historie Heute laden
-    useEffect(() => {
-        if (!currentUser) return;
-
-        const qActive = query(
-            collection(db, `users/${currentUser.uid}/sessions`),
-            where('endTime', '==', null)
-        );
-
-        const unsubActive = onSnapshot(qActive, (snapshot) => {
-            const sessions = snapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data(),
-                startTime: doc.data().startTime?.toDate() || new Date()
-            }));
-            setActiveSessions(sessions);
-            setLoading(false);
-        });
-
-        const startOfDay = new Date();
-        startOfDay.setHours(0,0,0,0);
-        
-        const qHistory = query(
-            collection(db, `users/${currentUser.uid}/sessions`),
-            where('startTime', '>=', startOfDay),
-            where('type', 'in', ['instruction', 'tzd']) 
-        );
-
-        const unsubHistory = onSnapshot(qHistory, (snapshot) => {
-            let maxDuration = 0;
-
-            snapshot.docs.forEach(doc => {
-                const data = doc.data();
-                const isNight = data.periodId && data.periodId.toLowerCase().includes('night');
-
-                if (!isNight && data.endTime) {
-                    let duration = (data.endTime.toDate() - data.startTime.toDate()) / 60000;
-                    if (data.discountMinutes) duration += data.discountMinutes;
-                    if (duration > maxDuration) maxDuration = duration;
-                }
-            });
-            setCompletedTodayMinutes(maxDuration);
-        });
-
-        return () => {
-            unsubActive();
-            unsubHistory();
-        };
-    }, [currentUser]);
-
-    // 4. Progress Berechnung
-    const calculateProgress = () => {
-        const now = new Date();
-        
-        let targetMinutes = (dailyTargetHours * 60);
-        if (targetMinutes < 0) targetMinutes = 0; 
-        
-        // Harter Reset am späten Abend (Nacht-Phase beginnt)
-        if (now.getHours() >= nightStartHour) {
-            return {
-                currentContinuousMinutes: discountMinutes,
-                dailyTargetMinutes: targetMinutes,
-                percentage: 0,
-                isDailyGoalMet: false, 
-                isLive: false,
-                nightCompliance,
-                discountMinutes
-            };
-        }
-
-        const activeInstruction = activeSessions.find(s => 
-            (s.type === 'instruction' || s.type === 'tzd') && 
-            (!s.periodId || !s.periodId.includes('night'))
-        );
-
-        let currentMinutes = 0;
-        let isLive = false;
-
-        if (activeInstruction && activeInstruction.instructionReadyTime) {
-            const start = activeInstruction.instructionReadyTime?.toDate ? activeInstruction.instructionReadyTime.toDate() : new Date(activeInstruction.instructionReadyTime);
-            currentMinutes = Math.floor((now - start) / 60000) + discountMinutes;
-            isLive = true;
-        } else {
-            currentMinutes = Math.floor(completedTodayMinutes) + discountMinutes;
-        }
-
-        const isGoalMet = currentMinutes >= targetMinutes;
-
-        if (!isLive && !isGoalMet) {
-            currentMinutes = discountMinutes;
-        }
-
-        return {
-            currentContinuousMinutes: currentMinutes,
-            dailyTargetMinutes: targetMinutes,
-            percentage: Math.min(100, Math.max(0, (currentMinutes / targetMinutes) * 100)),
-            isDailyGoalMet: isGoalMet,
-            isLive,
-            nightCompliance,
-            discountMinutes
-        };
-    };
-
-    return {
-        activeSessions,
-        loading,
-        progress: calculateProgress(),
-        dailyTargetHours,
-        nightCompliance,
-        startInstructionSession: async () => {}, 
-        stopSession: async () => {},
-        registerRelease: async () => {}
-    };
 }
 ```
 
@@ -13600,6 +13342,265 @@ export const addItemHistoryEntry = async (userId, itemId, entry) => {
         })
     });
 };
+```
+
+## File: src/hooks/dashboard/useSessionProgress.js
+```javascript
+// src/hooks/dashboard/useSessionProgress.js
+import { useState, useEffect } from 'react';
+import { collection, query, where, onSnapshot, doc, getDoc } from 'firebase/firestore';
+import { db } from '../../firebase';
+import { DEFAULT_PROTOCOL_RULES } from '../../config/defaultRules';
+import { checkAndRunWeeklyUpdate } from '../../services/ProtocolService';
+import { verifyNightCompliance } from '../../services/InstructionService'; 
+
+export default function useSessionProgress(currentUser, items) {
+    const [activeSessions, setActiveSessions] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [nightCompliance, setNightCompliance] = useState(null);
+    const [discountMinutes, setDiscountMinutes] = useState(0); 
+    
+    const [dailyTargetHours, setDailyTargetHours] = useState(DEFAULT_PROTOCOL_RULES.currentDailyGoal || 4); 
+    const [nightStartHour, setNightStartHour] = useState(23); 
+    const [completedTodayMinutes, setCompletedTodayMinutes] = useState(0);
+
+    // 0. AUTOMATISCHER WOCHEN-CHECK
+    useEffect(() => {
+        if (!currentUser) return;
+        const runUpdate = async () => {
+            await checkAndRunWeeklyUpdate(currentUser.uid);
+        };
+        runUpdate();
+    }, [currentUser]);
+
+    // 1. ZIEL & ZEITEN LADEN
+    useEffect(() => {
+        if (!currentUser) return;
+        
+        const settingsRef = doc(db, `users/${currentUser.uid}/settings/protocol`);
+        
+        const unsub = onSnapshot(settingsRef, async (docSnap) => {
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                
+                if (data.currentDailyGoal !== undefined) {
+                    setDailyTargetHours(data.currentDailyGoal);
+                } else {
+                    try {
+                        const prefSnap = await getDoc(doc(db, `users/${currentUser.uid}/settings/preferences`));
+                        if (prefSnap.exists() && prefSnap.data().dailyTargetHours) {
+                            setDailyTargetHours(prefSnap.data().dailyTargetHours);
+                        } else {
+                            setDailyTargetHours(4);
+                        }
+                    } catch (e) {
+                        setDailyTargetHours(4);
+                    }
+                }
+
+                if (data.time && data.time.nightStartHour !== undefined) {
+                    setNightStartHour(data.time.nightStartHour);
+                }
+
+            } else {
+                setDailyTargetHours(4);
+                setNightStartHour(23);
+            }
+        }, (error) => {
+            console.error("Fehler beim Laden der Protokoll-Daten:", error);
+        });
+
+        return () => unsub();
+    }, [currentUser]);
+
+    // 2. NACHT-COMPLIANCE LADEN & AUTOMATISCH VERIFIZIEREN
+    useEffect(() => {
+        if (!currentUser) return;
+
+        const getLocalISODate = (date) => {
+            const offset = date.getTimezoneOffset() * 60000;
+            return new Date(date.getTime() - offset).toISOString().split('T')[0];
+        };
+
+        const todayStr = getLocalISODate(new Date());
+        const statusRef = doc(db, `users/${currentUser.uid}/status/nightCompliance`);
+        
+        let intervalId;
+
+        const unsub = onSnapshot(statusRef, (snap) => {
+           let needsVerification = false;
+           if(snap.exists()) {
+               const data = snap.data();
+               if (data.date === todayStr) {
+                   setNightCompliance(data.success);
+               } else {
+                   setNightCompliance(null); 
+                   needsVerification = true;
+               }
+           } else {
+               setNightCompliance(null);
+               needsVerification = true;
+           }
+
+           if (needsVerification) {
+               const checkAndVerify = async () => {
+                   const d = new Date();
+                   // NEU: Watcher löst exakt ab 07:30 Uhr aus
+                   if (d.getHours() > 7 || (d.getHours() === 7 && d.getMinutes() >= 30)) {
+                       if (intervalId) clearInterval(intervalId);
+                       await verifyNightCompliance(currentUser.uid);
+                   }
+               };
+               
+               checkAndVerify(); 
+               
+               const d = new Date();
+               // NEU: Intervall bleibt bestehen, bis es 07:30 Uhr ist
+               if (!(d.getHours() > 7 || (d.getHours() === 7 && d.getMinutes() >= 30)) && !intervalId) {
+                   intervalId = setInterval(checkAndVerify, 60000);
+               }
+           } else {
+               if (intervalId) clearInterval(intervalId);
+           }
+        });
+
+        return () => {
+            unsub();
+            if (intervalId) clearInterval(intervalId);
+        };
+    }, [currentUser]);
+
+    // 2b. DISCOUNT LISTENER
+    useEffect(() => {
+        if (!currentUser) return;
+        const instrRef = doc(db, `users/${currentUser.uid}/status/dailyInstruction`);
+        const unsub = onSnapshot(instrRef, (snap) => {
+            if (snap.exists() && snap.data().discountMinutes) {
+                setDiscountMinutes(snap.data().discountMinutes);
+            } else {
+                setDiscountMinutes(0);
+            }
+        });
+        return () => unsub();
+    }, [currentUser]);
+
+    // 3. Aktive Sessions & Historie Heute laden
+    useEffect(() => {
+        if (!currentUser) return;
+
+        const qActive = query(
+            collection(db, `users/${currentUser.uid}/sessions`),
+            where('endTime', '==', null)
+        );
+
+        const unsubActive = onSnapshot(qActive, (snapshot) => {
+            const sessions = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data(),
+                startTime: doc.data().startTime?.toDate() || new Date()
+            }));
+            setActiveSessions(sessions);
+            setLoading(false);
+        });
+
+        const startOfDay = new Date();
+        startOfDay.setHours(0,0,0,0);
+        
+        const qHistory = query(
+            collection(db, `users/${currentUser.uid}/sessions`),
+            where('startTime', '>=', startOfDay),
+            where('type', 'in', ['instruction', 'tzd']) 
+        );
+
+        const unsubHistory = onSnapshot(qHistory, (snapshot) => {
+            let maxDuration = 0;
+
+            snapshot.docs.forEach(doc => {
+                const data = doc.data();
+                const isNight = data.periodId && data.periodId.toLowerCase().includes('night');
+
+                if (!isNight && data.endTime) {
+                    let duration = (data.endTime.toDate() - data.startTime.toDate()) / 60000;
+                    if (data.discountMinutes) duration += data.discountMinutes;
+                    if (duration > maxDuration) maxDuration = duration;
+                }
+            });
+            setCompletedTodayMinutes(maxDuration);
+        });
+
+        return () => {
+            unsubActive();
+            unsubHistory();
+        };
+    }, [currentUser]);
+
+    // 4. Progress Berechnung
+    const calculateProgress = () => {
+        const now = new Date();
+        
+        let targetMinutes = (dailyTargetHours * 60);
+        if (targetMinutes < 0) targetMinutes = 0; 
+        
+        // Harter Reset am späten Abend (Nacht-Phase beginnt)
+        if (now.getHours() >= nightStartHour) {
+            return {
+                currentContinuousMinutes: discountMinutes,
+                dailyTargetMinutes: targetMinutes,
+                percentage: 0,
+                isDailyGoalMet: false, 
+                isLive: false,
+                nightCompliance,
+                discountMinutes
+            };
+        }
+
+        const activeInstruction = activeSessions.find(s => 
+            (s.type === 'instruction' || s.type === 'tzd') && 
+            (!s.periodId || !s.periodId.includes('night'))
+        );
+
+        let currentMinutes = 0;
+        let isLive = false;
+
+        if (activeInstruction && activeInstruction.instructionReadyTime) {
+            const start = activeInstruction.instructionReadyTime?.toDate ? activeInstruction.instructionReadyTime.toDate() : new Date(activeInstruction.instructionReadyTime);
+            // Injektion des Vorschusses
+            currentMinutes = Math.floor((now - start) / 60000) + discountMinutes;
+            isLive = true;
+        } else {
+            // Injektion des Vorschusses in die ruhende Zeit
+            currentMinutes = Math.floor(completedTodayMinutes) + discountMinutes;
+        }
+
+        const isGoalMet = currentMinutes >= targetMinutes;
+
+        if (!isLive && !isGoalMet) {
+            // BUGFIX: Kombinierte Zeit aus bereits abgeleisteter Zeit PLUS Discount
+            currentMinutes = Math.floor(completedTodayMinutes) + discountMinutes;
+        }
+
+        return {
+            currentContinuousMinutes: currentMinutes,
+            dailyTargetMinutes: targetMinutes,
+            percentage: Math.min(100, Math.max(0, (currentMinutes / targetMinutes) * 100)),
+            isDailyGoalMet: isGoalMet,
+            isLive,
+            nightCompliance,
+            discountMinutes
+        };
+    };
+
+    return {
+        activeSessions,
+        loading,
+        progress: calculateProgress(),
+        dailyTargetHours,
+        nightCompliance,
+        startInstructionSession: async () => {}, 
+        stopSession: async () => {},
+        registerRelease: async () => {}
+    };
+}
 ```
 
 ## File: src/services/TimeBankService.js
@@ -17699,17 +17700,28 @@ export default function Dashboard() {
       }
 
       try {
-          await spendCredits(currentUser.uid, minutesToBuy, paymentType);
-
           const instrRef = doc(db, `users/${currentUser.uid}/status/dailyInstruction`);
           const instrSnap = await getDoc(instrRef);
 
           if (instrSnap.exists()) {
               const data = instrSnap.data();
+              
+              // GAMBLER'S RISK PROTOCOL: Die "1 Shot" Sperre
+              if (data.discountUsedToday) {
+                  showToast("Freikauf verweigert. Das System gewährt dieses Privileg nur einmal pro Tag.", "error");
+                  return;
+              }
+
+              // Credits physisch verbrennen
+              await spendCredits(currentUser.uid, minutesToBuy, paymentType);
+
               const currentDiscount = data.discountMinutes || 0;
               const newDiscount = currentDiscount + minutesToBuy;
               
-              await updateDoc(instrRef, { discountMinutes: newDiscount });
+              await updateDoc(instrRef, { 
+                  discountMinutes: newDiscount,
+                  discountUsedToday: true // Sperre für den Rest des Tages setzen
+              });
 
               let successMessage = `Freikauf autorisiert (-${minutesToBuy} Min).`;
               if (paymentType === 'both') successMessage = `Freikauf autorisiert (-${minutesToBuy} Min).\nSystem erzwang kombinierte LC & NC Zahlung.`;
@@ -18676,6 +18688,12 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
         finalNote: feedback.note || ''
     };
 
+    // GAMBLER'S RISK: Wenn das Ziel verfehlt wird, verbrennt der Freikauf.
+    if (!isInstructionCompleted && sessionDiscountMinutes > 0 && !isNightSession) {
+        const lossMsg = `GAMBLER'S RISK: ${sessionDiscountMinutes}m Freikauf durch Abbruch vernichtet`;
+        updateData.finalNote = updateData.finalNote ? `${updateData.finalNote} | ${lossMsg}` : lossMsg;
+    }
+
     if (nightSuccess !== null) {
         updateData.nightSuccess = nightSuccess;
     }
@@ -18870,10 +18888,16 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
         const instrSnap = await getDoc(instrRef);
         
         if (instrSnap.exists() && instrSnap.data().periodId === sessionData.periodId) {
+            // GAMBLER'S RISK: Wenn das Ziel verfehlt wird, verbrennt der Bonus (wird auf 0 gesetzt).
+            // Da das Feld in instrUpdates definiert ist, wird es entweder auf 0 genullt (Strafe) 
+            // oder bleibt 0 (wenn eh nichts da war). Der Flag discountForfeited verhindert den Neukauf.
             const instrUpdates = { isActive: false, activeSessionId: null, discountMinutes: 0 };
             
             if (isInstructionCompleted) {
                 instrUpdates.isCompleted = true;
+            } else if (sessionDiscountMinutes > 0 && !isNightSession) {
+                // Hard-Lock für den restlichen Tag, damit das verlorene Privileg nicht nachgekauft wird.
+                instrUpdates.discountForfeited = true; 
             }
 
             batch.set(instrRef, instrUpdates, { merge: true });

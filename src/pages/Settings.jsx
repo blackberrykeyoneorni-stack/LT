@@ -131,9 +131,10 @@ export default function Settings() {
               const data = protSnap.data();
               if (data.currentDailyGoal !== undefined) mergedRules.currentDailyGoal = data.currentDailyGoal;
               
-              // NEU: Lade Erpressungs-Wahrscheinlichkeit
+              // KORREKTUR: Lade Erpressungs-Wahrscheinlichkeit und ergänze mergedRules
               if (data.extortion && data.extortion.triggerChance !== undefined) {
                   setExtortionTriggerChance(data.extortion.triggerChance);
+                  mergedRules.extortion = { triggerChance: data.extortion.triggerChance };
               }
 
               mergedRules.tzd = { 
@@ -182,229 +183,104 @@ export default function Settings() {
           if (prefSnap.exists()) {
               batch.update(prefRef, { maxInstructionItems, categoryWeights });
           } else {
-              batch.set(prefRef, { maxInstructionItems, categoryWeights });
+              batch.set(prefRef, { maxInstructionItems, categoryWeights, dailyTargetHours: protocolRules.currentDailyGoal || 4 });
           }
 
           if (protocolRules) {
-              const protRef = doc(db, `users/${uid}/settings/protocol`);
-              // NEU: Füge Erpressungs-Wahrscheinlichkeit zum Speichern hinzu
-              const updatedRules = { 
-                  ...protocolRules, 
-                  extortion: { triggerChance: extortionTriggerChance },
-                  lastGoalUpdate: serverTimestamp() 
-              };
-              batch.set(protRef, updatedRules, { merge: true });
+              const protocolRef = doc(db, `users/${uid}/settings/protocol`);
+              const cleanRules = { ...protocolRules };
+              
+              // KORREKTUR: Speichere den extortion-Wert sicher im Protokoll ab
+              if (cleanRules.extortion) {
+                  cleanRules.extortion.triggerChance = extortionTriggerChance;
+              } else {
+                  cleanRules.extortion = { triggerChance: extortionTriggerChance };
+              }
+
+              batch.set(protocolRef, cleanRules, { merge: true });
           }
 
-          batch.set(doc(db, `users/${uid}/settings/brands`), { list: brands }, { merge: true });
-          batch.set(doc(db, `users/${uid}/settings/materials`), { list: materials }, { merge: true });
-          batch.set(doc(db, `users/${uid}/settings/locations`), { list: locations }, { merge: true });
-          batch.set(doc(db, `users/${uid}/settings/archiveReasons`), { list: archiveReasons }, { merge: true });
-          batch.set(doc(db, `users/${uid}/settings/runLocations`), { list: runLocations }, { merge: true });
-          batch.set(doc(db, `users/${uid}/settings/runCauses`), { list: runCauses }, { merge: true });
-
-          const catRef = doc(db, `users/${uid}/settings/categories`);
-          const catSnap = await getDoc(catRef);
-          if (catSnap.exists()) {
-              batch.update(catRef, { structure: catStructure });
-          } else {
-              batch.set(catRef, { structure: catStructure });
-          }
-
-          const locIdxRef = doc(db, `users/${uid}/settings/locationIndex`);
-          const locIdxSnap = await getDoc(locIdxRef);
-          if (locIdxSnap.exists()) {
-              batch.update(locIdxRef, { mapping: locationIndex });
-          } else {
-              batch.set(locIdxRef, { mapping: locationIndex });
-          }
+          batch.set(doc(db, `users/${uid}/settings/brands`), { list: brands });
+          batch.set(doc(db, `users/${uid}/settings/materials`), { list: materials });
+          batch.set(doc(db, `users/${uid}/settings/categories`), { structure: catStructure });
+          batch.set(doc(db, `users/${uid}/settings/locations`), { list: locations });
+          batch.set(doc(db, `users/${uid}/settings/locationIndex`), { mapping: locationIndex });
+          batch.set(doc(db, `users/${uid}/settings/archiveReasons`), { list: archiveReasons });
+          batch.set(doc(db, `users/${uid}/settings/runLocations`), { list: runLocations });
+          batch.set(doc(db, `users/${uid}/settings/runCauses`), { list: runCauses });
 
           await batch.commit();
-          showToast("Alle Einstellungen erfolgreich gespeichert.", "success");
-
-      } catch (e) {
-          showToast("Fehler beim Speichern: " + e.message, "error");
-      } finally {
-          setIsSavingAll(false);
-      }
+          showToast("Gesamte System-Konfiguration gespeichert.");
+      } catch(e) { console.error(e); showToast("Fehler beim Speichern.", "error"); }
+      finally { setIsSavingAll(false); }
   };
 
-  const handleAddSuspension = async () => {
-      let currentReason = newSuspension.reason;
-      
-      if (newSuspension.type === 'stealth_travel' && !currentReason) {
-          currentReason = 'Operation: Infiltration';
-      }
+  const addListEntry = (setter, val, resetter) => {
+      if(!val) return;
+      setter(prev => [...new Set([...prev, val])]);
+      resetter('');
+  };
+  const removeListEntry = (setter, val) => setter(prev => prev.filter(v => v !== val));
 
-      if(!newSuspension.startDate || !newSuspension.endDate || !currentReason) {
-          showToast("Bitte fülle alle notwendigen Felder aus.", "error");
-          return;
-      }
-      
-      const start = new Date(newSuspension.startDate);
-      const end = new Date(newSuspension.endDate);
-      
-      if (newSuspension.type === 'stealth_travel') {
-          if (stealthConfig.allowedDaySubCategories.length === 0) {
-              showToast("Bitte wähle mindestens eine erlaubte Subkategorie für den Tag aus.", "error");
-              return;
-          }
-
-          const diffTime = Math.abs(end - start);
-          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
-          const nights = diffDays > 1 ? diffDays - 1 : 1; 
-
-          const neededDay = diffDays * stealthConfig.dayIntensity;
-          const neededNight = nights * stealthConfig.nightIntensity;
-
-          let availableNight = allItems.filter(i => i.status === 'active' && i.subCategory === 'Strumpfhose');
-          let availableDay = allItems.filter(i => i.status === 'active' && stealthConfig.allowedDaySubCategories.includes(i.subCategory));
-
-          availableNight.sort((a, b) => (a.wearCount || 0) - (b.wearCount || 0));
-          availableDay.sort((a, b) => (a.wearCount || 0) - (b.wearCount || 0));
-
-          if (availableNight.length < neededNight) {
-              showToast(`Bestand zu gering: ${neededNight} Strumpfhosen benötigt, ${availableNight.length} sauber.`, "error");
-              return;
-          }
-          if (availableDay.length < neededDay) {
-              showToast(`Bestand zu gering: ${neededDay} Tag-Items benötigt, ${availableDay.length} sauber.`, "error");
-              return;
-          }
-
-          setSystemPackedItems({ 
-              day: availableDay.slice(0, neededDay), 
-              night: availableNight.slice(0, neededNight) 
-          });
-          
-          setNewSuspension(prev => ({...prev, reason: currentReason}));
-          setSuspensionDialogMode('pack');
-          return;
-      }
-      
-      try {
-          await addSuspension(currentUser.uid, { ...newSuspension, reason: currentReason });
-          showToast("Auszeit beantragt & genehmigt.", "success");
-          setSuspensionDialog(false);
-          loadSuspensions();
-          setNewSuspension({ type: 'medical', reason: '', startDate: '', endDate: '' });
-      } catch (e) {
-          showToast(e.message, "error");
-      }
+  const addMainCat = () => {
+      if (!newMainCat) return;
+      setCatStructure(prev => ({ ...prev, [newMainCat]: [] }));
+      setNewMainCat('');
+  };
+  
+  const addSubCat = (mainCat) => {
+      if (!newSubCat) return;
+      setCatStructure(prev => ({
+          ...prev,
+          [mainCat]: [...new Set([...(prev[mainCat] || []), newSubCat])]
+      }));
+      setNewSubCat('');
+  };
+  
+  const removeSubCat = (mainCat, sub) => {
+      setCatStructure(prev => ({
+          ...prev,
+          [mainCat]: prev[mainCat].filter(s => s !== sub)
+      }));
   };
 
-  const handleConfirmPack = async () => {
-      try {
-          const payload = {
-              ...newSuspension,
-              packedItemsDay: systemPackedItems.day.map(i => i.id),
-              packedItemsNight: systemPackedItems.night.map(i => i.id)
-          };
-          await addSuspension(currentUser.uid, payload);
-          showToast("Operation registriert. Loadout diktiert und gesichert.", "success");
-          setSuspensionDialog(false);
-          setSuspensionDialogMode('plan');
-          loadSuspensions();
-          setNewSuspension({ type: 'medical', reason: '', startDate: '', endDate: '' });
-          setStealthConfig({ dayIntensity: 1, nightIntensity: 1, allowedDaySubCategories: [] });
-      } catch (e) {
-          showToast(e.message, "error");
-      }
-  };
-
-  const handleDeleteSuspension = async (id) => {
-      if(!window.confirm("Bist du sicher, dass du diese geplante Auszeit löschen möchtest?")) return;
-      await deleteScheduledSuspension(currentUser.uid, id);
-      loadSuspensions();
-      showToast("Geplante Auszeit verworfen.", "info");
-  };
-
-  const handleTerminateSuspension = async (id) => {
-      if(!window.confirm("Bist du sicher, dass du den Dienst vorzeitig wieder aufnehmen willst?")) return;
-      await terminateSuspension(currentUser.uid, id);
-      loadSuspensions();
-      showToast("Willkommen zurück.", "success");
-  };
-
-  const handleToggleBiometrics = async (e) => {
-      const shouldEnable = e.target.checked;
-      if (shouldEnable) {
-          const success = await enableBiometrics();
-          if (success) { updateStatus(); showToast("Biometrie aktiviert", "success"); }
-          else showToast("Konnte Biometrie nicht aktivieren", "error");
-      } else {
-          disableBiometrics();
-          updateStatus();
-          showToast("Biometrie deaktiviert", "info");
-      }
-  };
-
-  const handleStartPairing = (loc) => {
-      setPairingLocation(loc);
-      startBindingScan(async (tagId) => {
-          try {
-              const newMapping = { ...locationIndex, [tagId]: loc };
-              await setDoc(doc(db, `users/${currentUser.uid}/settings/locationIndex`), { mapping: newMapping }, { merge: true });
-              setLocationIndex(newMapping);
-              showToast(`Ort ${loc} verknüpft!`, "success");
-          } catch (e) { showToast("Fehler", "error"); } finally { setPairingLocation(null); }
+  const removeMainCat = (mainCat) => {
+      setCatStructure(prev => {
+          const newStruct = { ...prev };
+          delete newStruct[mainCat];
+          return newStruct;
       });
   };
 
-  const updateCategories = (newStruct) => setCatStructure(newStruct);
-  
-  const addMainCategory = () => {
-    if (!newMainCat.trim()) return;
-    if (catStructure[newMainCat.trim()]) return showToast("Existiert bereits", "error");
-    const newStruct = { ...catStructure, [newMainCat.trim()]: [] };
-    updateCategories(newStruct); setNewMainCat('');
+  const handlePairLocation = (loc) => {
+      setPairingLocation(loc);
+      showToast(`Bitte halte einen NFC-Tag an das Gerät für den Lagerort: ${loc}`, 'info');
+      startBindingScan((tagId) => {
+          setLocationIndex(prev => ({ ...prev, [tagId]: loc }));
+          setPairingLocation(null);
+          showToast(`Tag erfolgreich mit ${loc} verknüpft!`, 'success');
+      });
   };
 
-  const removeMainCategory = (main) => {
-    if (!window.confirm(`Kategorie "${main}" löschen?`)) return;
-    const newStruct = { ...catStructure }; delete newStruct[main];
-    updateCategories(newStruct);
+  const handleRemovePairing = (tagId) => {
+      setLocationIndex(prev => {
+          const newIdx = { ...prev };
+          delete newIdx[tagId];
+          return newIdx;
+      });
   };
 
-  const addSubCategory = (main) => {
-    if (!newSubCat.trim()) return;
-    const current = catStructure[main] || [];
-    if (current.includes(newSubCat.trim())) return;
-    updateCategories({ ...catStructure, [main]: [...current, newSubCat.trim()] }); setNewSubCat('');
-  };
-
-  const addItemToList = (listName, newItem, setList, currentList) => { 
-      if (!newItem.trim()) return; 
-      const l = [...currentList, newItem.trim()]; 
-      setList(l); 
-  };
-  
-  const removeItemFromList = (listName, item, setList, currentList) => { 
-      const l = currentList.filter(x => x !== item); 
-      setList(l); 
-  };
-
-  const handleWeightTargetChange = (e) => {
-      const cat = e.target.value;
-      setWeightTarget(cat);
-      if (categoryWeights[cat]) {
-          setWeightValue(categoryWeights[cat]);
+  const toggleBiometrics = async (e) => {
+      const checked = e.target.checked;
+      if (checked) {
+          const success = await enableBiometrics(currentUser.email);
+          if (success) showToast("Biometrie für System aktiviert.");
+          else showToast("Aktivierung fehlgeschlagen.", "error");
       } else {
-          setWeightValue(2);
+          disableBiometrics();
+          showToast("Biometrie deaktiviert.");
       }
-  };
-
-  const addWeight = () => {
-      if (weightTarget) {
-          setCategoryWeights(prev => ({ ...prev, [weightTarget]: weightValue }));
-          setWeightTarget('');
-      }
-  };
-  
-  const removeWeight = (cat) => {
-      const next = { ...categoryWeights };
-      delete next[cat];
-      setCategoryWeights(next);
+      updateStatus();
   };
 
   const handleBackup = async () => {
@@ -412,418 +288,541 @@ export default function Settings() {
       try {
           const data = await generateBackup(currentUser.uid);
           downloadBackupFile(data);
-          showToast("Backup erstellt", "success");
-      } catch(e) { showToast("Backup Fehler", "error"); }
-      finally { setBackupLoading(false); }
+          showToast("Backup generiert und Download gestartet.");
+      } catch (e) {
+          showToast(e.message, "error");
+      } finally {
+          setBackupLoading(false);
+      }
   };
 
   const handleFileChange = (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      setRestoreFile(file);
-      setRestoreDialogOpen(true);
-      e.target.value = null;
+      if (e.target.files && e.target.files[0]) {
+          setRestoreFile(e.target.files[0]);
+          setRestoreDialogOpen(true);
+      }
   };
 
-  const executeRestore = async () => {
+  const handleRestore = async () => {
       if (!restoreFile) return;
       setRestoreLoading(true);
       try {
-          const text = await restoreFile.text();
-          const backupData = JSON.parse(text);
-          
-          await restoreBackup(currentUser.uid, backupData);
-          
-          showToast("Backup erfolgreich eingespielt! System wird neu geladen...", "success");
-          setRestoreDialogOpen(false);
-          setRestoreFile(null);
-          
-          setTimeout(() => window.location.reload(), 2000);
+          const reader = new FileReader();
+          reader.onload = async (event) => {
+              try {
+                  const backupData = JSON.parse(event.target.result);
+                  await restoreBackup(currentUser.uid, backupData);
+                  showToast("Restore erfolgreich! System wird neu geladen...");
+                  setTimeout(() => window.location.reload(), 2000);
+              } catch (err) {
+                  showToast(err.message, "error");
+                  setRestoreLoading(false);
+                  setRestoreDialogOpen(false);
+              }
+          };
+          reader.readAsText(restoreFile);
       } catch (e) {
-          showToast("Fehler beim Restore: " + e.message, "error");
-      } finally {
+          showToast(e.message, "error");
           setRestoreLoading(false);
       }
   };
 
-  const SectionHeader = ({ icon: Icon, title, color }) => (
-    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1, color: color || 'text.primary' }}>
-      <Avatar sx={{ bgcolor: `${color}22`, color: color, width: 32, height: 32 }}><Icon fontSize="small" /></Avatar>
-      <Typography variant="h6" sx={{ fontSize: '1.1rem', fontWeight: 600 }}>{title}</Typography>
-    </Box>
-  );
-
-  const ListManager = ({ title, items, newItem, setNewItem, listName, setList }) => (
-      <Box sx={{ mb: 2 }}>
-          <Typography variant="subtitle2" sx={{ mb: 1, color: 'text.secondary' }}>{title}</Typography>
-          <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
-              <TextField size="small" fullWidth value={newItem} onChange={e => setNewItem(e.target.value)} placeholder="Neuer Eintrag..." />
-              <Button variant="contained" size="small" onClick={() => { addItemToList(listName, newItem, setList, items); setNewItem(''); }}><Icons.Add /></Button>
-          </Box>
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-              {items.map(item => (
-                  <Chip key={item} label={item} onDelete={() => removeItemFromList(listName, item, setList, items)} size="small" />
-              ))}
-          </Box>
-      </Box>
-  );
-
-  if (loading) return <Box sx={{ display: 'flex', justifyContent: 'center', mt: 10 }}><CircularProgress /></Box>;
-
-  const allCategoryOptions = [];
-  const onlySubCategories = [];
-  Object.keys(catStructure).forEach(main => {
-      allCategoryOptions.push({ label: `HAUPT: ${main}`, value: main });
-      if(catStructure[main]) {
-          catStructure[main].forEach(sub => {
-              allCategoryOptions.push({ label: `• ${sub}`, value: sub });
-              if (sub !== 'Strumpfhose') onlySubCategories.push(sub);
-          });
+  const handleSimulateStealth = () => {
+      if (stealthConfig.allowedDaySubCategories.length === 0) {
+          alert("Fehler: Wähle mindestens eine erlaubte Sub-Kategorie für Tag-Items aus!");
+          return;
       }
-  });
+      
+      const dayReq = stealthConfig.dayIntensity;
+      const nightReq = stealthConfig.nightIntensity;
+
+      const itemsByCat = {};
+      allItems.forEach(i => {
+          if (!itemsByCat[i.mainCategory]) itemsByCat[i.mainCategory] = [];
+          itemsByCat[i.mainCategory].push(i);
+      });
+
+      const dayPool = allItems.filter(i => 
+          (i.mainCategory === 'Nylons' || i.mainCategory === 'Dessous') &&
+          stealthConfig.allowedDaySubCategories.includes(i.subCategory)
+      );
+      
+      const nightPool = allItems.filter(i => 
+          (i.mainCategory === 'Nylons' || i.mainCategory === 'Dessous')
+      );
+
+      const shuffle = (array) => [...array].sort(() => 0.5 - Math.random());
+
+      const sDay = shuffle(dayPool).slice(0, dayReq);
+      const sNight = shuffle(nightPool).slice(0, nightReq);
+
+      setSystemPackedItems({ day: sDay, night: sNight });
+  };
+
+  const handleScheduleSuspension = async () => {
+      if (!newSuspension.reason || !newSuspension.startDate || !newSuspension.endDate) {
+          showToast("Bitte alle Felder ausfüllen.", "error");
+          return;
+      }
+      
+      try {
+          const start = new Date(newSuspension.startDate);
+          const todayEnd = new Date();
+          todayEnd.setHours(23, 59, 59, 999);
+          
+          if (start <= todayEnd) {
+             showToast("Unzulässig: Aussetzungen müssen mindestens für den Folgetag geplant werden.", "error");
+             return;
+          }
+
+          let payload = { ...newSuspension };
+
+          if (newSuspension.type === 'stealth_travel') {
+              if (systemPackedItems.day.length === 0 && systemPackedItems.night.length === 0) {
+                  showToast("Fehler: Simulation muss zuerst ausgeführt werden.", "error");
+                  return;
+              }
+              const packedIds = [
+                  ...systemPackedItems.day.map(i => i.id),
+                  ...systemPackedItems.night.map(i => i.id)
+              ];
+              payload.packedItemIds = packedIds;
+              payload.packedItemsDay = systemPackedItems.day.map(i => i.id);
+              payload.packedItemsNight = systemPackedItems.night.map(i => i.id);
+          }
+
+          await addSuspension(currentUser.uid, payload);
+          showToast("Aussetzung programmiert.");
+          setSuspensionDialog(false);
+          loadSuspensions();
+      } catch (e) {
+          showToast(e.message, "error");
+      }
+  };
+
+  const handleTerminateSuspension = async (id) => {
+      // IRON CONTRACT VERLETZUNG VERHINDERN (Das Frontend fängt den Klick ab und stürzt ab,
+      // sollte der Benutzer versuchen, den Code manuell in der Konsole zu triggern)
+      try {
+          await terminateSuspension(currentUser.uid, id);
+          loadSuspensions();
+      } catch (e) {
+          showToast(e.message, "error");
+      }
+  };
+
+  const handleDeleteSuspension = async (id) => {
+      try {
+          await deleteScheduledSuspension(currentUser.uid, id);
+          showToast("Geplante Aussetzung gelöscht.", "success");
+          loadSuspensions();
+      } catch (e) {
+          showToast(e.message, "error");
+      }
+  };
+
+  if (loading) return <Box sx={{ p: 4, textAlign: 'center' }}><CircularProgress /></Box>;
 
   return (
-    <Container maxWidth="md" disableGutters sx={{ pt: 1, pb: 15, px: 0.5 }}>
-      <Typography variant="h4" gutterBottom sx={{ ...DESIGN_TOKENS.textGradient, ml: 1 }}>Einstellungen</Typography>
+    <Box sx={DESIGN_TOKENS.bottomNavSpacer}>
+      <Container maxWidth="md" sx={{ pt: 2, pb: 4 }}>
+        
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
+            <Typography variant="h4" sx={DESIGN_TOKENS.textGradient}>System Panel</Typography>
+            <Button 
+                variant="contained" 
+                startIcon={isSavingAll ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />} 
+                onClick={handleSaveAll}
+                disabled={isSavingAll}
+                sx={{ ...DESIGN_TOKENS.buttonGradient, borderRadius: 8, px: 3 }}
+            >
+                Speichern
+            </Button>
+        </Box>
 
-      <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.accents.gold}` }}>
-        <AccordionSummary expandIcon={<Icons.Expand />}>
-            <SectionHeader icon={MedicalServicesIcon} title="Protokoll-Verwaltung" color={PALETTE.accents.gold} />
-        </AccordionSummary>
-        <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="body2" color="text.secondary">Geplante Ausfallzeiten</Typography>
-                <Button variant="contained" size="small" sx={{ bgcolor: PALETTE.accents.gold, color:'#000' }} onClick={() => { setSuspensionDialogMode('plan'); setSuspensionDialog(true); }} startIcon={<Icons.Add />}>
-                    Beantragen
+        <Accordion sx={DESIGN_TOKENS.glassCard} defaultExpanded>
+            <AccordionSummary expandIcon={<Icons.KeyboardArrowDown sx={{color:'white'}}/>}>
+                <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><TuneIcon /> Protokoll-Engine</Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+                <ProtocolSettings 
+                    rules={protocolRules} 
+                    onChange={(newRules) => {
+                        setProtocolRules(newRules);
+                        // Extortion Handler im Frontend Sync halten
+                        if (newRules.extortion && newRules.extortion.triggerChance !== undefined) {
+                            setExtortionTriggerChance(newRules.extortion.triggerChance);
+                        }
+                    }} 
+                />
+            </AccordionDetails>
+        </Accordion>
+
+        <Accordion sx={DESIGN_TOKENS.glassCard} defaultExpanded>
+            <AccordionSummary expandIcon={<Icons.KeyboardArrowDown sx={{color:'white'}}/>}>
+                <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><ScienceIcon /> Taxonomie</Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+                
+                <Box sx={{ mb: 4 }}>
+                    <Typography variant="subtitle2" gutterBottom color="text.secondary">Main & Sub Categories</Typography>
+                    <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
+                        <TextField size="small" label="Neue Main Category" value={newMainCat} onChange={(e) => setNewMainCat(e.target.value)} sx={DESIGN_TOKENS.inputField} />
+                        <Button variant="outlined" onClick={addMainCat} sx={DESIGN_TOKENS.buttonSecondary}>Main Add</Button>
+                    </Stack>
+                    
+                    {Object.keys(catStructure).map(mainCat => (
+                        <Paper key={mainCat} sx={{ p: 2, mb: 2, bgcolor: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                                <Typography variant="body1" fontWeight="bold" color="primary">{mainCat}</Typography>
+                                <Button size="small" color="error" onClick={() => removeMainCat(mainCat)}>Main Delete</Button>
+                            </Box>
+                            
+                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
+                                {(catStructure[mainCat] || []).map(sub => (
+                                    <Chip 
+                                        key={sub} 
+                                        label={sub} 
+                                        onDelete={() => removeSubCat(mainCat, sub)} 
+                                        sx={DESIGN_TOKENS.chip.default}
+                                    />
+                                ))}
+                            </Box>
+                            
+                            <Stack direction="row" spacing={1}>
+                                <TextField size="small" label={`Neues Sub für ${mainCat}`} value={newSubCat} onChange={(e) => setNewSubCat(e.target.value)} sx={DESIGN_TOKENS.inputField} />
+                                <Button size="small" variant="outlined" onClick={() => addSubCat(mainCat)} sx={DESIGN_TOKENS.buttonSecondary}>Sub Add</Button>
+                            </Stack>
+                        </Paper>
+                    ))}
+                </Box>
+                <Divider sx={{ my: 3, borderColor: 'rgba(255,255,255,0.1)' }} />
+
+                <Box sx={{ mb: 4 }}>
+                    <Typography variant="subtitle2" gutterBottom color="text.secondary">Kategorie Gewichtung (Item Auswahl)</Typography>
+                    <Typography variant="caption" color="text.secondary" paragraph>Bestimmt die Häufigkeit, mit der Kategorien vom System ausgewählt werden. Höherer Wert = häufiger.</Typography>
+                    <Grid container spacing={2}>
+                        {Object.keys(catStructure).map(cat => (
+                            <Grid item xs={6} sm={4} key={cat}>
+                                <Paper sx={{ p: 1.5, bgcolor: 'rgba(255,255,255,0.05)', textAlign: 'center' }}>
+                                    <Typography variant="body2" fontWeight="bold" gutterBottom>{cat}</Typography>
+                                    <Slider 
+                                        value={categoryWeights[cat] || 1} 
+                                        min={1} max={5} step={1} marks
+                                        onChange={(e, v) => setCategoryWeights(prev => ({...prev, [cat]: v}))}
+                                        sx={{ color: PALETTE.primary.main }}
+                                    />
+                                </Paper>
+                            </Grid>
+                        ))}
+                    </Grid>
+                </Box>
+                <Divider sx={{ my: 3, borderColor: 'rgba(255,255,255,0.1)' }} />
+
+                <Box sx={{ mb: 4 }}>
+                    <Typography variant="subtitle2" gutterBottom color="text.secondary">Max Items pro Instruction Session</Typography>
+                    <Slider 
+                        value={maxInstructionItems} 
+                        onChange={(e, val) => setMaxInstructionItems(val)}
+                        min={1} max={5} marks valueLabelDisplay="auto"
+                        sx={{ color: PALETTE.primary.main, maxWidth: 300, ml: 2 }}
+                    />
+                </Box>
+                <Divider sx={{ my: 3, borderColor: 'rgba(255,255,255,0.1)' }} />
+
+                <Grid container spacing={4}>
+                    <Grid item xs={12} md={6}>
+                        <Typography variant="subtitle2" gutterBottom color="text.secondary">Marken</Typography>
+                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
+                            {brands.map(b => <Chip key={b} label={b} onDelete={() => removeListEntry(setBrands, b)} sx={DESIGN_TOKENS.chip.default} />)}
+                        </Box>
+                        <Stack direction="row" spacing={1}>
+                            <TextField size="small" value={newBrand} onChange={(e) => setNewBrand(e.target.value)} placeholder="Neue Marke" sx={DESIGN_TOKENS.inputField} />
+                            <Button onClick={() => addListEntry(setBrands, newBrand, setNewBrand)} sx={DESIGN_TOKENS.buttonSecondary}>Add</Button>
+                        </Stack>
+                    </Grid>
+
+                    <Grid item xs={12} md={6}>
+                        <Typography variant="subtitle2" gutterBottom color="text.secondary">Materialien</Typography>
+                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
+                            {materials.map(m => <Chip key={m} label={m} onDelete={() => removeListEntry(setMaterials, m)} sx={DESIGN_TOKENS.chip.default} />)}
+                        </Box>
+                        <Stack direction="row" spacing={1}>
+                            <TextField size="small" value={newMaterial} onChange={(e) => setNewMaterial(e.target.value)} placeholder="Neues Material" sx={DESIGN_TOKENS.inputField} />
+                            <Button onClick={() => addListEntry(setMaterials, newMaterial, setNewMaterial)} sx={DESIGN_TOKENS.buttonSecondary}>Add</Button>
+                        </Stack>
+                    </Grid>
+                </Grid>
+
+                <Divider sx={{ my: 3, borderColor: 'rgba(255,255,255,0.1)' }} />
+                <Typography variant="subtitle2" gutterBottom color="text.secondary">Lagerorte & NFC Boxen</Typography>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
+                    {locations.map(loc => {
+                        const boundTags = Object.keys(locationIndex).filter(k => locationIndex[k] === loc);
+                        return (
+                            <Chip 
+                                key={loc} 
+                                label={`${loc} ${boundTags.length > 0 ? '(NFC)' : ''}`} 
+                                onDelete={() => removeListEntry(setLocations, loc)}
+                                onClick={() => handlePairLocation(loc)}
+                                color={boundTags.length > 0 ? "success" : "default"}
+                                sx={boundTags.length > 0 ? {} : DESIGN_TOKENS.chip.default}
+                            />
+                        );
+                    })}
+                </Box>
+                <Stack direction="row" spacing={1}>
+                    <TextField size="small" value={newLocation} onChange={(e) => setNewLocation(e.target.value)} placeholder="Neuer Lagerort" sx={DESIGN_TOKENS.inputField} />
+                    <Button onClick={() => addListEntry(setLocations, newLocation, setNewLocation)} sx={DESIGN_TOKENS.buttonSecondary}>Add</Button>
+                </Stack>
+                {Object.keys(locationIndex).length > 0 && (
+                    <Box sx={{ mt: 2, p: 2, bgcolor: 'rgba(0,0,0,0.3)', borderRadius: 2 }}>
+                        <Typography variant="caption" color="text.secondary" display="block" mb={1}>Verknüpfte NFC Boxen</Typography>
+                        {Object.keys(locationIndex).map(tag => (
+                            <Chip key={tag} label={`${locationIndex[tag]} [${tag.substring(0,6)}]`} size="small" onDelete={() => handleRemovePairing(tag)} sx={{ mr: 1, mb: 1, bgcolor: 'rgba(255,255,255,0.1)' }} />
+                        ))}
+                    </Box>
+                )}
+                
+            </AccordionDetails>
+        </Accordion>
+
+        <Accordion sx={{ ...DESIGN_TOKENS.glassCard, mt: 2 }}>
+            <AccordionSummary expandIcon={<Icons.KeyboardArrowDown sx={{color:'white'}}/>}>
+                <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><Icons.Shield /> System & Backup</Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+                    <Box>
+                        <Typography variant="subtitle1">Biometrische Sicherung</Typography>
+                        <Typography variant="body2" color="text.secondary">Erfordert Fingerabdruck/Face-ID beim Start</Typography>
+                        {!biometricAvailable && <Typography variant="caption" color="error">Gerät unterstützt WebAuthn nicht.</Typography>}
+                    </Box>
+                    <Switch 
+                        checked={isBiometricActive} 
+                        onChange={toggleBiometrics} 
+                        disabled={!biometricAvailable}
+                        color="primary"
+                    />
+                </Box>
+
+                <Divider sx={{ my: 3, borderColor: 'rgba(255,255,255,0.1)' }} />
+                <Typography variant="subtitle1" gutterBottom>Database Backup</Typography>
+                <Stack direction="row" spacing={2} sx={{ mt: 2 }}>
+                    <Button variant="outlined" onClick={handleBackup} disabled={backupLoading} sx={DESIGN_TOKENS.buttonSecondary}>
+                        {backupLoading ? <CircularProgress size={20} /> : "Backup Download"}
+                    </Button>
+                    <Button variant="outlined" color="warning" onClick={() => fileInputRef.current?.click()} startIcon={<UploadIcon />}>
+                        Restore
+                    </Button>
+                    <input type="file" ref={fileInputRef} hidden accept=".json" onChange={handleFileChange} />
+                </Stack>
+            </AccordionDetails>
+        </Accordion>
+
+        <Accordion sx={{ ...DESIGN_TOKENS.glassCard, mt: 2 }}>
+            <AccordionSummary expandIcon={<Icons.KeyboardArrowDown sx={{color:'white'}}/>}>
+                <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><MedicalServicesIcon /> Ausfallzeiten</Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+                <Button variant="contained" fullWidth onClick={() => { setSuspensionDialogMode('plan'); setSuspensionDialog(true); }} sx={{ mb: 3, ...DESIGN_TOKENS.buttonGradient }}>
+                    Ausfallzeit beantragen
                 </Button>
-            </Box>
-            <Stack spacing={1}>
-                {suspensions.length === 0 && <Typography variant="caption" sx={{ fontStyle:'italic', color: PALETTE.text.muted }}>Keine geplanten Auszeiten.</Typography>}
-                {suspensions.map(sus => (
-                    <Paper key={sus.id} sx={{ p: 2, bgcolor: 'rgba(255,255,255,0.05)', borderLeft: `2px solid ${sus.type === 'stealth_travel' ? PALETTE.accents.purple : PALETTE.accents.gold}` }}>
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                            <Typography variant="subtitle2" fontWeight="bold">{sus.type.toUpperCase()}: {sus.reason}</Typography>
-                            {sus.status === 'active' && <Chip label="AKTIV" color="warning" size="small" />}
-                        </Box>
-                        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                            {sus.startDate.toLocaleDateString()} - {sus.endDate.toLocaleDateString()}
-                        </Typography>
-                        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                            {sus.status === 'active' && (
-                                <Button size="small" color="inherit" onClick={() => handleTerminateSuspension(sus.id)} sx={{ mt: 1, fontSize:'0.7rem' }}>
-                                    Vorzeitig beenden
-                                </Button>
-                            )}
-                            {sus.status === 'scheduled' && (
-                                <Button size="small" color="error" onClick={() => handleDeleteSuspension(sus.id)} sx={{ mt: 1, fontSize:'0.7rem' }}>
-                                    Planung verwerfen
-                                </Button>
-                            )}
-                        </Box>
-                    </Paper>
-                ))}
-            </Stack>
-        </AccordionDetails>
-      </Accordion>
 
-      <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.accents.purple}` }}>
-        <AccordionSummary expandIcon={<Icons.Expand />}>
-            <SectionHeader icon={TuneIcon} title="Protokoll Konfiguration (Core)" color={PALETTE.accents.purple} />
-        </AccordionSummary>
-        <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
-             <ProtocolSettings rules={protocolRules} onChange={setProtocolRules} />
-        </AccordionDetails>
-      </Accordion>
+                <Typography variant="subtitle2" gutterBottom color="text.secondary">Aktuelle & Geplante Ausfälle</Typography>
+                {suspensions.length === 0 ? (
+                    <Typography variant="body2" sx={{ opacity: 0.5 }}>Keine Ausfallzeiten programmiert.</Typography>
+                ) : (
+                    <List>
+                        {suspensions.map(s => (
+                            <ListItem key={s.id} sx={{ bgcolor: 'rgba(255,255,255,0.05)', mb: 1, borderRadius: 1, borderLeft: `4px solid ${s.status === 'active' ? PALETTE.accents.gold : 'transparent'}` }}>
+                                <ListItemText 
+                                    primary={
+                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                            <Typography variant="body2" fontWeight="bold">{s.type === 'medical' ? 'Medizinisch' : (s.type === 'stealth_travel' ? 'Infiltration' : 'Reise / Abwesenheit')}</Typography>
+                                            <Chip label={s.status} size="small" color={s.status === 'active' ? 'warning' : 'default'} sx={{ height: 20, fontSize: '0.7rem' }} />
+                                        </Box>
+                                    }
+                                    secondary={`${s.startDate.toLocaleDateString()} bis ${s.endDate.toLocaleDateString()} • ${s.reason}`} 
+                                    secondaryTypographyProps={{ sx: { color: 'rgba(255,255,255,0.6)' } }}
+                                />
+                                {s.status === 'scheduled' && (
+                                    <Button size="small" color="error" onClick={() => handleDeleteSuspension(s.id)}>Stornieren</Button>
+                                )}
+                            </ListItem>
+                        ))}
+                    </List>
+                )}
+            </AccordionDetails>
+        </Accordion>
 
-      <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.primary.main}` }}>
-        <AccordionSummary expandIcon={<Icons.Expand />}>
-            <SectionHeader icon={Icons.Track} title="Präferenzen & Limits" color={PALETTE.primary.main} />
-        </AccordionSummary>
-        <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
-            <Box sx={{ mb: 3 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                    <Typography variant="body2" color="text.secondary">Max. Items pro Anweisung</Typography>
-                    <Typography fontWeight="bold" color="primary">{maxInstructionItems}</Typography>
-                </Box>
-                <Slider 
-                    value={maxInstructionItems} 
-                    min={1} 
-                    max={3} 
-                    step={1} 
-                    marks
-                    onChange={(e, v) => setMaxInstructionItems(v)} 
-                    sx={{ color: PALETTE.primary.main }} 
-                />
-            </Box>
+        <Box sx={{ mt: 4, textAlign: 'center' }}>
+            <Button variant="text" color="error" onClick={logout}>Abmelden (Exit)</Button>
+        </Box>
+      </Container>
 
-            <Divider sx={{ my: 2, borderColor: 'rgba(255,255,255,0.1)' }} />
-
-            {/* NEU: ERPRESSUNGS-PROTOKOLL SLIDER */}
-            <Box sx={{ mb: 3 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                    <Typography variant="body2" color="text.secondary">Erpressungs-Chance (Beim Tab-Wechsel)</Typography>
-                    <Typography fontWeight="bold" sx={{ color: PALETTE.accents.orange || '#FF9800' }}>
-                        {(extortionTriggerChance * 100).toFixed(0)}%
-                    </Typography>
-                </Box>
-                <Slider 
-                    value={extortionTriggerChance} 
-                    min={0.02} 
-                    max={0.25} 
-                    step={0.01} 
-                    marks={[
-                        { value: 0.02, label: '2%' },
-                        { value: 0.10, label: '10%' },
-                        { value: 0.25, label: '25%' }
-                    ]}
-                    onChange={(e, v) => setExtortionTriggerChance(v)} 
-                    sx={{ color: PALETTE.accents.orange || '#FF9800' }} 
-                />
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-                    Legt fest, wie hoch die Chance ist, dass das System beim Überprüfen des Dashboards ein 60-Minuten-Ultimatum triggert. 
-                </Typography>
-            </Box>
+      {/* SUSPENSION DIALOG */}
+      <Dialog open={suspensionDialog} onClose={() => setSuspensionDialog(false)} maxWidth="sm" fullWidth PaperProps={DESIGN_TOKENS.dialog.paper}>
+        <DialogTitle sx={DESIGN_TOKENS.dialog.title.sx}>Ausfallzeit beantragen</DialogTitle>
+        <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
+            <DialogContentText sx={{ color: 'rgba(255,255,255,0.7)', mb: 3 }}>
+                Programmierte Ausfallzeiten setzen das System für die gewählte Dauer vollständig aus. Bei Operation: Infiltration (Stealth) werden dir vorab zwingende Items zugewiesen.
+            </DialogContentText>
             
-        </AccordionDetails>
-      </Accordion>
-
-      <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.accents.green}` }}>
-        <AccordionSummary expandIcon={<Icons.Expand />}>
-            <SectionHeader icon={Icons.Category} title="Kategorie Struktur" color={PALETTE.accents.green} />
-        </AccordionSummary>
-        <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
-            <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
-                <TextField size="small" fullWidth label="Neue Hauptkategorie" value={newMainCat} onChange={e => setNewMainCat(e.target.value)} />
-                <Button variant="contained" sx={{ bgcolor: PALETTE.accents.green }} onClick={addMainCategory}><Icons.Add /></Button>
-            </Box>
-            <Stack spacing={2}>
-                {Object.keys(catStructure).map(main => (
-                    <Paper key={main} sx={{ p: 2, bgcolor: 'rgba(255,255,255,0.03)' }}>
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                            <Typography variant="subtitle1" fontWeight="bold" sx={{ color: PALETTE.accents.green }}>{main}</Typography>
-                            <IconButton size="small" color="error" onClick={() => removeMainCategory(main)}><Icons.Delete /></IconButton>
-                        </Box>
-                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>{catStructure[main].map(sub => (<Chip key={sub} label={sub} size="small" onDelete={() => updateCategories({...catStructure, [main]: catStructure[main].filter(s=>s!==sub)})} />))}</Box>
-                        <Box sx={{ display: 'flex', gap: 1 }}><TextField size="small" fullWidth placeholder="Sub..." value={newSubCat} onChange={e => setNewSubCat(e.target.value)} /><Button size="small" onClick={() => addSubCategory(main)}><Icons.Add /></Button></Box>
-                    </Paper>
-                ))}
-            </Stack>
-        </AccordionDetails>
-      </Accordion>
-
-      <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.accents.purple}` }}>
-         <AccordionSummary expandIcon={<Icons.Expand />}><SectionHeader icon={Icons.Brain} title="Algorithmus" color={PALETTE.accents.purple} /></AccordionSummary>
-         <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
-            <Alert severity="info" sx={{mb: 2, bgcolor: 'rgba(255,255,255,0.05)', color: '#fff'}}>Wahrscheinlichkeiten für die Zufallsauswahl.</Alert>
-            <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-end', mb: 2 }}>
-                <FormControl fullWidth size="small">
-                    <InputLabel>Kategorie</InputLabel>
-                    <Select value={weightTarget} label="Kategorie" onChange={handleWeightTargetChange}>
-                        {allCategoryOptions.map(opt => <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>)}
+            <Stack spacing={3}>
+                <FormControl fullWidth>
+                    <InputLabel>Grund (Typ)</InputLabel>
+                    <Select 
+                        value={newSuspension.type} 
+                        label="Grund (Typ)"
+                        onChange={(e) => {
+                            setNewSuspension({...newSuspension, type: e.target.value});
+                            if (e.target.value === 'stealth_travel') setSuspensionDialogMode('stealth');
+                            else setSuspensionDialogMode('plan');
+                        }}
+                        sx={{ bgcolor: 'rgba(0,0,0,0.3)' }}
+                    >
+                        <MenuItem value="medical">Medizinischer Ausfall (z.B. Krankheit, OP)</MenuItem>
+                        <MenuItem value="travel">Urlaub / Reise (ohne Optionen)</MenuItem>
+                        <MenuItem value="stealth_travel">Operation: Infiltration (Reise unter Fremdkontrolle)</MenuItem>
                     </Select>
                 </FormControl>
-                <Box sx={{ width: 150, px: 1 }}>
-                      <Typography variant="caption">Gewicht: x{weightValue}</Typography>
-                      <Slider value={weightValue} min={2} max={10} onChange={(e, v) => setWeightValue(v)} size="small" sx={{ color: PALETTE.accents.purple }}/>
-                </Box>
-                <Button variant="contained" onClick={addWeight} sx={{ bgcolor: PALETTE.accents.purple, minWidth: 40 }}><Icons.Add /></Button>
-            </Box>
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                {Object.entries(categoryWeights).map(([cat, weight]) => (
-                    <Chip key={cat} label={`${cat}: ${weight}x`} onDelete={() => removeWeight(cat)} variant="outlined" sx={{ borderColor: PALETTE.accents.purple, color: PALETTE.accents.purple }}/>
-                ))}
-            </Box>
-         </AccordionDetails>
-      </Accordion>
 
-      <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.accents.red}` }}>
-         <AccordionSummary expandIcon={<Icons.Expand />}><SectionHeader icon={ScienceIcon} title="Forensik & Attribute" color={PALETTE.accents.red} /></AccordionSummary>
-         <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
-             <ListManager title="Verlust-Ursachen (Archiv)" items={archiveReasons} newItem={newArchiveReason} setNewItem={setNewArchiveReason} listName="archiveReasons" setList={setArchiveReasons} />
-             <Divider sx={{ my: 1 }} />
-             <ListManager title="Laufmaschen-Orte" items={runLocations} newItem={newRunLocation} setNewItem={setNewRunLocation} listName="runLocations" setList={setRunLocations} />
-             <Divider sx={{ my: 1 }} />
-             <ListManager title="Laufmaschen-Gründe" items={runCauses} newItem={newRunCause} setNewItem={setNewRunCause} listName="runCauses" setList={setRunCauses} />
-         </AccordionDetails>
-      </Accordion>
+                <TextField 
+                    label="Details (Ort, Grund etc.)" 
+                    fullWidth 
+                    value={newSuspension.reason} 
+                    onChange={e => setNewSuspension({...newSuspension, reason: e.target.value})}
+                    sx={DESIGN_TOKENS.inputField}
+                />
 
-      <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.accents.blue}` }}>
-         <AccordionSummary expandIcon={<Icons.Expand />}><SectionHeader icon={Icons.Inventory} title="Listen & Orte" color={PALETTE.accents.blue} /></AccordionSummary>
-         <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
-             <Typography variant="subtitle2" sx={{mb:1}}>Lagerorte</Typography>
-             <Box sx={{ display: 'flex', gap: 1, mb: 2 }}><TextField size="small" fullWidth value={newLocation} onChange={e => setNewLocation(e.target.value)} /><Button onClick={() => { addItemToList('locations', newLocation, setLocations, locations); setNewLocation(''); }} variant="contained"><Icons.Add /></Button></Box>
-             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mb: 3 }}>{locations.map(l => <Chip key={l} label={l} onDelete={() => removeItemFromList('locations', l, setLocations, locations)} size="small" clickable onClick={() => handleStartPairing(l)} color={pairingLocation === l ? 'secondary' : 'default'} icon={pairingLocation === l ? <CircularProgress size={16} /> : <Icons.Nfc />} />)}</Box>
-             <Divider sx={{ my: 2 }} />
-             <ListManager title="Marken" items={brands} newItem={newBrand} setNewItem={setNewBrand} listName="brands" setList={setBrands} />
-             <Divider sx={{ my: 2 }} />
-             <ListManager title="Materialien" items={materials} newItem={newMaterial} setNewItem={setNewMaterial} listName="materials" setList={setMaterials} />
-         </AccordionDetails>
-      </Accordion>
+                <Grid container spacing={2}>
+                    <Grid item xs={6}>
+                        <TextField 
+                            label="Startdatum (00:00 Uhr)" 
+                            type="date" 
+                            fullWidth 
+                            InputLabelProps={{ shrink: true }}
+                            value={newSuspension.startDate}
+                            onChange={e => setNewSuspension({...newSuspension, startDate: e.target.value})}
+                            sx={DESIGN_TOKENS.inputField}
+                        />
+                    </Grid>
+                    <Grid item xs={6}>
+                        <TextField 
+                            label="Enddatum (23:59 Uhr)" 
+                            type="date" 
+                            fullWidth 
+                            InputLabelProps={{ shrink: true }}
+                            value={newSuspension.endDate}
+                            onChange={e => setNewSuspension({...newSuspension, endDate: e.target.value})}
+                            sx={DESIGN_TOKENS.inputField}
+                        />
+                    </Grid>
+                </Grid>
 
-      <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 10, borderLeft: '4px solid #fff' }}>
-        <AccordionSummary expandIcon={<Icons.Expand />}><SectionHeader icon={Icons.Settings} title="System & Backup" color="#fff" /></AccordionSummary>
-        <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
-            <FormControlLabel control={<Switch checked={isBiometricActive} onChange={handleToggleBiometrics} disabled={!biometricAvailable} />} label="Biometrische Authentifizierung (Fingerprint)" sx={{ mb: 2, display: 'block' }} />
-            
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 3, mb: 2 }}>
-                <Button variant="outlined" fullWidth onClick={handleBackup} disabled={backupLoading} startIcon={backupLoading ? <CircularProgress size={20} /> : <Icons.Cloud />}>
-                    Backup herunterladen
-                </Button>
-                
-                <input type="file" accept=".json" style={{ display: 'none' }} ref={fileInputRef} onChange={handleFileChange} />
-                
-                <Button variant="outlined" color="warning" fullWidth onClick={() => fileInputRef.current.click()} disabled={backupLoading || restoreLoading} startIcon={restoreLoading ? <CircularProgress size={20} /> : <UploadIcon />}>
-                    Backup einspielen
-                </Button>
-            </Box>
+                {/* STEALTH CONFIGURATION BLOCK */}
+                {suspensionDialogMode === 'stealth' && (
+                    <Paper sx={{ p: 2, bgcolor: 'rgba(156, 39, 176, 0.1)', border: `1px solid ${PALETTE.accents.purple}` }}>
+                        <Typography variant="subtitle2" sx={{ color: PALETTE.accents.purple, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <TravelExploreIcon /> Infiltrations-Packliste
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary" paragraph>
+                            Das System simuliert deinen Koffer. Wähle die Intensität und die Sub-Kategorien. Du musst das gepackte Material tragen. TZD bleibt aktiv.
+                        </Typography>
+                        
+                        <Grid container spacing={2} sx={{ mb: 2 }}>
+                            <Grid item xs={6}>
+                                <Typography variant="caption">Items pro Tag</Typography>
+                                <Slider 
+                                    value={stealthConfig.dayIntensity} 
+                                    min={0} max={3} marks step={1}
+                                    onChange={(e,v) => setStealthConfig(prev => ({...prev, dayIntensity: v}))}
+                                    sx={{ color: PALETTE.accents.purple }}
+                                />
+                            </Grid>
+                            <Grid item xs={6}>
+                                <Typography variant="caption">Items pro Nacht</Typography>
+                                <Slider 
+                                    value={stealthConfig.nightIntensity} 
+                                    min={0} max={2} marks step={1}
+                                    onChange={(e,v) => setStealthConfig(prev => ({...prev, nightIntensity: v}))}
+                                    sx={{ color: PALETTE.accents.blue }}
+                                />
+                            </Grid>
+                        </Grid>
 
-            <Box sx={{ mt: 4, textAlign: 'center' }}><Button color="error" onClick={logout} startIcon={<Icons.Logout />}>Abmelden</Button></Box>
-            <Typography variant="caption" display="block" align="center" sx={{ mt: 2, color: 'text.secondary' }}>Version 2.4.2 • Build 20251206</Typography>
-        </AccordionDetails>
-      </Accordion>
+                        <Typography variant="caption" display="block" mb={1}>Erlaubte Tag-Kategorien</Typography>
+                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 3 }}>
+                            {(catStructure['Nylons'] || []).concat(catStructure['Dessous'] || []).map(sub => (
+                                <Chip 
+                                    key={sub} 
+                                    label={sub} 
+                                    onClick={() => {
+                                        setStealthConfig(prev => {
+                                            const isSelected = prev.allowedDaySubCategories.includes(sub);
+                                            return {
+                                                ...prev,
+                                                allowedDaySubCategories: isSelected 
+                                                    ? prev.allowedDaySubCategories.filter(s => s !== sub)
+                                                    : [...prev.allowedDaySubCategories, sub]
+                                            };
+                                        });
+                                    }}
+                                    sx={{ 
+                                        bgcolor: stealthConfig.allowedDaySubCategories.includes(sub) ? PALETTE.accents.purple : 'rgba(255,255,255,0.1)',
+                                        color: '#fff',
+                                        '&:hover': { bgcolor: stealthConfig.allowedDaySubCategories.includes(sub) ? PALETTE.accents.purple : 'rgba(255,255,255,0.2)' }
+                                    }}
+                                />
+                            ))}
+                        </Box>
 
-      <Paper sx={{ 
-          position: 'fixed', bottom: 80, left: 0, right: 0, 
-          zIndex: 1000, 
-          p: 2, 
-          bgcolor: 'rgba(0,0,0,0.8)', 
-          backdropFilter: 'blur(10px)',
-          borderTop: '1px solid rgba(255,255,255,0.1)',
-          display: 'flex', justifyContent: 'center'
-      }}>
-          <Button 
-            variant="contained" 
-            size="large"
-            startIcon={isSavingAll ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
-            onClick={handleSaveAll}
-            disabled={isSavingAll}
-            sx={{ ...DESIGN_TOKENS.buttonGradient, width: '90%', maxWidth: 400, height: 50, fontSize: '1rem' }}
-          >
-              {isSavingAll ? "Speichere..." : "Alle Änderungen speichern"}
-          </Button>
-      </Paper>
+                        <Button variant="outlined" fullWidth onClick={handleSimulateStealth} sx={{ color: PALETTE.accents.purple, borderColor: PALETTE.accents.purple, mb: 2 }}>
+                            Koffer Packen (Simulieren)
+                        </Button>
 
-      <Dialog open={restoreDialogOpen} onClose={() => !restoreLoading && setRestoreDialogOpen(false)} PaperProps={DESIGN_TOKENS.dialog.paper}>
-          <DialogTitle sx={{ ...DESIGN_TOKENS.dialog.title.sx, color: PALETTE.accents.red }}>
-              Backup Einspielen
-          </DialogTitle>
+                        {systemPackedItems.day.length > 0 && (
+                            <Box sx={{ mt: 2, p: 2, bgcolor: 'rgba(0,0,0,0.5)', borderRadius: 2 }}>
+                                <Typography variant="caption" color="text.secondary" display="block">Dein Gepäck (Plicht):</Typography>
+                                <List dense>
+                                    {systemPackedItems.day.map(i => <ListItem key={i.id}><ListItemText primary={i.name} secondary="Tag" /></ListItem>)}
+                                    {systemPackedItems.night.map(i => <ListItem key={i.id}><ListItemText primary={i.name} secondary="Nacht" /></ListItem>)}
+                                </List>
+                            </Box>
+                        )}
+                    </Paper>
+                )}
+
+            </Stack>
+        </DialogContent>
+        <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}>
+            <Button onClick={() => setSuspensionDialog(false)} color="inherit">Abbrechen</Button>
+            <Button variant="contained" onClick={handleScheduleSuspension} sx={DESIGN_TOKENS.buttonGradient}>
+                Beantragen
+            </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={restoreDialogOpen} onClose={() => setRestoreDialogOpen(false)} PaperProps={DESIGN_TOKENS.dialog.paper}>
+          <DialogTitle sx={DESIGN_TOKENS.dialog.title.sx}>Backup Einspielen</DialogTitle>
           <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
-              <Alert severity="error" sx={{ mb: 3 }}>
-                  ACHTUNG: Dies überschreibt alle aktuellen Daten unwiderruflich mit dem Inhalt des ausgewählten Backups.
-              </Alert>
-              <Typography variant="body2" sx={{ textAlign: 'center' }}>
-                  Möchtest du das Backup <br /><strong>{restoreFile?.name}</strong><br /> wirklich einspielen?
-              </Typography>
+              <DialogContentText sx={{ color: 'rgba(255,255,255,0.7)', mb: 2 }}>
+                  ACHTUNG: Das Einspielen eines Backups überschreibt alle aktuellen Daten.
+              </DialogContentText>
+              <Typography variant="body2">Gewählte Datei: {restoreFile?.name}</Typography>
           </DialogContent>
           <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}>
-              <Button onClick={() => setRestoreDialogOpen(false)} color="inherit" disabled={restoreLoading}>
-                  Abbrechen
-              </Button>
-              <Button onClick={executeRestore} variant="contained" color="error" disabled={restoreLoading}>
-                  {restoreLoading ? "Spiele ein..." : "Unwiderruflich einspielen"}
+              <Button onClick={() => setRestoreDialogOpen(false)} color="inherit">Abbrechen</Button>
+              <Button onClick={handleRestore} color="error" variant="contained" disabled={restoreLoading}>
+                  {restoreLoading ? <CircularProgress size={20} color="inherit" /> : "Gefahr: Daten überschreiben"}
               </Button>
           </DialogActions>
       </Dialog>
 
-      <Dialog open={suspensionDialog} onClose={() => setSuspensionDialog(false)} PaperProps={DESIGN_TOKENS.dialog.paper}>
-        {suspensionDialogMode === 'plan' ? (
-            <>
-                <DialogTitle sx={DESIGN_TOKENS.dialog.title.sx}>Auszeit planen</DialogTitle>
-                <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
-                    <DialogContentText sx={{ mb: 2 }}>Die Auszeit beginnt am gewählten Starttag um 07:30 Uhr und endet am Endtag um 23:00 Uhr.</DialogContentText>
-                    <TextField select fullWidth label="Grund" value={newSuspension.type} onChange={e => setNewSuspension({...newSuspension, type: e.target.value})} margin="dense">
-                        <MenuItem value="medical">Medizinisch (Total)</MenuItem>
-                        <MenuItem value="social">Sozial/Besuch (Total)</MenuItem>
-                        <MenuItem value="stealth_travel" sx={{ color: PALETTE.accents.purple, fontWeight: 'bold' }}>Operation: Infiltration (Reise)</MenuItem>
-                        <MenuItem value="other">Sonstiges</MenuItem>
-                    </TextField>
-                    <TextField fullWidth label="Beschreibung" value={newSuspension.reason} onChange={e => setNewSuspension({...newSuspension, reason: e.target.value})} margin="dense" placeholder="z.B. Grippe" />
-                    <TextField fullWidth type="date" label="Startdatum" InputLabelProps={{ shrink: true }} value={newSuspension.startDate} onChange={e => setNewSuspension({...newSuspension, startDate: e.target.value})} margin="dense" />
-                    <TextField fullWidth type="date" label="Enddatum" InputLabelProps={{ shrink: true }} value={newSuspension.endDate} onChange={e => setNewSuspension({...newSuspension, endDate: e.target.value})} margin="dense" />
-                    
-                    {newSuspension.type === 'stealth_travel' && (
-                        <Box sx={{ mt: 2, p: 2, bgcolor: 'rgba(255,255,255,0.05)', borderRadius: 2 }}>
-                            <Typography variant="subtitle2" sx={{ color: PALETTE.accents.purple, mb: 2 }}>Infiltrations-Parameter</Typography>
-                            <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
-                                <TextField type="number" label="Tages-Stücke" value={stealthConfig.dayIntensity} onChange={e => setStealthConfig({...stealthConfig, dayIntensity: parseInt(e.target.value) || 1})} size="small" fullWidth />
-                                <TextField type="number" label="Nacht-Stücke" value={stealthConfig.nightIntensity} onChange={e => setStealthConfig({...stealthConfig, nightIntensity: parseInt(e.target.value) || 1})} size="small" fullWidth />
-                            </Box>
-                            <FormControl fullWidth size="small">
-                                <InputLabel>Erlaubte Tages-Subkategorien</InputLabel>
-                                <Select
-                                    multiple
-                                    value={stealthConfig.allowedDaySubCategories}
-                                    onChange={e => setStealthConfig({...stealthConfig, allowedDaySubCategories: e.target.value})}
-                                    renderValue={(selected) => selected.join(', ')}
-                                >
-                                    {onlySubCategories.map(sub => (
-                                        <MenuItem key={sub} value={sub}>
-                                            <Checkbox checked={stealthConfig.allowedDaySubCategories.indexOf(sub) > -1} />
-                                            <ListItemText primary={sub} />
-                                        </MenuItem>
-                                    ))}
-                                </Select>
-                            </FormControl>
-                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-                                *Nachts ist die Subkategorie "Strumpfhose" zwingend vorgeschrieben.
-                            </Typography>
-                        </Box>
-                    )}
-
-                </DialogContent>
-                <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}><Button onClick={() => setSuspensionDialog(false)} color="inherit">Abbrechen</Button><Button onClick={handleAddSuspension} variant="contained" sx={DESIGN_TOKENS.buttonGradient}>Weiter</Button></DialogActions>
-            </>
-        ) : (
-            <>
-                <DialogTitle sx={{ ...DESIGN_TOKENS.dialog.title.sx, color: PALETTE.accents.purple, justifyContent: 'center' }}>
-                    <TravelExploreIcon sx={{ mr: 1 }} /> DIKTAT: KOFFERINHALT
-                </DialogTitle>
-                <DialogContent sx={{ ...DESIGN_TOKENS.dialog.content.sx, maxHeight: '60vh', overflowY: 'auto' }}>
-                    <Alert severity="warning" sx={{ mb: 2, bgcolor: 'rgba(255,255,255,0.05)', color: '#fff' }}>
-                        Die folgenden Items wurden algorithmisch für deine Mission vorausgewählt. Du hast diese Items zwingend in das Gepäck zu überführen.
-                    </Alert>
-
-                    <Typography variant="subtitle2" sx={{ color: PALETTE.primary.main, mb: 1, mt: 3 }}>Tagtrage-Loadout</Typography>
-                    <Stack spacing={1} sx={{ mb: 3 }}>
-                        {systemPackedItems.day.map(i => {
-                            const imgSrc = i.imageUrl || (i.images && i.images.length > 0 ? i.images[0] : null);
-                            return (
-                                <Paper key={i.id} elevation={0} sx={{ display: 'flex', alignItems: 'center', p: 1, bgcolor: 'rgba(255,255,255,0.03)', border: `1px solid ${PALETTE.primary.main}`, borderRadius: 2 }}>
-                                    <Avatar src={imgSrc} variant="rounded" sx={{ width: 40, height: 40, mx: 1, bgcolor: 'rgba(255,255,255,0.1)' }}>{!imgSrc && (i.name ? i.name.charAt(0).toUpperCase() : '?')}</Avatar>
-                                    <Box sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1, overflow: 'hidden' }}>
-                                        <Typography variant="subtitle2" noWrap sx={{ color: PALETTE.primary.main }}>{i.brand ? `${i.brand} - ` : ''}{i.name || 'Unbenannt'}</Typography>
-                                        <Typography variant="caption" color="text.secondary" noWrap>ID: {i.customId || i.id} • {i.subCategory}</Typography>
-                                    </Box>
-                                </Paper>
-                            );
-                        })}
-                    </Stack>
-
-                    <Typography variant="subtitle2" sx={{ color: PALETTE.primary.main, mb: 1 }}>Nachttrage-Loadout (Strumpfhosen)</Typography>
-                    <Stack spacing={1}>
-                        {systemPackedItems.night.map(i => {
-                            const imgSrc = i.imageUrl || (i.images && i.images.length > 0 ? i.images[0] : null);
-                            return (
-                                <Paper key={i.id} elevation={0} sx={{ display: 'flex', alignItems: 'center', p: 1, bgcolor: 'rgba(255,255,255,0.03)', border: `1px solid ${PALETTE.primary.main}`, borderRadius: 2 }}>
-                                    <Avatar src={imgSrc} variant="rounded" sx={{ width: 40, height: 40, mx: 1, bgcolor: 'rgba(255,255,255,0.1)' }}>{!imgSrc && (i.name ? i.name.charAt(0).toUpperCase() : '?')}</Avatar>
-                                    <Box sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1, overflow: 'hidden' }}>
-                                        <Typography variant="subtitle2" noWrap sx={{ color: PALETTE.primary.main }}>{i.brand ? `${i.brand} - ` : ''}{i.name || 'Unbenannt'}</Typography>
-                                        <Typography variant="caption" color="text.secondary" noWrap>ID: {i.customId || i.id} • {i.subCategory}</Typography>
-                                    </Box>
-                                </Paper>
-                            );
-                        })}
-                    </Stack>
-                </DialogContent>
-                <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}>
-                    <Button onClick={() => setSuspensionDialogMode('plan')} color="inherit">Abbrechen</Button>
-                    <Button onClick={handleConfirmPack} variant="contained" sx={{ bgcolor: PALETTE.accents.purple }}>Verstanden & Akzeptiert</Button>
-                </DialogActions>
-            </>
-        )}
-      </Dialog>
-      
-      <Snackbar open={toast.open} autoHideDuration={4000} onClose={handleCloseToast} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}><Alert onClose={handleCloseToast} severity={toast.severity} variant="filled" sx={{ width: '100%' }}>{toast.message}</Alert></Snackbar>
-    </Container>
+      <Snackbar open={toast.open} autoHideDuration={4000} onClose={handleCloseToast} anchorOrigin={{ vertical: 'top', horizontal: 'center' }}>
+        <Alert onClose={handleCloseToast} severity={toast.severity} variant="filled" sx={{ width: '100%' }}>{toast.message}</Alert>
+      </Snackbar>
+    </Box>
   );
 }

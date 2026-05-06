@@ -49,63 +49,6 @@ export const isImmunityActive = async (userId) => {
 };
 
 /**
- * Prüft, ob ein Gamble ausgelöst werden soll (inkl. Cooldown & Zwang).
- */
-export const checkGambleTrigger = async (userId, isTzdActive, isInstructionActive, activePunishmentItem) => {
-    // 1. SCHUTZRAUM: Keine Gambles bei Pflichtaufgaben
-    if (isTzdActive) return { trigger: false };
-
-    // 2. AUSNAHME: Buttplug-Strafen erlauben Gambles
-    if (activePunishmentItem) {
-        const name = (activePunishmentItem.name || "").toLowerCase();
-        const sub = (activePunishmentItem.subCategory || "").toLowerCase();
-        const cat = (activePunishmentItem.mainCategory || "").toLowerCase();
-        const isPlug = name.includes("plug") || sub.includes("plug") || cat.includes("anal") || name.includes("butt") || sub.includes("butt");
-        
-        if (!isPlug) {
-            return { trigger: false }; // Normale Strafe blockiert weiterhin
-        }
-    }
-
-    // 3. IMMUNITÄT PRÜFEN
-    const immunityActive = await isImmunityActive(userId);
-    if (immunityActive) return { trigger: false };
-
-    // 4. STATS & COOLDOWN PRÜFEN
-    const statsRef = doc(db, `users/${userId}/status/gambleStats`);
-    const statsSnap = await getDoc(statsRef);
-    let consecutiveDeclines = 0;
-    
-    if (statsSnap.exists()) {
-        const data = statsSnap.data();
-        consecutiveDeclines = data.consecutiveDeclines || 0;
-        
-        if (data.lastGambleOfferedAt) {
-            const lastOffered = data.lastGambleOfferedAt.toDate();
-            const now = new Date();
-            const hoursSince = (now - lastOffered) / (1000 * 60 * 60);
-            if (hoursSince < COOLDOWN_HOURS) {
-                return { trigger: false };
-            }
-        }
-    }
-
-    // 5. WÜRFELN (Die 3% Micro-Chance)
-    if (Math.random() < GAMBLE_CHANCE) {
-        await setDoc(statsRef, {
-            lastGambleOfferedAt: serverTimestamp()
-        }, { merge: true });
-
-        return { 
-            trigger: true, 
-            isForced: consecutiveDeclines >= FORCED_GAMBLE_THRESHOLD 
-        };
-    }
-
-    return { trigger: false };
-};
-
-/**
  * Ermittelt den Einsatz (Exakt 3 Items, 1 Strumpfhose zwingend, 1 Mystery Item).
  */
 export const determineGambleStake = (items) => {
@@ -170,14 +113,84 @@ export const determineGambleStake = (items) => {
 };
 
 /**
- * Registriert die Entscheidung des Nutzers persistent.
+ * PERSISTENT GAMBLE LOCK:
+ * Prüft, ob ein Gamble ausgelöst werden soll und SCHREIBT ES SOFORT IN DIE DATENBANK.
+ * Verhindert das Flucht-Paradoxon.
+ */
+export const checkGambleTrigger = async (userId, isTzdActive, isInstructionActive, activePunishmentItem, items) => {
+    // 1. SCHUTZRAUM: Keine Gambles bei Pflichtaufgaben
+    if (isTzdActive) return { trigger: false };
+
+    // 2. AUSNAHME: Buttplug-Strafen erlauben Gambles
+    if (activePunishmentItem) {
+        const name = (activePunishmentItem.name || "").toLowerCase();
+        const sub = (activePunishmentItem.subCategory || "").toLowerCase();
+        const cat = (activePunishmentItem.mainCategory || "").toLowerCase();
+        const isPlug = name.includes("plug") || sub.includes("plug") || cat.includes("anal") || name.includes("butt") || sub.includes("butt");
+        
+        if (!isPlug) {
+            return { trigger: false }; // Normale Strafe blockiert weiterhin
+        }
+    }
+
+    // 3. IMMUNITÄT PRÜFEN
+    const immunityActive = await isImmunityActive(userId);
+    if (immunityActive) return { trigger: false };
+
+    // 4. STATS & COOLDOWN PRÜFEN
+    const statsRef = doc(db, `users/${userId}/status/gambleStats`);
+    const statsSnap = await getDoc(statsRef);
+    let consecutiveDeclines = 0;
+    
+    if (statsSnap.exists()) {
+        const data = statsSnap.data();
+        
+        // WICHTIG: Wenn bereits ein aktives Gamble in der DB liegt, nichts Neues triggern!
+        if (data.activeGamble) return { trigger: false };
+
+        consecutiveDeclines = data.consecutiveDeclines || 0;
+        
+        if (data.lastGambleOfferedAt) {
+            const lastOffered = data.lastGambleOfferedAt.toDate();
+            const now = new Date();
+            const hoursSince = (now - lastOffered) / (1000 * 60 * 60);
+            if (hoursSince < COOLDOWN_HOURS) {
+                return { trigger: false };
+            }
+        }
+    }
+
+    // 5. WÜRFELN (Die 3% Micro-Chance)
+    if (Math.random() < GAMBLE_CHANCE) {
+        const stake = determineGambleStake(items);
+        if (stake.length === 0) return { trigger: false };
+
+        const isForced = consecutiveDeclines >= FORCED_GAMBLE_THRESHOLD;
+
+        // PERSISTENZ: Gamble sofort in Firebase verankern
+        await setDoc(statsRef, {
+            lastGambleOfferedAt: serverTimestamp(),
+            activeGamble: {
+                stake: stake,
+                isForced: isForced
+            }
+        }, { merge: true });
+
+        return { trigger: true, isForced, stake };
+    }
+
+    return { trigger: false };
+};
+
+/**
+ * Registriert die Entscheidung des Nutzers persistent und hebt den Lock auf.
  */
 export const recordGambleAction = async (userId, action) => {
     const statsRef = doc(db, `users/${userId}/status/gambleStats`);
     if (action === 'accept') {
-        await setDoc(statsRef, { consecutiveDeclines: 0 }, { merge: true });
+        await setDoc(statsRef, { consecutiveDeclines: 0, activeGamble: null }, { merge: true });
     } else if (action === 'decline') {
-        await setDoc(statsRef, { consecutiveDeclines: increment(1) }, { merge: true });
+        await setDoc(statsRef, { consecutiveDeclines: increment(1), activeGamble: null }, { merge: true });
     }
 };
 
@@ -189,30 +202,24 @@ export const rollTheDice = async (userId, stakeItems) => {
     const win = roll < WIN_CHANCE;
 
     if (win) {
-        // GEWINN
-        await setImmunity(userId, 24);
+        // GEWINN (Immunitäts-Stunden werden vom Hook im Frontend gesetzt)
         return { 
             win: true, 
-            type: 'immunity',
-            penaltyDuration: null 
+            type: 'immunity'
         };
     } else {
-        // VERLUST - Das Gamble *ist* das TZD. 
-        const duration = 1440; // Exakt 24 Stunden
-        
-        // Mystery-Flag für die Speicherung in der Datenbank (TZD-Historie) entfernen
+        // VERLUST - Das universelle TZD startet (Dauer wird vom TZD Service berechnet)
         const penaltyItems = stakeItems.map(item => {
             const cleanItem = { ...item };
             delete cleanItem.isMystery;
             return cleanItem;
         });
         
-        await startTZD(userId, penaltyItems, null, duration, 'spiel_tzd'); 
+        await startTZD(userId, penaltyItems, null, null, 'spiel_tzd'); 
         
         return { 
             win: false, 
-            type: 'tzd_lock',
-            penaltyDuration: duration 
+            type: 'tzd_lock'
         };
     }
 };
