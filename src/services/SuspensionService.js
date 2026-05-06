@@ -180,28 +180,7 @@ export const checkActiveSuspension = async (userId) => {
     return null;
 };
 
+// --- IRON CONTRACT PROTOCOL ---
 export const terminateSuspension = async (userId, suspensionId) => {
-    const suspRef = doc(db, `users/${userId}/${COLLECTION}`, suspensionId);
-    
-    const suspSnap = await getDoc(suspRef);
-    if (suspSnap.exists() && suspSnap.data().type === 'stealth_travel') {
-        const qLedger = query(collection(db, `users/${userId}/punishmentLedger`), where('status', '==', 'pending'), where('isStealthAkkumulation', '==', true));
-        const ledgerSnap = await getDocs(qLedger);
-        if (!ledgerSnap.empty) {
-            const batch = writeBatch(db);
-            ledgerSnap.forEach(ticket => batch.update(ticket.ref, { isStealthAkkumulation: false }));
-            await batch.commit();
-        }
-    }
-    
-    await updateDoc(suspRef, {
-        status: 'terminated',
-        terminatedAt: Timestamp.now()
-    });
-    
-    await updateDoc(doc(db, `users/${userId}/status/dailyInstruction`), { 
-        activeSuspension: false,
-        suspensionReason: null,
-        stealthModeActive: false 
-    });
+    throw new Error("SYSTEM SPERRE: Ein vorzeitiger Abbruch einer geplanten Ausfallzeit ist systemseitig gesperrt (Iron Contract). Die Zeit muss zwingend abgesessen werden.");
 };

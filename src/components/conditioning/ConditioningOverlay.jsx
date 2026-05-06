@@ -99,7 +99,7 @@ export default function ConditioningOverlay({ onAcknowledge }) {
                         textShadow: '0 0 10px #FF1493, 0 0 20px #FF1493, 0 0 30px #FF1493' // Starker Neon Glow
                     }}
                 >
-                    Da du ja gerne Dessous und Nylons trägst, wirst du das ab jetzt für den Rest deines Lebens immer tun, egal ob es dir passt oder nicht.
+                    Da du ja so gerne Dessous und Nylons trägst, wirst du das ab jetzt für den Rest deines Lebens immer tun, egal ob es dir passt oder nicht.
                 </Typography>
                 
                 <Button 
@@ -128,7 +128,7 @@ export default function ConditioningOverlay({ onAcknowledge }) {
                         }
                     }}
                 >
-                    Ich bin eine Nylon-Fotze und schwöre, dass ich dies ewig tun werde.
+                    Ich schwöre, dass ich für den Rest meines Lebens nur noch Dessous und Nylons tragen werde.
                 </Button>
             </Paper>
         </Box>

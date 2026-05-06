@@ -245,17 +245,28 @@ export default function Dashboard() {
       }
 
       try {
-          await spendCredits(currentUser.uid, minutesToBuy, paymentType);
-
           const instrRef = doc(db, `users/${currentUser.uid}/status/dailyInstruction`);
           const instrSnap = await getDoc(instrRef);
 
           if (instrSnap.exists()) {
               const data = instrSnap.data();
+              
+              // GAMBLER'S RISK PROTOCOL: Die "1 Shot" Sperre
+              if (data.discountUsedToday) {
+                  showToast("Freikauf verweigert. Das System gewährt dieses Privileg nur einmal pro Tag.", "error");
+                  return;
+              }
+
+              // Credits physisch verbrennen
+              await spendCredits(currentUser.uid, minutesToBuy, paymentType);
+
               const currentDiscount = data.discountMinutes || 0;
               const newDiscount = currentDiscount + minutesToBuy;
               
-              await updateDoc(instrRef, { discountMinutes: newDiscount });
+              await updateDoc(instrRef, { 
+                  discountMinutes: newDiscount,
+                  discountUsedToday: true // Sperre für den Rest des Tages setzen
+              });
 
               let successMessage = `Freikauf autorisiert (-${minutesToBuy} Min).`;
               if (paymentType === 'both') successMessage = `Freikauf autorisiert (-${minutesToBuy} Min).\nSystem erzwang kombinierte LC & NC Zahlung.`;

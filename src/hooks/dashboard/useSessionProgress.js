@@ -216,16 +216,19 @@ export default function useSessionProgress(currentUser, items) {
 
         if (activeInstruction && activeInstruction.instructionReadyTime) {
             const start = activeInstruction.instructionReadyTime?.toDate ? activeInstruction.instructionReadyTime.toDate() : new Date(activeInstruction.instructionReadyTime);
+            // Injektion des Vorschusses
             currentMinutes = Math.floor((now - start) / 60000) + discountMinutes;
             isLive = true;
         } else {
+            // Injektion des Vorschusses in die ruhende Zeit
             currentMinutes = Math.floor(completedTodayMinutes) + discountMinutes;
         }
 
         const isGoalMet = currentMinutes >= targetMinutes;
 
         if (!isLive && !isGoalMet) {
-            currentMinutes = discountMinutes;
+            // BUGFIX: Kombinierte Zeit aus bereits abgeleisteter Zeit PLUS Discount
+            currentMinutes = Math.floor(completedTodayMinutes) + discountMinutes;
         }
 
         return {

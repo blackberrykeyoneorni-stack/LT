@@ -6,17 +6,7 @@ import { Icons } from '../theme/appIcons';
 
 export default function LockScreen() {
   const { unlock, forceUnlock, authError } = useSecurity();
-  const { login } = useAuth(); 
-
-  // Fallback: Wenn Biometrie kaputt ist, kann man sich über Google neu einloggen
-  const handleFallback = async () => {
-    try {
-      await login(); 
-      forceUnlock(); // Wenn Login erfolgreich, sperre auf
-    } catch (e) {
-      console.error("Fallback fehlgeschlagen", e);
-    }
-  };
+  const { currentUser } = useAuth(); 
 
   return (
     <Box sx={{ 
@@ -89,16 +79,6 @@ export default function LockScreen() {
         <Typography variant="caption" sx={{ color: 'text.disabled', mb: 1 }}>
             Biometrische Verifizierung oder System-PIN
         </Typography>
-
-        {/* Notfall Login */}
-        <Button 
-          variant="text" 
-          size="small" 
-          onClick={handleFallback}
-          sx={{ color: 'text.secondary', mt: 4, textTransform: 'none' }}
-        >
-          Admin-Fallback: Google Login
-        </Button>
         
       </Container>
     </Box>

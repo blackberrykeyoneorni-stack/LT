@@ -457,6 +457,12 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
         finalNote: feedback.note || ''
     };
 
+    // GAMBLER'S RISK: Wenn das Ziel verfehlt wird, verbrennt der Freikauf.
+    if (!isInstructionCompleted && sessionDiscountMinutes > 0 && !isNightSession) {
+        const lossMsg = `GAMBLER'S RISK: ${sessionDiscountMinutes}m Freikauf durch Abbruch vernichtet`;
+        updateData.finalNote = updateData.finalNote ? `${updateData.finalNote} | ${lossMsg}` : lossMsg;
+    }
+
     if (nightSuccess !== null) {
         updateData.nightSuccess = nightSuccess;
     }
@@ -651,10 +657,16 @@ export const stopSession = async (userId, sessionId, feedback = {}) => {
         const instrSnap = await getDoc(instrRef);
         
         if (instrSnap.exists() && instrSnap.data().periodId === sessionData.periodId) {
+            // GAMBLER'S RISK: Wenn das Ziel verfehlt wird, verbrennt der Bonus (wird auf 0 gesetzt).
+            // Da das Feld in instrUpdates definiert ist, wird es entweder auf 0 genullt (Strafe) 
+            // oder bleibt 0 (wenn eh nichts da war). Der Flag discountForfeited verhindert den Neukauf.
             const instrUpdates = { isActive: false, activeSessionId: null, discountMinutes: 0 };
             
             if (isInstructionCompleted) {
                 instrUpdates.isCompleted = true;
+            } else if (sessionDiscountMinutes > 0 && !isNightSession) {
+                // Hard-Lock für den restlichen Tag, damit das verlorene Privileg nicht nachgekauft wird.
+                instrUpdates.discountForfeited = true; 
             }
 
             batch.set(instrRef, instrUpdates, { merge: true });
