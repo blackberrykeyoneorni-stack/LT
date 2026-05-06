@@ -76,34 +76,41 @@ export default function Layout() {
     return () => clearInterval(timer);
   }, [extortionData, extortionTimeLeft, currentUser]);
 
-  // Hook für Visibility-Änderungen
-  useEffect(() => {
-    const handleVisibilityChange = async () => {
-      // Wenn die App sichtbar wird (User öffnet sie oder wechselt zurück)
-      if (document.visibilityState === 'visible' && currentUser) {
-        const now = Date.now();
-        
-        // Drosselung: Nur alle 60 Sekunden prüfen, um System-Trigger zu vermeiden
-        if (now - lastPenaltyTime.current > 60000) {
-            const punished = await penalizeTZDAppOpen(currentUser.uid);
-            
-            if (punished) {
-                // Wenn bestraft wurde: Zeit merken und Warnung zeigen
-                lastPenaltyTime.current = now;
-                setPenaltyOpen(true);
-            }
+  // --- ZENTRALER SYSTEM-TRIGGER (Neu) ---
+  const executeSystemTriggers = async () => {
+    if (!currentUser) return;
+    const now = Date.now();
+    
+    // Drosselung: Nur alle 60 Sekunden prüfen, um TZD-Spam zu vermeiden
+    if (now - lastPenaltyTime.current > 60000) {
+        const punished = await penalizeTZDAppOpen(currentUser.uid);
+        if (punished) {
+            lastPenaltyTime.current = now;
+            setPenaltyOpen(true);
         }
+    }
 
-        // --- ERPRESSUNGS-PROTOKOLL TRIGGER ---
-        checkAndTriggerExtortion(currentUser.uid);
+    // Erpressungs-Protokoll feuern (Backend prüft selbständig Bedingungen und %-Chance)
+    checkAndTriggerExtortion(currentUser.uid);
+  };
+
+  // 1. Hook für Visibility-Änderungen (Background -> Foreground)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        executeSystemTriggers();
       }
     };
-
     document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, [currentUser]);
+
+  // 2. Hook für Tab-Wechsel und initialen Ladevorgang
+  useEffect(() => {
+    if (document.visibilityState === 'visible') {
+        executeSystemTriggers();
+    }
+  }, [location.pathname, currentUser]);
 
   const handleClosePenalty = () => {
       setPenaltyOpen(false);
@@ -121,7 +128,6 @@ export default function Layout() {
   const navValue = getNavValue(location.pathname);
 
   // Blackout-Screen, während der Server prüft, ob du schon geschworen hast.
-  // Keine Millisekunde Einsicht in das System ohne Autorisierung.
   if (loadingGuard) {
       return <Box sx={{ width: '100vw', height: '100vh', bgcolor: '#000' }} />;
   }

@@ -920,18 +920,31 @@ export const acceptExtortion = async (userId) => {
 
         if (!instrSnap.exists() || !sessionSnap.exists()) return;
 
-        const batch = writeBatch(db);
-
-        // Dynamische Ziel-Ankerung korrigiert: Ursprüngliches Tagesziel + 60 Minuten Zwang
         const instrData = instrSnap.data();
-        const currentTarget = instrData.durationMinutes || 240; // Fallback auf 4h, falls nicht gesetzt
+        
+        // --- KORREKTUR: Dynamisches Basisziel ermitteln ---
+        let currentTarget = instrData.durationMinutes;
+        
+        if (!currentTarget) {
+            // Dynamisch aus Protocol laden, falls noch nicht in der Instruction verankert
+            const protSnap = await getDoc(doc(db, `users/${userId}/settings/protocol`));
+            if (protSnap.exists() && protSnap.data().currentDailyGoal) {
+                currentTarget = protSnap.data().currentDailyGoal * 60;
+            } else {
+                currentTarget = 240; // Fallback auf 4h
+            }
+        }
         
         // Neues Ziel: Ursprüngliches Ziel + 60 Minuten Zwang
         const newTarget = currentTarget + 60;
+        const currentPenalty = instrData.extortionPenalty || 0;
+
+        const batch = writeBatch(db);
 
         // Rollback & Zwang etablieren
         batch.update(instrRef, {
             durationMinutes: newTarget,
+            extortionPenalty: currentPenalty + 60,
             isCompleted: false
         });
 

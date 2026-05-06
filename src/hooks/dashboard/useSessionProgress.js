@@ -10,7 +10,11 @@ export default function useSessionProgress(currentUser, items) {
     const [activeSessions, setActiveSessions] = useState([]);
     const [loading, setLoading] = useState(true);
     const [nightCompliance, setNightCompliance] = useState(null);
+    
+    // UI Override States
     const [discountMinutes, setDiscountMinutes] = useState(0); 
+    const [extortionPenalty, setExtortionPenalty] = useState(0);
+    const [dynamicTargetMinutes, setDynamicTargetMinutes] = useState(null);
     
     const [dailyTargetHours, setDailyTargetHours] = useState(DEFAULT_PROTOCOL_RULES.currentDailyGoal || 4); 
     const [nightStartHour, setNightStartHour] = useState(23); 
@@ -97,7 +101,6 @@ export default function useSessionProgress(currentUser, items) {
            if (needsVerification) {
                const checkAndVerify = async () => {
                    const d = new Date();
-                   // NEU: Watcher löst exakt ab 07:30 Uhr aus
                    if (d.getHours() > 7 || (d.getHours() === 7 && d.getMinutes() >= 30)) {
                        if (intervalId) clearInterval(intervalId);
                        await verifyNightCompliance(currentUser.uid);
@@ -107,7 +110,6 @@ export default function useSessionProgress(currentUser, items) {
                checkAndVerify(); 
                
                const d = new Date();
-               // NEU: Intervall bleibt bestehen, bis es 07:30 Uhr ist
                if (!(d.getHours() > 7 || (d.getHours() === 7 && d.getMinutes() >= 30)) && !intervalId) {
                    intervalId = setInterval(checkAndVerify, 60000);
                }
@@ -122,15 +124,26 @@ export default function useSessionProgress(currentUser, items) {
         };
     }, [currentUser]);
 
-    // 2b. DISCOUNT LISTENER
+    // 2b. INSTRUCTION STATUS LISTENER (Dynamische Ziele & Modifikatoren)
     useEffect(() => {
         if (!currentUser) return;
         const instrRef = doc(db, `users/${currentUser.uid}/status/dailyInstruction`);
         const unsub = onSnapshot(instrRef, (snap) => {
-            if (snap.exists() && snap.data().discountMinutes) {
-                setDiscountMinutes(snap.data().discountMinutes);
+            if (snap.exists()) {
+                const data = snap.data();
+                setDiscountMinutes(data.discountMinutes || 0);
+                setExtortionPenalty(data.extortionPenalty || 0);
+                
+                // Falls das System (z.B. durch Erpressung) die Dauer fest auf das Dokument geschrieben hat
+                if (data.durationMinutes) {
+                    setDynamicTargetMinutes(data.durationMinutes);
+                } else {
+                    setDynamicTargetMinutes(null);
+                }
             } else {
                 setDiscountMinutes(0);
+                setExtortionPenalty(0);
+                setDynamicTargetMinutes(null);
             }
         });
         return () => unsub();
@@ -190,7 +203,8 @@ export default function useSessionProgress(currentUser, items) {
     const calculateProgress = () => {
         const now = new Date();
         
-        let targetMinutes = (dailyTargetHours * 60);
+        // Dynamisches Ziel überschreibt das Basis-Protokoll-Ziel
+        let targetMinutes = dynamicTargetMinutes !== null ? dynamicTargetMinutes : (dailyTargetHours * 60);
         if (targetMinutes < 0) targetMinutes = 0; 
         
         // Harter Reset am späten Abend (Nacht-Phase beginnt)
@@ -202,7 +216,8 @@ export default function useSessionProgress(currentUser, items) {
                 isDailyGoalMet: false, 
                 isLive: false,
                 nightCompliance,
-                discountMinutes
+                discountMinutes,
+                extortionPenalty
             };
         }
 
@@ -238,7 +253,8 @@ export default function useSessionProgress(currentUser, items) {
             isDailyGoalMet: isGoalMet,
             isLive,
             nightCompliance,
-            discountMinutes
+            discountMinutes,
+            extortionPenalty
         };
     };
 

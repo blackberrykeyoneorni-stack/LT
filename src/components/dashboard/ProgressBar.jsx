@@ -6,8 +6,11 @@ import { PALETTE } from '../../theme/obsidianDesign';
 
 export default function ProgressBar({ currentMinutes, targetHours, isGoalMetToday, progressData }) {
     
-    // Zielzeit = Ursprungsziel (aus Protokoll)
-    let targetMinutes = (targetHours * 60);
+    // Zielzeit = Dynamisches Ziel aus dem Hook (inkl. Erpressung) ODER Ursprungsziel
+    let targetMinutes = progressData?.dailyTargetMinutes !== undefined 
+        ? progressData.dailyTargetMinutes 
+        : (targetHours * 60);
+        
     if (targetMinutes < 0) targetMinutes = 0; 
 
     // Balken darf max 100% sein für die Anzeige
@@ -54,10 +57,18 @@ export default function ProgressBar({ currentMinutes, targetHours, isGoalMetToda
                     <Typography variant="body2" sx={{ color: isStrictlySuccessful ? activeColor : 'text.secondary', letterSpacing: 1, fontWeight: 'bold' }}>
                         TAGESZIEL
                     </Typography>
-                    {/* NEU: Visueller Hinweis auf TimeBank-Tribut (als Aufschlag) */}
+                    
+                    {/* Visualisierung: Zeitvorteil durch Freikauf */}
                     {progressData?.discountMinutes > 0 && (
                         <Typography variant="caption" sx={{ color: PALETTE.primary.main, ml: 1, fontWeight: 'bold' }}>
                             (+{progressData.discountMinutes}m TimeBank)
+                        </Typography>
+                    )}
+                    
+                    {/* Visualisierung: Zeitverlust durch Erpressung */}
+                    {progressData?.extortionPenalty > 0 && (
+                        <Typography variant="caption" sx={{ color: PALETTE.accents.red, ml: 1, fontWeight: 'bold' }}>
+                            (+{progressData.extortionPenalty}m Strafe)
                         </Typography>
                     )}
                 </Box>
