@@ -50,6 +50,11 @@ export default function InstructionDialog({
   const [verifiedItemIds, setVerifiedItemIds] = useState([]);
   const [stagingStatus, setStagingStatus] = useState('idle'); 
   
+  // States für Dressing Time Lock
+  const [dressingTimes, setDressingTimes] = useState({});
+  const [nowTime, setNowTime] = useState(Date.now());
+  const [localStartTimes, setLocalStartTimes] = useState({});
+  
   const [suggestedItem, setSuggestedItem] = useState(null);
   const [hardcoreDialogOpen, setHardcoreDialogOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState(null);
@@ -81,6 +86,15 @@ export default function InstructionDialog({
         setViewState('oath');
     }
   }, [instruction, open]);
+
+  // Sekunden-Ticker für den Dressing Time Lock
+  useEffect(() => {
+      if (viewState === 'preparation') {
+          setNowTime(Date.now());
+          const interval = setInterval(() => setNowTime(Date.now()), 1000);
+          return () => clearInterval(interval);
+      }
+  }, [viewState]);
 
   // Synchronisiert die verifiedItemIds mit der Datenbank, falls man den Dialog schließt und wieder öffnet
   useEffect(() => {
@@ -121,9 +135,9 @@ export default function InstructionDialog({
       
       try {
           setVerifiedItemIds(prev => [...prev, scannedItem.id]);
+          // Lokal speichern für verzögerungsfreie Sperrung des nachfolgenden Items
+          setLocalStartTimes(prev => ({ ...prev, [scannedItem.id]: Date.now() }));
           
-          // Wir starten das Item einzeln. Der Service kümmert sich darum, es an die existierende
-          // Instruction-Session anzuhängen und die ReadyTime zu setzen, wenn wir komplett sind.
           await startSessionService(currentUser.uid, {
               items: [scannedItem],
               itemId: scannedItem.id,
@@ -133,7 +147,7 @@ export default function InstructionDialog({
               acceptedAt: instruction.acceptedAt
           });
           
-          if (showToast) showToast(`"${scannedItem.name}" am Körper. Materialzeit läuft.`, "success");
+          if (showToast) showToast(`"${scannedItem.name}" am Körper. System-Timer für dieses Item läuft.`, "success");
       } catch (e) {
           if (showToast) showToast("Fehler beim Erfassen des Items.", "error");
           setVerifiedItemIds(prev => prev.filter(id => id !== scannedItem.id));
@@ -180,7 +194,7 @@ export default function InstructionDialog({
   };
 
   const activateNfcScan = () => {
-      if (showToast) showToast("Scanner aktiv. Halte das nächste Item an das Telefon.", "info");
+      if (showToast) showToast("Scanner aktiv. Halte das korrekte nächste Item an das Telefon.", "info");
       startBindingScan(handleNfcAutoStart, true);
   };
 
@@ -199,6 +213,46 @@ export default function InstructionDialog({
       }
 
       let isValid = false;
+      let sequenceError = false;
+      let lockError = false;
+
+      // Ermittlung des exakt nächsten freigeschalteten Items nach Vorgabe
+      const sortedItems = (instruction?.items || [])
+          .map(instrItem => {
+              const foundItem = items.find(i => i.id === instrItem.id);
+              return foundItem ? { ...foundItem, orderIndex: instrItem.orderIndex } : instrItem;
+          })
+          .sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
+
+      const unverifiedItems = sortedItems.filter(i => !verifiedItemIds.includes(i.id));
+      const currentTarget = unverifiedItems.length > 0 ? unverifiedItems[0] : null;
+      const currentTargetIdx = currentTarget ? sortedItems.findIndex(i => i.id === currentTarget.id) : -1;
+
+      // Lock Status auswerten
+      let isLocked = false;
+      if (currentTargetIdx > 0) {
+          const prevItem = sortedItems[currentTargetIdx - 1];
+          const prevSession = activeSessions.find(s => 
+              s.type === 'preparation' && 
+              s.periodId === instruction.periodId && 
+              (s.itemId === prevItem.id || (s.itemIds && s.itemIds.includes(prevItem.id)))
+          );
+
+          let startMs = localStartTimes[prevItem.id];
+          if (prevSession && prevSession.startTime) {
+               startMs = prevSession.startTime.toDate ? prevSession.startTime.toDate().getTime() : new Date(prevSession.startTime).getTime();
+          }
+
+          if (startMs) {
+              const requiredSeconds = dressingTimes[prevItem.subCategory] !== undefined ? dressingTimes[prevItem.subCategory] : 10;
+              const unlockTimeMs = startMs + (requiredSeconds * 1000);
+              if (Date.now() < unlockTimeMs) {
+                  isLocked = true;
+              }
+          } else {
+              isLocked = true;
+          }
+      }
 
       if (instruction.transitProtocol && instruction.transitProtocol.active) {
           const transit = instruction.transitProtocol;
@@ -214,10 +268,15 @@ export default function InstructionDialog({
           if (scannedItem.id === expectedItemId) {
               isValid = true;
           } else if ((instruction?.items || []).some(i => i.id === scannedItem.id && i.id !== transit.primaryItemId)) {
-              isValid = true; 
+              if (currentTarget && scannedItem.id === currentTarget.id) {
+                  if (isLocked) lockError = true;
+                  else isValid = true;
+              } else {
+                  sequenceError = true;
+              }
           }
 
-          if (!isValid) {
+          if (!isValid && !sequenceError && !lockError) {
               if (isLate && scannedItem.id === transit.primaryItemId) {
                    if (showToast) showToast("Transit verpasst (30 Min)! Nacht-Item unrein. Scanne Ersatz.", "error");
                    return;
@@ -227,7 +286,26 @@ export default function InstructionDialog({
               }
           }
       } else {
-          isValid = (instruction?.items || []).some(instrItem => instrItem.id === scannedItem.id);
+          // Strikte Reihenfolge erzwingen
+          if (currentTarget && scannedItem.id === currentTarget.id) {
+              if (isLocked) lockError = true;
+              else isValid = true;
+          } else {
+              sequenceError = true;
+          }
+      }
+
+      // Reaktionen auf Fehler
+      if (lockError) {
+          if (showToast) showToast(`Sperre aktiv! Du musst das vorherige Item erst vollständig anziehen.`, "warning");
+          if (navigator.vibrate) navigator.vibrate([100, 50, 100]); 
+          return;
+      }
+
+      if (sequenceError) {
+          if (showToast) showToast(`Falsche Reihenfolge! Erwartet: ${currentTarget?.name || 'Anderes Item'}`, "error");
+          if (navigator.vibrate) navigator.vibrate([100, 50, 100]); 
+          return;
       }
 
       if (isValid) {
@@ -286,7 +364,12 @@ export default function InstructionDialog({
                     probability: data.nightReleaseProbability !== undefined ? data.nightReleaseProbability : 15
                 });
             }
-        } catch (e) { console.error("Error loading prefs", e); }
+            
+            // Dressing Time Configuration laden
+            const dtSnap = await getDoc(doc(db, `users/${currentUser.uid}/settings/dressingTimes`));
+            if (dtSnap.exists()) setDressingTimes(dtSnap.data().times || {});
+            
+        } catch (e) { console.error("Error loading configs", e); }
 
         if (instruction && !instruction.isAccepted) {
             const balance = await getTimeBankBalance(currentUser.uid);
@@ -620,13 +703,47 @@ export default function InstructionDialog({
   };
 
   const renderPreparationPhase = () => {
-      // Items mappen, fehlende Daten anreichern und strikt nach orderIndex sortieren
+      
       const displayItems = (instruction?.items || [])
           .map(instrItem => {
               const foundItem = items.find(i => i.id === instrItem.id);
               return foundItem ? { ...foundItem, orderIndex: instrItem.orderIndex } : instrItem;
           })
           .sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
+
+      const unverifiedItems = displayItems.filter(i => !verifiedItemIds.includes(i.id));
+      const currentTargetItem = unverifiedItems.length > 0 ? unverifiedItems[0] : null;
+      const currentTargetIndex = currentTargetItem ? displayItems.findIndex(i => i.id === currentTargetItem.id) : -1;
+
+      // Lock Logic Calculation
+      let activeLockStatus = false;
+      let activeLockCountdown = 0;
+
+      if (currentTargetIndex > 0) {
+          const prevItem = displayItems[currentTargetIndex - 1];
+          const prevSession = activeSessions.find(s => 
+              s.type === 'preparation' && 
+              s.periodId === instruction.periodId && 
+              (s.itemId === prevItem.id || (s.itemIds && s.itemIds.includes(prevItem.id)))
+          );
+
+          let startMs = localStartTimes[prevItem.id];
+          if (prevSession && prevSession.startTime) {
+               startMs = prevSession.startTime.toDate ? prevSession.startTime.toDate().getTime() : new Date(prevSession.startTime).getTime();
+          }
+
+          if (startMs) {
+              const requiredSeconds = dressingTimes[prevItem.subCategory] !== undefined ? dressingTimes[prevItem.subCategory] : 10;
+              const unlockTimeMs = startMs + (requiredSeconds * 1000);
+              if (nowTime < unlockTimeMs) {
+                  activeLockStatus = true;
+                  activeLockCountdown = Math.ceil((unlockTimeMs - nowTime) / 1000);
+              }
+          } else {
+              activeLockStatus = true;
+              activeLockCountdown = 0; 
+          }
+      }
           
       const primaryTransitItem = instruction?.transitProtocol?.active ? items.find(i => i.id === instruction.transitProtocol.primaryItemId) : null;
 
@@ -704,9 +821,26 @@ export default function InstructionDialog({
                             sx={{ mb: 1, borderColor: 'rgba(255,255,255,0.1)', color: 'text.secondary', fontSize: '0.65rem', height: 20 }} 
                         />
                         
-                         {!isVerified && (
-                             <Button size="small" variant="contained" onClick={() => handleVerifyItem(displayItem)} sx={{ mx: 'auto', display: 'block', fontSize: '0.6rem', bgcolor: PALETTE.primary.dark }}>
-                                 MANUELL ANZIEHEN
+                         {!isVerified && displayItem.id === currentTargetItem?.id && (
+                             <Button 
+                                 size="small" 
+                                 variant={activeLockStatus ? "outlined" : "contained"} 
+                                 disabled={activeLockStatus}
+                                 onClick={() => handleVerifyItem(displayItem)} 
+                                 sx={{ 
+                                     mx: 'auto', display: 'block', fontSize: '0.6rem', 
+                                     bgcolor: activeLockStatus ? 'transparent' : PALETTE.primary.dark,
+                                     borderColor: activeLockStatus ? 'rgba(255,255,255,0.2)' : 'none',
+                                     color: activeLockStatus ? 'text.secondary' : '#fff'
+                                 }}
+                             >
+                                 {activeLockStatus ? `SPERRE: ${activeLockCountdown}s` : "MANUELL ANZIEHEN"}
+                             </Button>
+                         )}
+
+                         {!isVerified && displayItem.id !== currentTargetItem?.id && (
+                             <Button size="small" variant="outlined" disabled sx={{ mx: 'auto', display: 'block', fontSize: '0.6rem', borderColor: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.3)' }}>
+                                 WARTET AUF VORLÄUFER
                              </Button>
                          )}
 

@@ -30,6 +30,7 @@ import TuneIcon from '@mui/icons-material/Tune';
 import SaveIcon from '@mui/icons-material/Save'; 
 import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 import UploadIcon from '@mui/icons-material/Upload';
+import TimerIcon from '@mui/icons-material/Timer';
 
 export default function Settings() {
   const { currentUser, logout } = useAuth();
@@ -59,6 +60,7 @@ export default function Settings() {
   const [maxInstructionItems, setMaxInstructionItems] = useState(1); 
   const [extortionTriggerChance, setExtortionTriggerChance] = useState(0.05); // NEU: Erpressungs-Protokoll State
   const [inventoryConfig, setInventoryConfig] = useState({ Nylons: { minCondition: 3, subcategories: {} }, Dessous: { minCondition: 3, subcategories: {} } });
+  const [dressingTimes, setDressingTimes] = useState({}); // NEU: Dressing Time Lock Configuration
   
   const [protocolRules, setProtocolRules] = useState(null);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
@@ -100,7 +102,7 @@ export default function Settings() {
   const loadAll = async () => {
       try {
           const userId = currentUser.uid;
-          const [bSnap, mSnap, catSnap, locSnap, locIdxSnap, prefSnap, arSnap, rlSnap, rcSnap, protSnap, itemsSnap, invConfigSnap] = await Promise.all([
+          const [bSnap, mSnap, catSnap, locSnap, locIdxSnap, prefSnap, arSnap, rlSnap, rcSnap, protSnap, itemsSnap, invConfigSnap, dtSnap] = await Promise.all([
               getDoc(doc(db, `users/${userId}/settings/brands`)),
               getDoc(doc(db, `users/${userId}/settings/materials`)),
               getDoc(doc(db, `users/${userId}/settings/categories`)),
@@ -112,7 +114,8 @@ export default function Settings() {
               getDoc(doc(db, `users/${userId}/settings/runCauses`)),
               getDoc(doc(db, `users/${userId}/settings/protocol`)),
               getDocs(query(collection(db, `users/${userId}/items`), where('status', '==', 'active'))),
-              getDoc(doc(db, `users/${userId}/settings/inventoryConfig`))
+              getDoc(doc(db, `users/${userId}/settings/inventoryConfig`)),
+              getDoc(doc(db, `users/${userId}/settings/dressingTimes`))
           ]);
 
           if (bSnap.exists()) setBrands(bSnap.data().list || []);
@@ -161,6 +164,10 @@ export default function Settings() {
 
           if (invConfigSnap.exists()) {
               setInventoryConfig(invConfigSnap.data());
+          }
+
+          if (dtSnap && dtSnap.exists()) {
+              setDressingTimes(dtSnap.data().times || {});
           }
 
       } catch (e) { console.error(e); } finally { setLoading(false); }
@@ -230,6 +237,7 @@ export default function Settings() {
           }
 
           batch.set(doc(db, `users/${uid}/settings/inventoryConfig`), inventoryConfig, { merge: true });
+          batch.set(doc(db, `users/${uid}/settings/dressingTimes`), { times: dressingTimes }, { merge: true });
 
           await batch.commit();
           showToast("Alle Einstellungen erfolgreich gespeichert.", "success");
@@ -489,7 +497,7 @@ export default function Settings() {
       if(catStructure[main]) {
           catStructure[main].forEach(sub => {
               allCategoryOptions.push({ label: `• ${sub}`, value: sub });
-              if (sub !== 'Strumpfhose') onlySubCategories.push(sub);
+              if (!onlySubCategories.includes(sub)) onlySubCategories.push(sub);
           });
       }
   });
@@ -764,6 +772,32 @@ export default function Settings() {
                  </Box>
              )})}
          </AccordionDetails>
+      </Accordion>
+
+      <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.accents.orange}` }}>
+        <AccordionSummary expandIcon={<Icons.Expand />}><SectionHeader icon={TimerIcon} title="Diktat: Anziehzeiten" color={PALETTE.accents.orange} /></AccordionSummary>
+        <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Definiere die exakte Zeit in Sekunden, die das System für das physische Anziehen der jeweiligen Subkategorie blockiert. 
+            </Typography>
+            {onlySubCategories.length === 0 && <Typography variant="caption" color="text.disabled">Keine Subkategorien definiert.</Typography>}
+            {onlySubCategories.map(sub => (
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }} key={sub}>
+                    <Typography variant="body2" sx={{ fontWeight: 'bold' }}>{sub}</Typography>
+                    <TextField 
+                        label="Sekunden" 
+                        type="number" 
+                        size="small" 
+                        sx={{ width: 100, ...DESIGN_TOKENS.inputField }}
+                        value={dressingTimes[sub] !== undefined ? dressingTimes[sub] : ''}
+                        onChange={(e) => {
+                            const val = parseInt(e.target.value);
+                            setDressingTimes(prev => ({ ...prev, [sub]: isNaN(val) ? 0 : val }));
+                        }}
+                    />
+                </Box>
+            ))}
+        </AccordionDetails>
       </Accordion>
 
       <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 10, borderLeft: '4px solid #fff' }}>
