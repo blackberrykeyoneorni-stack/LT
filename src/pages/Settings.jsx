@@ -58,6 +58,7 @@ export default function Settings() {
 
   const [maxInstructionItems, setMaxInstructionItems] = useState(1); 
   const [extortionTriggerChance, setExtortionTriggerChance] = useState(0.05); // NEU: Erpressungs-Protokoll State
+  const [inventoryConfig, setInventoryConfig] = useState({ Nylons: { minCondition: 3, subcategories: {} }, Dessous: { minCondition: 3, subcategories: {} } });
   
   const [protocolRules, setProtocolRules] = useState(null);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
@@ -99,7 +100,7 @@ export default function Settings() {
   const loadAll = async () => {
       try {
           const userId = currentUser.uid;
-          const [bSnap, mSnap, catSnap, locSnap, locIdxSnap, prefSnap, arSnap, rlSnap, rcSnap, protSnap, itemsSnap] = await Promise.all([
+          const [bSnap, mSnap, catSnap, locSnap, locIdxSnap, prefSnap, arSnap, rlSnap, rcSnap, protSnap, itemsSnap, invConfigSnap] = await Promise.all([
               getDoc(doc(db, `users/${userId}/settings/brands`)),
               getDoc(doc(db, `users/${userId}/settings/materials`)),
               getDoc(doc(db, `users/${userId}/settings/categories`)),
@@ -110,7 +111,8 @@ export default function Settings() {
               getDoc(doc(db, `users/${userId}/settings/runLocations`)),
               getDoc(doc(db, `users/${userId}/settings/runCauses`)),
               getDoc(doc(db, `users/${userId}/settings/protocol`)),
-              getDocs(query(collection(db, `users/${userId}/items`), where('status', '==', 'active')))
+              getDocs(query(collection(db, `users/${userId}/items`), where('status', '==', 'active'))),
+              getDoc(doc(db, `users/${userId}/settings/inventoryConfig`))
           ]);
 
           if (bSnap.exists()) setBrands(bSnap.data().list || []);
@@ -156,6 +158,10 @@ export default function Settings() {
           
           const itemsData = itemsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
           setAllItems(itemsData);
+
+          if (invConfigSnap.exists()) {
+              setInventoryConfig(invConfigSnap.data());
+          }
 
       } catch (e) { console.error(e); } finally { setLoading(false); }
   };
@@ -222,6 +228,8 @@ export default function Settings() {
           } else {
               batch.set(locIdxRef, { mapping: locationIndex });
           }
+
+          batch.set(doc(db, `users/${uid}/settings/inventoryConfig`), inventoryConfig, { merge: true });
 
           await batch.commit();
           showToast("Alle Einstellungen erfolgreich gespeichert.", "success");
@@ -670,6 +678,91 @@ export default function Settings() {
              <ListManager title="Marken" items={brands} newItem={newBrand} setNewItem={setNewBrand} listName="brands" setList={setBrands} />
              <Divider sx={{ my: 2 }} />
              <ListManager title="Materialien" items={materials} newItem={newMaterial} setNewItem={setNewMaterial} listName="materials" setList={setMaterials} />
+         </AccordionDetails>
+      </Accordion>
+
+      <Accordion sx={{ ...DESIGN_TOKENS.accordion.root, mb: 1, borderLeft: `4px solid ${PALETTE.accents.blue}` }}>
+         <AccordionSummary expandIcon={<Icons.Expand />}><SectionHeader icon={Icons.Inventory} title="Bestands- & Qualitätsmanagement" color={PALETTE.accents.blue} /></AccordionSummary>
+         <AccordionDetails sx={{ ...DESIGN_TOKENS.accordion.details, p: 1.5 }}>
+             {['Nylons', 'Dessous'].map(mainCat => {
+                 const subs = catStructure[mainCat] || [];
+                 return (
+                 <Box key={mainCat} sx={{ mb: 3, p: 2, bgcolor: 'rgba(255,255,255,0.02)', borderRadius: 2, border: `1px solid ${mainCat === 'Nylons' ? PALETTE.accents.pink : PALETTE.accents.blue}40` }}>
+                     <Typography variant="h6" sx={{ color: mainCat === 'Nylons' ? PALETTE.accents.pink : PALETTE.accents.blue, mb: 2 }}>{mainCat}</Typography>
+                     
+                     <FormControl fullWidth sx={{ mb: 3 }}>
+                         <InputLabel sx={{ color: 'text.secondary' }}>Mindestzustand für intakten Bestand</InputLabel>
+                         <Select 
+                             value={inventoryConfig[mainCat]?.minCondition || 3} 
+                             label="Mindestzustand für intakten Bestand"
+                             onChange={(e) => {
+                                 setInventoryConfig(prev => ({
+                                     ...prev,
+                                     [mainCat]: { ...prev[mainCat], minCondition: e.target.value }
+                                 }));
+                             }}
+                             sx={DESIGN_TOKENS.inputField}
+                         >
+                             {[1, 2, 3, 4, 5].map(v => <MenuItem key={v} value={v}>Zustand {v} oder besser</MenuItem>)}
+                         </Select>
+                     </FormControl>
+
+                     <Typography variant="subtitle2" sx={{ color: 'text.secondary', mb: 2 }}>Spezifische Subkategorien-Ziele</Typography>
+                     {subs.length === 0 ? (
+                         <Typography variant="caption" color="text.disabled">Keine Subkategorien definiert.</Typography>
+                     ) : (
+                         subs.map(subCat => (
+                             <Box sx={{ display: 'flex', gap: 1, mb: 2, alignItems: 'center' }} key={subCat}>
+                                 <Typography variant="body2" sx={{ fontWeight: 'bold', width: '30%', wordWrap: 'break-word' }}>{subCat}</Typography>
+                                 <TextField 
+                                     label="Anzahl" 
+                                     type="number" 
+                                     size="small" 
+                                     sx={{ width: '35%', ...DESIGN_TOKENS.inputField }}
+                                     value={inventoryConfig[mainCat]?.subcategories?.[subCat]?.minCount || 0}
+                                     onChange={(e) => {
+                                         setInventoryConfig(prev => ({
+                                             ...prev,
+                                             [mainCat]: {
+                                                 ...prev[mainCat],
+                                                 subcategories: {
+                                                     ...(prev[mainCat]?.subcategories || {}),
+                                                     [subCat]: {
+                                                         ...(prev[mainCat]?.subcategories?.[subCat] || {}),
+                                                         minCount: parseInt(e.target.value) || 0
+                                                     }
+                                                 }
+                                             }
+                                         }));
+                                     }}
+                                 />
+                                 <TextField 
+                                     label="Preis (€)" 
+                                     type="number" 
+                                     size="small" 
+                                     sx={{ width: '35%', ...DESIGN_TOKENS.inputField }}
+                                     value={inventoryConfig[mainCat]?.subcategories?.[subCat]?.fallbackPrice || 0}
+                                     onChange={(e) => {
+                                         setInventoryConfig(prev => ({
+                                             ...prev,
+                                             [mainCat]: {
+                                                 ...prev[mainCat],
+                                                 subcategories: {
+                                                     ...(prev[mainCat]?.subcategories || {}),
+                                                     [subCat]: {
+                                                         ...(prev[mainCat]?.subcategories?.[subCat] || {}),
+                                                         fallbackPrice: parseFloat(e.target.value) || 0
+                                                     }
+                                                 }
+                                             }
+                                         }));
+                                     }}
+                                 />
+                             </Box>
+                         ))
+                     )}
+                 </Box>
+             )})}
          </AccordionDetails>
       </Accordion>
 

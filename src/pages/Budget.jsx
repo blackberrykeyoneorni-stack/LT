@@ -5,17 +5,19 @@ import {
     DialogContent, DialogActions, Chip 
 } from '@mui/material';
 import { 
-    collection, doc, getDoc, setDoc, query, where, getDocs, orderBy 
+    collection, doc, getDoc, setDoc, query, getDocs, orderBy 
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { DESIGN_TOKENS, PALETTE } from '../theme/obsidianDesign';
+import { calculatePurchasePriority } from '../services/BudgetService';
 
 import WarningIcon from '@mui/icons-material/Warning';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import InfoIcon from '@mui/icons-material/Info';
 
 export default function Budget() {
     const { currentUser } = useAuth();
@@ -50,16 +52,23 @@ export default function Budget() {
 
             const wishQ = query(collection(db, `users/${currentUser.uid}/wishlist`), orderBy('createdAt', 'desc'));
             const wishSnap = await getDocs(wishQ);
-            setWishlist(wishSnap.docs.map(d => ({ 
+            const loadedWishlist = wishSnap.docs.map(d => ({ 
                 id: d.id, 
                 ...d.data(),
                 cost: d.data().estimatedCost || d.data().cost || d.data().price || 0 
-            })));
+            }));
+            
+            setWishlist(loadedWishlist);
 
             const itemsRef = collection(db, `users/${currentUser.uid}/items`);
-            const wornOutQ = query(itemsRef, where('condition', '<=', 2), where('status', '==', 'active'));
-            const wornSnap = await getDocs(wornOutQ);
-            setReplacements(wornSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+            const itemsSnap = await getDocs(query(itemsRef));
+            const allItems = itemsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+            // Intelligenter Algorithmus wird direkt konsultiert
+            const priorities = await calculatePurchasePriority(currentUser.uid, allItems, loadedWishlist);
+            
+            // Gefilterte Liste für alle Empfehlungen und Ersatzkäufe
+            setReplacements(priorities.filter(p => p.type === 'replacement' || p.type === 'recommendation'));
 
         } catch (error) {
             console.error("Fehler beim Laden:", error);
@@ -83,6 +92,7 @@ export default function Budget() {
         }
     };
 
+    // Im neuen Konzept gibt es keinen Systemzwang mehr, das Geld steht vollständig zur Verfügung
     const remaining = budgetSettings.monthlyLimit - (budgetSettings.currentSpent || 0);
     const progress = Math.min(((budgetSettings.currentSpent || 0) / budgetSettings.monthlyLimit) * 100, 100);
     
@@ -122,23 +132,30 @@ export default function Budget() {
                     </Stack>
                 </Paper>
 
-                {/* 2. REPLACEMENTS */}
+                {/* 2. REPLACEMENTS & RECOMMENDATIONS */}
                 {replacements.length > 0 && (
                     <Box sx={{ mb: 4 }}>
-                        <Typography variant="h6" sx={{ display:'flex', alignItems:'center', gap:1, mb: 1, color: PALETTE.accents.gold }}>
-                            <WarningIcon fontSize="small" /> Ersatz notwendig
+                        <Typography variant="h6" sx={{ display:'flex', alignItems:'center', gap:1, mb: 1, color: PALETTE.accents.blue }}>
+                            <InfoIcon fontSize="small" /> Empfehlungen & Qualitätssicherung
                         </Typography>
                         <Stack spacing={1}>
-                            {replacements.map(item => (
-                                <Paper key={item.id} sx={{ p: 1.5, display: 'flex', alignItems: 'center', gap: 2, bgcolor: `${PALETTE.accents.gold}15`, border: `1px solid ${PALETTE.accents.gold}40` }}>
-                                    <Avatar src={item.imageUrl} variant="rounded" sx={{ width: 40, height: 40, bgcolor: 'transparent' }}>!</Avatar>
-                                    <Box sx={{ flexGrow: 1 }}>
-                                        <Typography variant="body2" fontWeight="bold">{item.name}</Typography>
-                                        <Typography variant="caption" color="text.secondary">Zustand: {item.condition}/5</Typography>
-                                    </Box>
-                                    <Chip label="Kaufen" sx={{ bgcolor: PALETTE.accents.gold, color: 'black', fontWeight: 'bold' }} size="small" onClick={() => window.open(`https://www.google.com/search?q=${item.brand}+${item.model}`, '_blank')} />
-                                </Paper>
-                            ))}
+                            {replacements.map(item => {
+                                const isRecommendation = item.type === 'recommendation';
+                                const themeColor = isRecommendation ? PALETTE.accents.blue : PALETTE.accents.gold;
+                                
+                                return (
+                                    <Paper key={item.id} sx={{ p: 1.5, display: 'flex', alignItems: 'center', gap: 2, bgcolor: `${themeColor}15`, border: `1px solid ${themeColor}40` }}>
+                                        <Avatar src={item.imageUrl} variant="rounded" sx={{ width: 40, height: 40, bgcolor: 'transparent', color: themeColor, fontWeight: 'bold' }}>
+                                            {isRecommendation ? 'i' : '!'}
+                                        </Avatar>
+                                        <Box sx={{ flexGrow: 1 }}>
+                                            <Typography variant="body2" fontWeight="bold" sx={{ color: '#fff' }}>{item.name}</Typography>
+                                            <Typography variant="caption" color="text.secondary">{item.reason}</Typography>
+                                        </Box>
+                                        <Chip label={`${item.cost}€`} sx={{ bgcolor: themeColor, color: 'black', fontWeight: 'bold' }} size="small" onClick={() => window.open(`https://www.google.com/search?q=${item.brand}+${item.name}`, '_blank')} />
+                                    </Paper>
+                                );
+                            })}
                         </Stack>
                     </Box>
                 )}
@@ -146,7 +163,7 @@ export default function Budget() {
                 {/* 3. WISHLIST ANALYSIS */}
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                     <Typography variant="h6" sx={{ display:'flex', alignItems:'center', gap:1 }}>
-                        <ShoppingCartIcon fontSize="small" sx={{ color: PALETTE.primary.main }} /> Empfehlungen
+                        <ShoppingCartIcon fontSize="small" sx={{ color: PALETTE.primary.main }} /> Wünsche
                     </Typography>
                     <Button endIcon={<ArrowForwardIcon />} onClick={() => navigate('/wishlist')} color="inherit">
                         Zur Wishlist
