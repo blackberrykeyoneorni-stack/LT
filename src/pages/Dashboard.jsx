@@ -313,12 +313,7 @@ export default function Dashboard() {
     };
     initLoad();
 
-    const unsubProtocol = onSnapshot(doc(db, `users/${currentUser.uid}/settings/protocol`), (docSnap) => {
-        if (docSnap.exists()) {
-            const data = docSnap.data();
-            setWeeklyReport((data.weeklyReport && data.weeklyReport.acknowledged === false) ? data.weeklyReport : null);
-        }
-    });
+    // Legacy unsubProtocol listener removed to prevent state conflicts with the new reports collection
 
     const unsubscribeTB = onSnapshot(doc(db, `users/${currentUser.uid}/status/timeBank`), (docSnap) => {
         if (docSnap.exists()) {
@@ -343,7 +338,6 @@ export default function Dashboard() {
 
     return () => { 
         unsubscribeTB(); 
-        unsubProtocol();
         unsubLedger();
     };
   }, [currentUser, setImmunityActive]);
@@ -751,6 +745,7 @@ export default function Dashboard() {
           handleGambleDecline={handleGambleDecline} hasVoluntarySession={hasVoluntarySession} isForcedGamble={isForcedGamble}
           weeklyReport={weeklyReport} currentUser={currentUser} 
           handleAcknowledgeReport={handleAcknowledgeReport}
+          onCloseWeeklyReport={() => setWeeklyReport(null)}
           currentInstruction={currentInstruction} startOathPress={startOathPress} cancelOathPress={cancelOathPress}
           handleDeclineOath={handleDeclineOath} handleStartRequest={handleStartRequest} navigate={navigate} isFreeDay={isFreeDay} freeDayReason={freeDayReason} 
           instructionStatus={instructionStatus} isNight={isNight} showToast={showToast} 

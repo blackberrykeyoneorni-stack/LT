@@ -15,7 +15,7 @@ export const generateWeeklyReport = async (userId, lastTargetMinutes) => {
   friday.setHours(23, 59, 59, 999);
 
   // --- KRANKHEITS-CHECK (Nenner-Korrektur) ---
-  const suspensionRef = collection(db, `users/${userId}/status/suspensions`);
+  const suspensionRef = collection(db, `users/${userId}/suspensions`);
   const suspSnap = await getDocs(query(suspensionRef, where('type', '==', 'sick')));
   
   const sickDays = [];
@@ -58,10 +58,27 @@ export const generateWeeklyReport = async (userId, lastTargetMinutes) => {
 
     const dayMins = sessions
       .filter(s => {
+        // FILTER 1: Nur diesen spezifischen Wochentag
         const sDate = s.startTime?.toDate ? s.startTime.toDate() : new Date(s.startTime);
-        return sDate.toISOString().split('T')[0] === dayStr;
+        if (sDate.toISOString().split('T')[0] !== dayStr) return false;
+        
+        // FILTER 2: Nacht-Sessions ignorieren (nur Day-Sessions gelten)
+        if (s.periodId && s.periodId.toLowerCase().includes('night')) return false;
+
+        return true;
       })
-      .reduce((sum, s) => sum + (s.durationMinutes || 0), 0);
+      .reduce((sum, s) => {
+          let mins = 0;
+          const sStart = s.startTime?.toDate ? s.startTime.toDate() : new Date(s.startTime);
+          if (s.endTime) {
+              const sEnd = s.endTime?.toDate ? s.endTime.toDate() : new Date(s.endTime);
+              mins = (sEnd - sStart) / 60000;
+          } else {
+              // Session ist noch aktiv
+              mins = (now - sStart) / 60000;
+          }
+          return sum + Math.max(0, Math.round(mins));
+      }, 0);
 
     return { day: name, minutes: dayMins, isSick };
   });

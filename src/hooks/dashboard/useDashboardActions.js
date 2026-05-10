@@ -82,11 +82,11 @@ export const useDashboardActions = () => {
   }, [currentUser, showToast]);
 
   // Wochenbericht bestätigen
-  const handleAcknowledgeReport = useCallback(async () => {
-    if (!currentUser) return;
+  const handleAcknowledgeReport = useCallback(async (report) => {
+    if (!currentUser || !report || !report.weekId) return;
     try {
-        await updateDoc(doc(db, `users/${currentUser.uid}/settings/protocol`), {
-            "weeklyReport.acknowledged": true
+        await updateDoc(doc(db, `users/${currentUser.uid}/reports/${report.weekId}`), {
+            acknowledged: true
         });
         showToast("Wochen-Audit bestätigt.", "success");
     } catch (e) {

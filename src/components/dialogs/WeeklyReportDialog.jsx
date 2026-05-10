@@ -10,7 +10,7 @@ import {
 } from '@mui/material';
 import { PALETTE } from '../../theme/obsidianDesign';
 
-export default function WeeklyReportDialog({ open, onClose, report }) {
+export default function WeeklyReportDialog({ open, onClose, report, onAcknowledge }) {
   if (!report) return null;
 
   const formatMins = (m) => {
@@ -110,7 +110,10 @@ export default function WeeklyReportDialog({ open, onClose, report }) {
       <Box sx={{ p: 2, textAlign: 'center' }}>
         <Button 
           fullWidth
-          onClick={onClose}
+          onClick={() => {
+            if (onAcknowledge) onAcknowledge(report);
+            if (onClose) onClose();
+          }}
           sx={{ 
             color: PALETTE.accents.gold, 
             borderColor: PALETTE.accents.gold,

@@ -114,7 +114,6 @@ export default function ConditioningOverlay({ onAcknowledge }) {
                         fontWeight: '900',
                         fontSize: '1rem',
                         letterSpacing: '1px',
-                        textTransform: 'uppercase',
                         borderRadius: '30px', 
                         animation: `${pulseNeon} 2s infinite`, // Pulsierender Zwang
                         transition: 'all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1)',

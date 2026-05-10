@@ -64,6 +64,45 @@ export const calculatePurchasePriority = async (userId, items, wishlist) => {
             });
         }
 
+        // --- HILFSFUNKTION: DYNAMISCHER MEDIAN-PREIS ---
+        const getMedianPrice = (subCatName, fallbackPrice) => {
+            if (!items || items.length === 0) return parseFloat(fallbackPrice) || 0;
+            
+            // Alle Items (inkl. Archiv) dieser Subkategorie mit gültigem Preis filtern
+            const subCatItems = items.filter(i => 
+                i.subCategory === subCatName && 
+                i.cost !== undefined && 
+                i.cost !== null && 
+                parseFloat(i.cost) > 0
+            );
+
+            if (subCatItems.length === 0) return parseFloat(fallbackPrice) || 0;
+
+            // Helfer zum sicheren Extrahieren des Zeitstempels
+            const getTime = (val) => {
+                if (!val) return 0;
+                if (typeof val.toDate === 'function') return val.toDate().getTime();
+                if (val.seconds) return val.seconds * 1000;
+                return new Date(val).getTime();
+            };
+
+            // Nach Aktualität sortieren (neueste zuerst)
+            subCatItems.sort((a, b) => getTime(b.createdAt) - getTime(a.createdAt));
+
+            // Die aktuellsten 12 nehmen (wenn weniger da sind, nimmt slice automatisch alle vorhandenen)
+            const recentItems = subCatItems.slice(0, 12);
+            
+            // Preise extrahieren und aufsteigend sortieren für die Median-Berechnung
+            const costs = recentItems.map(i => parseFloat(i.cost)).sort((a, b) => a - b);
+            
+            const mid = Math.floor(costs.length / 2);
+            if (costs.length % 2 === 0) {
+                return (costs[mid - 1] + costs[mid]) / 2;
+            } else {
+                return costs[mid];
+            }
+        };
+
         // --- SCHRITT B: INTELLIGENTE NACHKAUF-EMPFEHLUNGEN (Lücken-Ermittlung) ---
         ['Nylons', 'Dessous'].forEach(cat => {
             const catConfig = inventoryConfig[cat] || { subcategories: {} };
@@ -76,6 +115,10 @@ export const calculatePurchasePriority = async (userId, items, wishlist) => {
                 
                 if (current < required) {
                     const missing = required - current;
+                    
+                    // Dynamischen Median-Preis berechnen
+                    const calculatedCost = getMedianPrice(subCat, fallbackPrice);
+
                     for (let i = 0; i < missing; i++) {
                         priorities.push({
                             id: `gap_${cat}_${subCat}_${i}`,
@@ -83,7 +126,7 @@ export const calculatePurchasePriority = async (userId, items, wishlist) => {
                             brand: 'Qualitätssicherung',
                             type: 'recommendation', // Markiert als Empfehlung (nicht bindend)
                             reason: `Mindestbestand unterschritten (${current}/${required} intakt)`,
-                            cost: parseFloat(fallbackPrice) || 0,
+                            cost: parseFloat(calculatedCost.toFixed(2)),
                             score: 200, // Hohe Priorität, blockiert jedoch kein Budget
                             imageUrl: null
                         });

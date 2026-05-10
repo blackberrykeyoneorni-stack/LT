@@ -22,7 +22,7 @@ export default function DashboardDialogManager({
     handleConfirmForcedRelease, handleFailForcedRelease, handleRefuseForcedRelease,
     timeBankData, handleAcknowledgeInflation, offerOpen, gambleStake, 
     handleGambleAccept, handleGambleDecline, hasVoluntarySession, isForcedGamble,
-    weeklyReport, currentUser, handleAcknowledgeReport,
+    weeklyReport, currentUser, handleAcknowledgeReport, onCloseWeeklyReport,
     currentInstruction, startOathPress, cancelOathPress,
     handleDeclineOath, handleStartRequest, navigate, isFreeDay, freeDayReason, 
     instructionStatus, isNight, showToast, 
@@ -68,7 +68,8 @@ export default function DashboardDialogManager({
                 <WeeklyReportDialog 
                     open={!!weeklyReport} report={weeklyReport} 
                     userId={currentUser?.uid} 
-                    onClose={handleAcknowledgeReport}
+                    onClose={onCloseWeeklyReport}
+                    onAcknowledge={handleAcknowledgeReport}
                 />
             )}
 
