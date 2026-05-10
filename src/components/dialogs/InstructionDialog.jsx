@@ -56,10 +56,6 @@ export default function InstructionDialog({
   const [localStartTimes, setLocalStartTimes] = useState({});
   
   const [suggestedItem, setSuggestedItem] = useState(null);
-  const [hardcoreDialogOpen, setHardcoreDialogOpen] = useState(false);
-  const [pendingAction, setPendingAction] = useState(null);
-  const [hcPrefs, setHcPrefs] = useState({ enabled: false, probability: 15 });
-  const [releaseMethod, setReleaseMethod] = useState(null);
 
   const [credits, setCredits] = useState({ nc: 0, lc: 0 });
   const [creditReduction, setCreditReduction] = useState(0); 
@@ -317,37 +313,35 @@ export default function InstructionDialog({
   };
 
   const handleCommitment = async () => {
-      triggerHardcoreCheck(async () => {
-          if (creditReduction > 0) {
-             try {
-                 await spendCredits(currentUser.uid, creditReduction, creditType);
-             } catch(e) {
-                 if (showToast) showToast("Kauf fehlgeschlagen.", "error");
-                 return; 
-             }
-          }
+      if (creditReduction > 0) {
+         try {
+             await spendCredits(currentUser.uid, creditReduction, creditType);
+         } catch(e) {
+             if (showToast) showToast("Kauf fehlgeschlagen.", "error");
+             return; 
+         }
+      }
 
-          try {
-              const newDuration = (instruction.durationMinutes || 0) - creditReduction;
-              
-              await updateDoc(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), {
-                  isAccepted: true,
-                  acceptedAt: serverTimestamp(),
-                  durationMinutes: newDuration,
-                  originalDurationMinutes: instruction.durationMinutes,
-                  creditsUsed: creditReduction,
-                  wasOverdraft: isOverdraft 
-              });
-              
-              if (showToast) showToast("Akzeptiert. Gehe zur Umkleide.", "success");
-              setViewState('preparation');
-              onCancelOath(); 
+      try {
+          const newDuration = (instruction.durationMinutes || 0) - creditReduction;
+          
+          await updateDoc(doc(db, `users/${currentUser.uid}/status/dailyInstruction`), {
+              isAccepted: true,
+              acceptedAt: serverTimestamp(),
+              durationMinutes: newDuration,
+              originalDurationMinutes: instruction.durationMinutes,
+              creditsUsed: creditReduction,
+              wasOverdraft: isOverdraft 
+          });
+          
+          if (showToast) showToast("Akzeptiert. Gehe zur Umkleide.", "success");
+          setViewState('preparation');
+          onCancelOath(); 
 
-          } catch (e) {
-              console.error(e);
-              if (showToast) showToast("Fehler beim Akzeptieren.", "error");
-          }
-      });
+      } catch (e) {
+          console.error(e);
+          if (showToast) showToast("Fehler beim Akzeptieren.", "error");
+      }
   };
 
 
@@ -356,15 +350,6 @@ export default function InstructionDialog({
         if (!currentUser || !open) return;
         
         try {
-            const prefsSnap = await getDoc(doc(db, `users/${currentUser.uid}/settings/preferences`));
-            if (prefsSnap.exists()) {
-                const data = prefsSnap.data();
-                setHcPrefs({
-                    enabled: data.sissyProtocolEnabled || false,
-                    probability: data.nightReleaseProbability !== undefined ? data.nightReleaseProbability : 15
-                });
-            }
-            
             // Dressing Time Configuration laden
             const dtSnap = await getDoc(doc(db, `users/${currentUser.uid}/settings/dressingTimes`));
             if (dtSnap.exists()) setDressingTimes(dtSnap.data().times || {});
@@ -471,44 +456,6 @@ export default function InstructionDialog({
 
   }, [creditReduction, credits, creditType]);
 
-  const triggerHardcoreCheck = (actionToExecute) => {
-      if (!isNight || !hcPrefs.enabled) { actionToExecute(); return; }
-      
-      const roll = Math.random();
-      const threshold = hcPrefs.probability / 100;
-      
-      if (roll < threshold) {
-          const methodRoll = Math.random();
-          let method = "per Hand"; 
-          if (methodRoll >= 0.34 && methodRoll < 0.67) method = "per Masturbator vaginal";
-          else if (methodRoll >= 0.67) method = "per Masturbator anal";
-
-          setReleaseMethod(method);
-          setPendingAction(() => actionToExecute);
-          setHardcoreDialogOpen(true);
-      } else { 
-          actionToExecute(); 
-      }
-  };
-
-  const handleHardcoreRefuse = async () => {
-      try {
-          await registerPunishment(currentUser.uid, "Hardcore-Start verweigert (Entladung)", 30);
-          if (showToast) showToast("Verweigerung registriert. Strafe aktiv.", "warning");
-      } catch (e) { console.error(e);
-      } finally {
-          setHardcoreDialogOpen(false);
-          if (pendingAction) pendingAction();
-          setPendingAction(null);
-      }
-  };
-
-  const handleHardcoreAccept = () => {
-      if (showToast) showToast("Brav. Instruction akzeptiert.", "success");
-      setHardcoreDialogOpen(false);
-      if (pendingAction) pendingAction();
-      setPendingAction(null);
-  };
 
   const handleWeekendAccept = () => {
       const candidates = items.filter(i => 
@@ -1002,44 +949,7 @@ export default function InstructionDialog({
         </DialogContent>
       </Dialog>
 
-      <Dialog 
-        open={hardcoreDialogOpen} 
-        disableEscapeKeyDown 
-        PaperProps={{ sx: { ...dialogPaperStyle, border: `1px solid ${PALETTE.accents.red}` } }}
-      >
-          <DialogTitle sx={{ ...DESIGN_TOKENS.dialog.title.sx, color: PALETTE.accents.red }}>
-              <ReportProblemIcon /> Hardcore Protokoll
-          </DialogTitle>
-          <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
-             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-                  <Box sx={{ textAlign: 'center', py: 2 }}>
-                      <DialogContentText sx={{ color: 'text.primary', mb: 2 }}>
-                          <strong>Eine sofortige Entladung wird gefordert.</strong>
-                      </DialogContentText>
-                      
-                      {releaseMethod && (
-                        <Box sx={{ 
-                            p: 2, 
-                            bgcolor: 'rgba(255, 0, 0, 0.1)', 
-                            border: `1px solid ${PALETTE.accents.red}`,
-                            borderRadius: '8px'
-                        }}>
-                            <Typography variant="caption" color="error" sx={{ textTransform: 'uppercase', letterSpacing: 1 }}>
-                                Vorgeschriebene Methode
-                            </Typography>
-                            <Typography variant="h6" sx={{ color: '#fff', fontWeight: 'bold', mt: 1 }}>
-                                {releaseMethod}
-                            </Typography>
-                        </Box>
-                      )}
-                  </Box>
-              </motion.div>
-          </DialogContent>
-          <DialogActions sx={DESIGN_TOKENS.dialog.actions.sx}>
-              <Button fullWidth variant="contained" color="error" onClick={handleHardcoreAccept}>Akzeptieren</Button>
-              <Button fullWidth variant="outlined" color="warning" onClick={handleHardcoreRefuse}>Verweigern (Strafe)</Button>
-          </DialogActions>
-      </Dialog>
+
     </>
   );
 }

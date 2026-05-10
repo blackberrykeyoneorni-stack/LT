@@ -91,12 +91,24 @@ export default function ItemHistory({ historyEvents }) {
                         color = "warning";
                         icon = <LocalLaundryServiceIcon style={{ fontSize: 16 }} />;
                         durationLabel = 'Wartend';
-                    } else if (event.type === 'wash' || event.type === 'WASHED') {
+                    } else if (event.type === 'wash' || event.type === 'WASHED' || event.type === 'LAUNDRY_COMPLETED') {
                         label = "Reinigung abgeschlossen";
                         sub = event.data?.message || `${dateStr} • Gewaschen und verfügbar`;
                         color = "success";
                         icon = <LocalLaundryServiceIcon style={{ fontSize: 16 }} />;
                         durationLabel = 'Sauber';
+                    } else if (event.type === 'STATUS_WORN') {
+                        label = "Getragen";
+                        sub = event.data?.message || `${dateStr} • Item in Benutzung`;
+                        color = "secondary";
+                        icon = <AccessTimeIcon style={{ fontSize: 16 }} />;
+                        durationLabel = 'Aktiv';
+                    } else if (event.type === 'STATUS_CHANGED') {
+                        label = "Status-Update";
+                        sub = event.data?.message || `${dateStr} • System-Status geändert`;
+                        color = "default";
+                        icon = <InfoIcon style={{ fontSize: 16 }} />;
+                        durationLabel = 'Status';
                     } else if (event.type === 'archived' || event.type === 'ARCHIVED') {
                         label = "Archiviert";
                         const reasonStr = event.data?.reason || event.reason || 'Kein Grund';

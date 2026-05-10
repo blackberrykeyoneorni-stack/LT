@@ -114,11 +114,11 @@ export default function ProtocolSettings({ rules, onChange }) {
                     <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                         <Typography variant="body2">Trigger Wahrscheinlichkeit</Typography>
                         <Typography color="primary" fontWeight="bold">
-                            {rules.tzd?.triggerChance ? (rules.tzd.triggerChance * 100).toFixed(1) : '0.0'}%
+                            {rules.tzd?.triggerChance !== undefined ? (rules.tzd.triggerChance * 100).toFixed(1) : '8.0'}%
                         </Typography>
                     </Box>
                     <Slider 
-                        value={rules.tzd?.triggerChance || 0.08} 
+                        value={rules.tzd?.triggerChance !== undefined ? rules.tzd.triggerChance : 0.08} 
                         min={0} max={0.5} step={0.01}
                         onChange={(_, v) => handleChange('tzd', 'triggerChance', v)}
                     />
@@ -181,11 +181,11 @@ export default function ProtocolSettings({ rules, onChange }) {
                     <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                         <Typography variant="body2">Trigger Wahrscheinlichkeit</Typography>
                         <Typography sx={{ color: PALETTE.accents.orange || '#FF9800' }} fontWeight="bold">
-                            {rules.extortion?.triggerChance ? (rules.extortion.triggerChance * 100).toFixed(1) : '5.0'}%
+                            {rules.extortion?.triggerChance !== undefined ? (rules.extortion.triggerChance * 100).toFixed(1) : '5.0'}%
                         </Typography>
                     </Box>
                     <Slider
-                        value={rules.extortion?.triggerChance || 0.05}
+                        value={rules.extortion?.triggerChance !== undefined ? rules.extortion.triggerChance : 0.05}
                         min={0.02} max={0.25} step={0.01}
                         onChange={(_, v) => handleChange('extortion', 'triggerChance', v)}
                         sx={{ color: PALETTE.accents.orange || '#FF9800' }}
@@ -209,11 +209,11 @@ export default function ProtocolSettings({ rules, onChange }) {
                     <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                         <Typography>Trigger Chance (Nachts)</Typography>
                         <Typography sx={{ color: PALETTE.accents.purple }} fontWeight="bold">
-                            {rules.instruction?.forcedReleaseTriggerChance ? (rules.instruction.forcedReleaseTriggerChance * 100).toFixed(0) : '0'}%
+                            {rules.instruction?.forcedReleaseTriggerChance !== undefined ? (rules.instruction.forcedReleaseTriggerChance * 100).toFixed(0) : '15'}%
                         </Typography>
                     </Box>
                     <Slider 
-                        value={rules.instruction?.forcedReleaseTriggerChance || 0.15} 
+                        value={rules.instruction?.forcedReleaseTriggerChance !== undefined ? rules.instruction.forcedReleaseTriggerChance : 0.15} 
                         min={0} max={1} step={0.01}
                         onChange={(_, v) => handleChange('instruction', 'forcedReleaseTriggerChance', v)}
                         sx={{ color: PALETTE.accents.purple }}

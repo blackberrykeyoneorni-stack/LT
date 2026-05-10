@@ -16,7 +16,7 @@ const TZD_CONFIG = {
 };
 
 // --- FALLBACK KONSTANTEN ---
-const FALLBACK_TRIGGER_CHANCE = 0.12; 
+const FALLBACK_TRIGGER_CHANCE = 0.08; 
 const FALLBACK_MATRIX = [
     { label: 'The Bait', min: 2, max: 4, weight: 0.20 },
     { label: 'The Standard', min: 4, max: 8, weight: 0.70 }, 

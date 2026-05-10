@@ -72,6 +72,7 @@ function useItemFetcher(id, currentUser, navigate) {
                 setDropdowns(newDropdowns);
 
                 // KORREKTUR: Umgehung des Firebase Composite Index Fehlers.
+                // Entkoppelte Abfragen, damit eine fehlende Query nicht beide blockiert.
                 let snapLegacy = { docs: [] };
                 let snapNew = { docs: [] };
                 
@@ -80,16 +81,19 @@ function useItemFetcher(id, currentUser, navigate) {
                         collection(db, `users/${currentUser.uid}/sessions`),
                         where('itemId', '==', id)
                     );
+                    snapLegacy = await getDocs(qLegacy);
+                } catch (legacyErr) {
+                    console.error("Fehler beim Abrufen der Legacy-Sessions:", legacyErr);
+                }
+
+                try {
                     const qNew = query(
                         collection(db, `users/${currentUser.uid}/sessions`),
                         where('itemIds', 'array-contains', id)
                     );
-                    
-                    const [resLegacy, resNew] = await Promise.all([getDocs(qLegacy), getDocs(qNew)]);
-                    snapLegacy = resLegacy;
-                    snapNew = resNew;
-                } catch (sessionErr) {
-                    console.error("Fehler beim Abrufen der Sessions (möglicherweise blockiert durch Firebase):", sessionErr);
+                    snapNew = await getDocs(qNew);
+                } catch (newErr) {
+                    console.error("Fehler beim Abrufen der neuen Sessions:", newErr);
                 }
 
                 const sessionMap = new Map();

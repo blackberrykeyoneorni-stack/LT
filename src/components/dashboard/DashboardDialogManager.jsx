@@ -38,7 +38,8 @@ export default function DashboardDialogManager({
         auditOpen, setAuditOpen,
         pendingAuditItems, currentAuditIndex,
         laundryOpen, setLaundryOpen,
-        oathProgress, isHoldingOath 
+        oathProgress, isHoldingOath,
+        forcedReleaseOpen, forcedReleaseMethod
     } = useUIStore();
 
     return (
@@ -110,9 +111,9 @@ export default function DashboardDialogManager({
                 setIntensity={(v) => useUIStore.getState().setReleaseIntensity(v)} 
             />
 
-            {instructionStatus?.forcedReleaseRequired && !instructionStatus?.forcedReleaseExecuted && (
+            {forcedReleaseOpen && (
                 <ForcedReleaseOverlay 
-                    method={instructionStatus.forcedReleaseMethod}
+                    method={forcedReleaseMethod}
                     onConfirm={handleConfirmForcedRelease}
                     onFail={handleFailForcedRelease}
                     onRefuse={handleRefuseForcedRelease}
