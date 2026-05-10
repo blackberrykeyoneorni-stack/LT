@@ -1,4 +1,3 @@
-// src/components/conditioning/ConditioningOverlay.jsx
 import React from 'react';
 import { Box, Typography, Button, Paper } from '@mui/material';
 import { keyframes } from '@mui/system';

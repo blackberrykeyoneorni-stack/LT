@@ -147,7 +147,7 @@ export default function InstructionDialog({
               acceptedAt: instruction.acceptedAt
           });
           
-          if (showToast) showToast(`"${scannedItem.name}" am Körper. System-Timer für dieses Item läuft.`, "success");
+          if (showToast) showToast(`"${scannedItem.name}" bestätigt. Bereite das nächste Item vor.`, "success");
       } catch (e) {
           if (showToast) showToast("Fehler beim Erfassen des Items.", "error");
           setVerifiedItemIds(prev => prev.filter(id => id !== scannedItem.id));
@@ -244,7 +244,7 @@ export default function InstructionDialog({
           }
 
           if (startMs) {
-              const requiredSeconds = dressingTimes[prevItem.subCategory] !== undefined ? dressingTimes[prevItem.subCategory] : 10;
+              const requiredSeconds = dressingTimes[currentTarget.subCategory] !== undefined ? dressingTimes[currentTarget.subCategory] : 10;
               const unlockTimeMs = startMs + (requiredSeconds * 1000);
               if (Date.now() < unlockTimeMs) {
                   isLocked = true;
@@ -733,7 +733,7 @@ export default function InstructionDialog({
           }
 
           if (startMs) {
-              const requiredSeconds = dressingTimes[prevItem.subCategory] !== undefined ? dressingTimes[prevItem.subCategory] : 10;
+              const requiredSeconds = dressingTimes[currentTargetItem.subCategory] !== undefined ? dressingTimes[currentTargetItem.subCategory] : 10;
               const unlockTimeMs = startMs + (requiredSeconds * 1000);
               if (nowTime < unlockTimeMs) {
                   activeLockStatus = true;

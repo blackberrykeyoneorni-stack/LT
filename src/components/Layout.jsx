@@ -1,4 +1,3 @@
-// src/components/Layout.jsx
 import React, { useEffect, useState, useRef } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { Box, Paper, BottomNavigation, BottomNavigationAction, Snackbar, Alert, Typography, Button } from '@mui/material';

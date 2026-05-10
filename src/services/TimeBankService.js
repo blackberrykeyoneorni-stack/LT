@@ -373,22 +373,15 @@ const _calculateProgressiveTax = (balance) => {
     const val = parseSafeNumber(balance, 0);
     if (val <= 0) return 0;
     
-    let tax = 0;
-    let remainder = val;
-    
-    if (remainder > 2000) {
-        tax += (remainder - 2000) * 0.20; // 20% ab 2001
-        remainder = 2000;
-    }
-    if (remainder > 1000) {
-        tax += (remainder - 1000) * 0.15; // 15% von 1001 bis 2000
-        remainder = 1000;
-    }
-    if (remainder > 0) {
-        tax += remainder * 0.10; // 10% bis 1000
+    let rate;
+    if (val >= 1500) {
+        rate = 0.20; // Maximaler Satz
+    } else {
+        // Lineare Steigerung: Startet bei 0.10, fügt maximal 0.10 (bei 1500) hinzu
+        rate = 0.10 + (0.10 * (val / 1500));
     }
     
-    return Math.ceil(tax); 
+    return Math.ceil(val * rate); 
 };
 
 /**

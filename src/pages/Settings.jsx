@@ -58,7 +58,6 @@ export default function Settings() {
   const [weightValue, setWeightValue] = useState(2);
 
   const [maxInstructionItems, setMaxInstructionItems] = useState(1); 
-  const [extortionTriggerChance, setExtortionTriggerChance] = useState(0.05); // NEU: Erpressungs-Protokoll State
   const [inventoryConfig, setInventoryConfig] = useState({ Nylons: { minCondition: 3, subcategories: {} }, Dessous: { minCondition: 3, subcategories: {} } });
   const [dressingTimes, setDressingTimes] = useState({}); // NEU: Dressing Time Lock Configuration
   
@@ -138,7 +137,6 @@ export default function Settings() {
               
               // NEU: Lade Erpressungs-Wahrscheinlichkeit
               if (data.extortion && data.extortion.triggerChance !== undefined) {
-                  setExtortionTriggerChance(data.extortion.triggerChance);
                   mergedRules.extortion = { triggerChance: data.extortion.triggerChance };
               }
 
@@ -202,13 +200,6 @@ export default function Settings() {
           if (protocolRules) {
               const protRef = doc(db, `users/${uid}/settings/protocol`);
               const cleanRules = { ...protocolRules };
-              
-              // KORREKTUR: Speichere den extortion-Wert sicher im Protokoll ab
-              if (cleanRules.extortion) {
-                  cleanRules.extortion.triggerChance = extortionTriggerChance;
-              } else {
-                  cleanRules.extortion = { triggerChance: extortionTriggerChance };
-              }
 
               batch.set(protRef, cleanRules, { merge: true });
           }
@@ -555,10 +546,6 @@ export default function Settings() {
                  rules={protocolRules} 
                  onChange={(newRules) => {
                      setProtocolRules(newRules);
-                     // Extortion Handler im Frontend Sync halten
-                     if (newRules.extortion && newRules.extortion.triggerChance !== undefined) {
-                         setExtortionTriggerChance(newRules.extortion.triggerChance);
-                     }
                  }} 
              />
         </AccordionDetails>
@@ -583,34 +570,6 @@ export default function Settings() {
                     onChange={(e, v) => setMaxInstructionItems(v)} 
                     sx={{ color: PALETTE.primary.main }} 
                 />
-            </Box>
-
-            <Divider sx={{ my: 2, borderColor: 'rgba(255,255,255,0.1)' }} />
-
-            {/* NEU: ERPRESSUNGS-PROTOKOLL SLIDER */}
-            <Box sx={{ mb: 3 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                    <Typography variant="body2" color="text.secondary">Erpressungs-Chance (Beim Tab-Wechsel)</Typography>
-                    <Typography fontWeight="bold" sx={{ color: PALETTE.accents.orange || '#FF9800' }}>
-                        {(extortionTriggerChance * 100).toFixed(0)}%
-                    </Typography>
-                </Box>
-                <Slider 
-                    value={extortionTriggerChance} 
-                    min={0.02} 
-                    max={0.25} 
-                    step={0.01} 
-                    marks={[
-                        { value: 0.02, label: '2%' },
-                        { value: 0.10, label: '10%' },
-                        { value: 0.25, label: '25%' }
-                    ]}
-                    onChange={(e, v) => setExtortionTriggerChance(v)} 
-                    sx={{ color: PALETTE.accents.orange || '#FF9800' }} 
-                />
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-                    Legt fest, wie hoch die Chance ist, dass das System beim Überprüfen des Dashboards ein 60-Minuten-Ultimatum triggert. 
-                </Typography>
             </Box>
             
         </AccordionDetails>

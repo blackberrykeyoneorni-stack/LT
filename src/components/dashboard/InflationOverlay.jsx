@@ -28,7 +28,7 @@ export default function InflationOverlay({ open, data, noticeData, onClose, onAc
             <DialogContent sx={DESIGN_TOKENS.dialog.content.sx}>
                 <Box sx={{ textAlign: 'center', py: 2 }}>
                     <Typography variant="body2" sx={{ mb: 4, color: 'text.secondary' }}>
-                        Der wöchentliche Tribut von 10% wurde zum Stichtag (Sonntag, 23:00 Uhr) von deinen positiven Salden eingezogen.
+                        Der wöchentliche progressive Tribut (10% - 20%) wurde zum Stichtag (Sonntag, 23:00 Uhr) von deinen positiven Salden eingezogen.
                     </Typography>
                     
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mb: 2 }}>
